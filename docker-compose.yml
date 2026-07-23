@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: desk_foreman
+      POSTGRES_USER: desk_foreman
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-local-only}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  desk-foreman:
+    build:
+      context: .
+      target: runtime
+    image: desk-foreman:local
+    depends_on:
+      - postgres
+      - runner-manager
+    ports:
+      - "8080:80"
+    environment:
+      MCP_BIND_ADDR: 0.0.0.0:3000
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-change-me-local-only}
+      DATABASE_URL: ${DATABASE_URL:-postgres://desk_foreman:change-me-local-only@postgres:5432/desk_foreman}
+      WORKSPACE_ROOT: /workspace
+      DEFAULT_SHELL: /bin/bash
+      RUNNER_MANAGER_URL: http://runner-manager:3001
+      RUNNER_MANAGER_TOKEN: ${RUNNER_MANAGER_TOKEN:-change-me-runner-token-local-only}
+      SESSION_IDLE_TTL_SEC: 1800
+      WEB_SESSION_TTL_SEC: 604800
+      WEB_COOKIE_NAME: desk_foreman_session
+      WEB_COOKIE_SECURE: "false"
+      BOOTSTRAP_ADMIN_LOGIN: admin
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-change-me-admin-local-only}
+      BOOTSTRAP_ADMIN_DISPLAY_NAME: Administrator
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_TIMEZONE: UTC
+      MAX_OUTPUT_BYTES: 262144
+      PATCH_SURFACE_MODE: function_compat
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    restart: unless-stopped
+
+  runner-manager:
+    build:
+      context: .
+      target: runner-manager
+    image: desk-foreman-runner-manager:local
+    depends_on:
+      - postgres
+      - workspace-runner-image
+    environment:
+      RUNNER_MANAGER_BIND_ADDR: 0.0.0.0:3001
+      RUNNER_MANAGER_TOKEN: ${RUNNER_MANAGER_TOKEN:-change-me-runner-token-local-only}
+      RUNNER_BACKEND: docker
+      DATABASE_URL: ${DATABASE_URL:-postgres://desk_foreman:change-me-local-only@postgres:5432/desk_foreman}
+      WORKSPACE_ROOT: /workspace
+      RUNNER_HOST_WORKSPACE_ROOT: ${PWD}
+      RUNNER_IMAGE: desk-foreman-workspace-runner:local
+      RUNNER_WORKDIR: /workspace
+      RUNNER_NETWORK_ENABLED: "false"
+      RUNNER_MAX_OUTPUT_BYTES: 262144
+      RUNNER_MAX_SESSIONS: 32
+      RUNNER_PIDS_LIMIT: 256
+      RUNNER_MEMORY_LIMIT: 1g
+      RUNNER_CPU_LIMIT: 2
+      RUNNER_IDLE_TTL_SEC: 1800
+    volumes:
+      - .:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /workspace
+    restart: unless-stopped
+
+  workspace-runner-image:
+    build:
+      context: .
+      target: workspace-runner
+    image: desk-foreman-workspace-runner:local
+    command: ["/bin/bash", "-lc", "sleep infinity"]
+    profiles: ["build-only"]
+
+volumes:
+  postgres-data:

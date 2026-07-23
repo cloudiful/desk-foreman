@@ -1,0 +1,11 @@
+/node_modules/
+/bun.lock
+/dist/
+/src/generated/
+/*.js
+!/eslint.config.js
+/*.d.ts
+/src/**/*.js
+/src/**/*.d.ts
+!/src/env.d.ts
+/openapi.json

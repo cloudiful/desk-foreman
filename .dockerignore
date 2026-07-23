@@ -1,0 +1,12 @@
+target
+.git
+.DS_Store
+.env
+.env.*
+!.env.example
+frontend/node_modules
+frontend/bun.lock
+frontend/dist
+frontend/src/**/*.js
+frontend/*.js
+frontend/*.d.ts

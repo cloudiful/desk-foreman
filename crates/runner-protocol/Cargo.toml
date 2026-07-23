@@ -1,0 +1,9 @@
+[package]
+name = "desk-foreman-runner-protocol"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+schemars.workspace = true
+serde.workspace = true
+utoipa.workspace = true

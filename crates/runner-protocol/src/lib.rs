@@ -1,0 +1,149 @@
+use std::path::PathBuf;
+
+use utoipa::ToSchema;
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum RunnerOwner {
+    InternalUser { user_id: i64 },
+    WorkspaceBinding { workspace_binding_id: i64 },
+}
+
+impl RunnerOwner {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::InternalUser { .. } => "user",
+            Self::WorkspaceBinding { .. } => "workspace_binding",
+        }
+    }
+
+    pub fn stable_key(&self) -> String {
+        match self {
+            Self::InternalUser { user_id } => format!("user:{user_id}"),
+            Self::WorkspaceBinding {
+                workspace_binding_id,
+            } => format!("workspace_binding:{workspace_binding_id}"),
+        }
+    }
+
+    pub fn container_name(&self) -> String {
+        format!(
+            "desk-foreman-runner-{}",
+            self.stable_key().replace([':', '/'], "-")
+        )
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct RunnerShellRequest {
+    pub owner: RunnerOwner,
+    pub workspace_root: PathBuf,
+    pub working_dir: PathBuf,
+    pub shell: String,
+    pub login: bool,
+    pub tty: bool,
+    pub command: String,
+    pub network_enabled: bool,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct RunnerCommandRequest {
+    pub owner: RunnerOwner,
+    pub workspace_root: PathBuf,
+    pub working_dir: PathBuf,
+    pub program: String,
+    pub args: Vec<String>,
+    pub timeout_ms: Option<u64>,
+    pub max_output_bytes: Option<usize>,
+    pub network_enabled: bool,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct ExecRequest {
+    pub owner: RunnerOwner,
+    pub session_key: Option<String>,
+    pub workspace_root: PathBuf,
+    pub cmd: String,
+    pub workdir: Option<String>,
+    pub shell: String,
+    pub login: bool,
+    pub tty: bool,
+    pub timeout_ms: Option<u64>,
+    pub yield_time_ms: Option<u64>,
+    pub max_output_tokens: Option<usize>,
+    pub max_output_bytes: Option<usize>,
+    pub network_enabled: bool,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct InputRequest {
+    pub owner: RunnerOwner,
+    pub session_key: Option<String>,
+    pub session_id: u64,
+    pub chars: String,
+    pub yield_time_ms: Option<u64>,
+    pub max_output_tokens: Option<usize>,
+    pub timeout_ms: Option<u64>,
+    pub max_output_bytes: Option<usize>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct CancelSessionRequest {
+    pub owner: RunnerOwner,
+    pub session_key: Option<String>,
+    pub session_id: u64,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct RunnerSessionStatus {
+    pub session_id: u64,
+    pub owner: RunnerOwner,
+    pub session_key: Option<String>,
+    pub state: String,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    pub wall_time_seconds: f64,
+}
+
+#[derive(
+    Clone, Debug, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema, ToSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct CommandOutput {
+    pub wall_time_seconds: f64,
+    pub output: String,
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+    pub truncated: bool,
+    pub timed_out: bool,
+    pub stdout_bytes: usize,
+    pub stderr_bytes: usize,
+}
+
+#[derive(
+    Clone, Debug, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema, ToSchema,
+)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct ShellToolOutput {
+    pub wall_time_seconds: f64,
+    pub output: String,
+    pub stdout: String,
+    pub stderr: String,
+    pub output_is_combined: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chunk_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_token_count: Option<usize>,
+    pub truncated: bool,
+    pub has_more: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    pub stdout_bytes: usize,
+    pub stderr_bytes: usize,
+    pub timed_out: bool,
+}

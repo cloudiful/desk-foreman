@@ -1,0 +1,7 @@
+/target
+Cargo.lock
+/openapi.json
+.env
+.env.*
+!.env.example
+/frontend/bun.lock

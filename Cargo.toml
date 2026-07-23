@@ -1,0 +1,82 @@
+[workspace]
+members = [
+    ".",
+    "crates/approval",
+    "crates/runner-manager",
+    "crates/runner-protocol",
+    "crates/workspace-sdk",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+anyhow = "1.0.102"
+async-openai = { version = "0.41.1", default-features = false, features = ["byot", "middleware", "responses", "rustls"] }
+argon2 = "0.5.3"
+axum = { version = "0.8.9", features = ["http1", "json", "tokio", "tracing"] }
+axum-extra = { version = "0.12.6", features = ["cookie"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+pty-process = { version = "0.5.3", features = ["async"] }
+rand = "0.10.1"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
+rmcp = { version = "=1.7.0", features = ["schemars", "server", "tower", "transport-streamable-http-server"] }
+schemars = "1.2.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+server = { package = "cloudiful-server", version = "=0.2.6", default-features = false, features = ["axum", "mcp"] }
+sha2 = "0.11.0"
+sqlx = { version = "0.9.0", features = ["postgres", "runtime-tokio", "tls-rustls-ring-webpki", "uuid", "chrono"] }
+tempfile = "3.27.0"
+thiserror = "2.0.18"
+time = { version = "=0.3.47", features = ["formatting", "macros", "parsing"] }
+tokio = { version = "1.52.3", features = ["full"] }
+tower-http = { version = "0.6.11", features = ["fs"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+utoipa = { version = "5.5.0", features = ["chrono", "uuid"] }
+uuid = { version = "1.23.3", features = ["serde", "v4"] }
+validator = { version = "0.20.0", features = ["derive"] }
+runner-protocol = { package = "desk-foreman-runner-protocol", path = "crates/runner-protocol" }
+desk-foreman-approval = { path = "crates/approval" }
+desk-foreman-workspace-sdk = { path = "crates/workspace-sdk" }
+
+[package]
+name = "desk-foreman"
+version.workspace = true
+edition.workspace = true
+license = "Apache-2.0"
+readme = "README.md"
+description = "Workspace-scoped MCP coding service with isolated runners"
+
+[dependencies]
+anyhow.workspace = true
+desk-foreman-approval.workspace = true
+argon2.workspace = true
+axum.workspace = true
+axum-extra.workspace = true
+chrono.workspace = true
+pty-process.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+server.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+utoipa.workspace = true
+uuid.workspace = true
+validator.workspace = true
+runner-protocol.workspace = true
+desk-foreman-workspace-sdk = { workspace = true, features = ["approval"] }
