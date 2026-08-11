@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use reqwest::{Client, StatusCode};
@@ -13,6 +14,12 @@ use runner_protocol::{
     RunnerSessionStatus, ShellToolOutput,
 };
 
+// Align with the tool-level shell timeout ceiling (MAX_TIMEOUT_MS, default
+// 600s); a shorter total timeout would fail long-running compile/test commands
+// that the tool layer explicitly allows.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub struct HttpRunnerClient {
     client: Client,
     base_url: String,
@@ -22,7 +29,11 @@ pub struct HttpRunnerClient {
 impl HttpRunnerClient {
     pub fn new(config: RunnerClientConfig) -> Arc<Self> {
         Arc::new(Self {
-            client: Client::new(),
+            client: Client::builder()
+                .connect_timeout(CONNECT_TIMEOUT)
+                .timeout(REQUEST_TIMEOUT)
+                .build()
+                .expect("reqwest client builder"),
             base_url: config.base_url.trim_end_matches('/').to_string(),
             auth_token: config.auth_token,
         })

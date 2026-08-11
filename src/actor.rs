@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
+use chrono::Utc;
 use rmcp::service::RequestContext;
 
 use crate::{
@@ -31,6 +32,39 @@ pub struct ActorContext {
     pub workspace_binding_id: i64,
     pub workspace_root: PathBuf,
     pub policy: crate::policy::AccessPolicy,
+    /// Lease owner carried from the MCP request (e.g. an AI conversation id).
+    /// Write access to resource-owned workspaces requires holding the binding's
+    /// write lease with this owner.
+    pub lease_owner: Option<String>,
+}
+
+impl ActorContext {
+    /// Verifies the actor may mutate files in its bound workspace.
+    ///
+    /// Resource-owned workspaces (shared across users) require an active write
+    /// lease held by this actor's lease owner. Per-user workspaces are
+    /// unaffected.
+    pub fn ensure_write_access(&self) -> Result<(), String> {
+        let Some(binding) = &self.workspace_binding else {
+            return Ok(());
+        };
+        if binding.resource_kind.is_none() {
+            return Ok(());
+        }
+        let lease_owner = self.lease_owner.as_deref().unwrap_or_default();
+        let holds_lease = binding.write_lease_owner.as_deref() == Some(lease_owner)
+            && !lease_owner.is_empty()
+            && binding
+                .write_lease_expires_at
+                .is_some_and(|expires| expires > Utc::now());
+        if holds_lease {
+            return Ok(());
+        }
+        Err(
+            "workspace is read-only: no write lease held by this session. Acquire the write lease (or take it over) before running mutating commands"
+                .to_string(),
+        )
+    }
 }
 
 impl ActorContext {
@@ -65,6 +99,7 @@ pub enum McpActor {
         workspace_binding: Box<WorkspaceBindingResponse>,
         external_user_id: String,
         token: Box<ApplicationTokenRecord>,
+        lease_owner: Option<String>,
     },
 }
 
@@ -98,6 +133,7 @@ pub fn actor_from_web_user(state: &AppState, user: UserRecord) -> Result<ActorCo
             state.config.server_scopes.clone(),
             state.config.server_limits.clone(),
         ),
+        lease_owner: None,
     })
 }
 
@@ -107,6 +143,7 @@ pub fn actor_from_application_binding(
     workspace_binding: WorkspaceBindingResponse,
     external_user_id: String,
     token: ApplicationTokenRecord,
+    lease_owner: Option<String>,
 ) -> Result<ActorContext, AppError> {
     let workspace_root =
         resolve_workspace_binding_root(&state.config.workspace_root, &workspace_binding)
@@ -133,6 +170,7 @@ pub fn actor_from_application_binding(
         external_user_id: Some(external_user_id),
         workspace_root,
         policy,
+        lease_owner,
     })
 }
 
@@ -176,12 +214,106 @@ pub(crate) fn actor_from_mcp_actor(
             workspace_binding,
             external_user_id,
             token,
+            lease_owner,
         } => actor_from_application_binding(
             state,
             *application,
             *workspace_binding,
             external_user_id,
             *token,
+            lease_owner,
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, Utc};
+
+    use super::{ActorContext, ActorMode};
+    use crate::db::types::WorkspaceBindingResponse;
+
+    fn actor_with_binding(
+        resource_kind: Option<String>,
+        write_lease_owner: Option<String>,
+        write_lease_expires_at: Option<chrono::DateTime<Utc>>,
+        lease_owner: Option<String>,
+    ) -> ActorContext {
+        ActorContext {
+            mode: ActorMode::ApplicationSubject,
+            user: None,
+            application: None,
+            workspace_binding: Some(WorkspaceBindingResponse {
+                workspace_binding_id: 1,
+                application_id: 1,
+                external_user_id: "__resource__".to_string(),
+                workspace_key: "code_project:abc".to_string(),
+                external_user_hash: "hash".to_string(),
+                workspace_root: "/tmp/ws".to_string(),
+                is_active: true,
+                last_used_at: Utc::now(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                lifecycle_state: "active".to_string(),
+                archived_at: None,
+                resource_id: resource_kind.as_ref().map(|_| "abc".to_string()),
+                resource_kind,
+                write_lease_owner,
+                write_lease_acquired_at: None,
+                write_lease_expires_at,
+            }),
+            principal_id: "application:1:user:code_project:abc".to_string(),
+            external_user_id: Some("user".to_string()),
+            workspace_binding_id: 1,
+            workspace_root: std::path::PathBuf::from("/tmp/ws"),
+            policy: crate::policy::AccessPolicy::new(
+                crate::policy::ALL_SCOPES
+                    .iter()
+                    .map(|scope| (*scope).to_string()),
+                crate::policy::ResourceLimits::unrestricted(false),
+            ),
+            lease_owner,
+        }
+    }
+
+    #[test]
+    fn user_workspace_never_requires_lease() {
+        let actor = actor_with_binding(None, None, None, None);
+        assert!(actor.ensure_write_access().is_ok());
+    }
+
+    #[test]
+    fn resource_workspace_requires_matching_lease() {
+        let now = Utc::now();
+        let actor = actor_with_binding(
+            Some("code_project".to_string()),
+            Some("conversation:1".to_string()),
+            Some(now + Duration::minutes(10)),
+            Some("conversation:1".to_string()),
+        );
+        assert!(actor.ensure_write_access().is_ok());
+    }
+
+    #[test]
+    fn resource_workspace_rejects_foreign_or_missing_lease() {
+        let now = Utc::now();
+        let foreign = actor_with_binding(
+            Some("code_project".to_string()),
+            Some("conversation:1".to_string()),
+            Some(now + Duration::minutes(10)),
+            Some("conversation:2".to_string()),
+        );
+        assert!(foreign.ensure_write_access().is_err());
+
+        let missing = actor_with_binding(Some("code_project".to_string()), None, None, None);
+        assert!(missing.ensure_write_access().is_err());
+
+        let expired = actor_with_binding(
+            Some("code_project".to_string()),
+            Some("conversation:1".to_string()),
+            Some(now - Duration::minutes(1)),
+            Some("conversation:1".to_string()),
+        );
+        assert!(expired.ensure_write_access().is_err());
     }
 }

@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
+use sha2::{Digest, Sha256};
 
 use crate::{
     db::{
@@ -71,6 +72,61 @@ pub fn resolve_application_workspace(
             workspace_key,
         ),
     )
+}
+
+/// Resolves a shared resource-owned workspace for an application.
+///
+/// Resource workspaces (e.g. `code_project:<id>`) are shared across external
+/// users, so the path is derived from the resource identity rather than the
+/// requesting user.
+pub fn resolve_resource_workspace(
+    base_root: &Path,
+    application: &ApplicationResponse,
+    resource_kind: &str,
+    resource_id: &str,
+) -> anyhow::Result<PathBuf> {
+    let resource_hash = resource_workspace_hash(resource_kind, resource_id);
+    resolve_absolute_workspace(
+        base_root,
+        base_root
+            .join("apps")
+            .join(application.application_id.to_string())
+            .join("resources")
+            .join(&resource_hash),
+    )
+}
+
+/// Parses a resource workspace key of the form `kind:id`.
+///
+/// Returns `None` for keys that do not look like a resource workspace or that
+/// contain characters unsafe for workspace paths.
+pub fn parse_resource_workspace_key(key: &str) -> Option<(String, String)> {
+    let (kind, id) = key.split_once(':')?;
+    if kind.is_empty()
+        || id.is_empty()
+        || id.len() > 128
+        || !kind.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+        })
+        || !id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
+    {
+        return None;
+    }
+    Some((kind.to_string(), id.to_string()))
+}
+
+fn resource_workspace_hash(resource_kind: &str, resource_id: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(resource_kind.as_bytes());
+    hasher.update(b":");
+    hasher.update(resource_id.as_bytes());
+    let digest = hasher.finalize();
+    digest[..16]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 pub fn initialize_workspace_template(
@@ -201,5 +257,39 @@ mod tests {
         assert!(rendered.starts_with("/workspace/apps/7/users/"));
         assert!(!rendered.contains("alice@example.com"));
         assert!(rendered.ends_with("/default"));
+    }
+}
+
+#[cfg(test)]
+mod resource_tests {
+    use super::parse_resource_workspace_key;
+
+    #[test]
+    fn parses_valid_resource_keys() {
+        assert_eq!(
+            parse_resource_workspace_key("code_project:123e4567-e89b-12d3-a456-426614174000"),
+            Some((
+                "code_project".to_string(),
+                "123e4567-e89b-12d3-a456-426614174000".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_resource_workspace_key("code_project:project_1"),
+            Some(("code_project".to_string(), "project_1".to_string()))
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_resource_keys() {
+        assert_eq!(parse_resource_workspace_key("default"), None);
+        assert_eq!(parse_resource_workspace_key("code_project:"), None);
+        assert_eq!(parse_resource_workspace_key(":id"), None);
+        assert_eq!(parse_resource_workspace_key("code_project:a/b"), None);
+        assert_eq!(parse_resource_workspace_key("code project:abc"), None);
+        assert_eq!(parse_resource_workspace_key("CODE:abc"), None);
+        assert_eq!(
+            parse_resource_workspace_key(&format!("code_project:{}", "x".repeat(200))),
+            None
+        );
     }
 }

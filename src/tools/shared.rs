@@ -101,6 +101,7 @@ pub async fn shell(
 ) -> Result<ShellToolOutput, ToolError> {
     let started = Instant::now();
     ensure_scope(state, actor, crate::policy::WORKSPACE_SHELL)?;
+    actor.ensure_write_access().map_err(ToolError::Forbidden)?;
     if let Some(limit) = actor.policy.limits.max_sessions {
         let active = state
             .runner
@@ -188,6 +189,7 @@ pub async fn write_stdin(
     let started = Instant::now();
     ensure_scope(state, actor, crate::policy::WORKSPACE_SHELL)?;
     if !params.chars.is_empty() {
+        actor.ensure_write_access().map_err(ToolError::Forbidden)?;
         review::ensure_review(
             state,
             actor,
@@ -277,6 +279,7 @@ pub async fn apply_patch(
 ) -> Result<ApplyPatchOutput, ToolError> {
     let started = Instant::now();
     ensure_scope(state, actor, crate::policy::WORKSPACE_PATCH)?;
+    actor.ensure_write_access().map_err(ToolError::Forbidden)?;
     if actor
         .policy
         .limits

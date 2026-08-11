@@ -24,6 +24,8 @@ This workspace also includes `desk-foreman-workspace-sdk`, a reusable Rust crate
 
 Use `shell` for Git commands such as `git status --short`, `git diff`, and `git show <revision>`.
 
+Application tokens select a workspace with `X-DF-Workspace-Key` (default `default`). Workspace keys of the form `kind:id` (for example `code_project:<uuid>`) resolve to a **resource-owned shared workspace**: one directory per `(application, kind, id)` shared across all external users of the application. Resource workspaces enforce a **write lease**: mutating tools (`shell`, `apply_patch`, and `write_stdin` with input) only run when the request carries an active lease for that binding. Pass the lease owner with `X-DF-Lease-Owner` (for example an AI conversation id); leases are acquired and released by the host application through the lease endpoints. Read-only tools (`read`, `glob`, `grep`, `stat`) work without a lease.
+
 `read` accepts a file or directory. File text output includes line numbers; directory output contains child entries with directory names ending in `/`. Both are bounded and paginated by `offset` and `limit`. All returned paths are workspace-relative.
 
 `apply_patch` accepts one JSON field named `patchText`. Its value must contain Codex patch DSL text.
@@ -59,6 +61,9 @@ Desk Foreman can optionally review side-effecting operations with an OpenAI Resp
 - `GET /api/admin/operations/summary`
 - `GET|PATCH /api/admin/approval-settings`
 - `POST /api/admin/workspace-bindings/{binding_id}/archive|restore|reset`
+- `POST|DELETE /api/admin/workspace-bindings/{binding_id}/lease` (admin, web session)
+- `POST|DELETE /api/internal/workspace-bindings/{binding_id}/lease` (application bearer token)
+- `POST|DELETE /api/internal/resource-workspaces/{resource_kind}/{resource_id}/lease` (application bearer token; resolves or creates the shared resource workspace binding)
 - `GET /healthz`
 - `GET /readyz`
 - `/` serves the frontend SPA when `frontend/dist` is available
@@ -146,7 +151,7 @@ docker compose --profile build-only up --build
 
 Then log into the admin UI, create per-user MCP tokens there, and open `http://localhost:8080`.
 
-The Compose defaults are local-development placeholders. Set `POSTGRES_PASSWORD`, `DATABASE_URL`, `MCP_AUTH_TOKEN`, `RUNNER_MANAGER_TOKEN`, and `BOOTSTRAP_ADMIN_PASSWORD` before exposing the service outside a local machine.
+The Compose defaults are local-development placeholders. Set `POSTGRES_PASSWORD`, `DATABASE_URL`, `RUNNER_MANAGER_TOKEN`, and `BOOTSTRAP_ADMIN_PASSWORD` before exposing the service outside a local machine.
 
 ## Runner Split
 

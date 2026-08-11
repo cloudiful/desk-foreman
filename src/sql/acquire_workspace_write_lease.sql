@@ -1,10 +1,15 @@
 UPDATE workspace_bindings
 SET
-    lifecycle_state = $2,
-    is_active = ($2 = 'active'),
-    archived_at = CASE WHEN $2 = 'archived' THEN NOW() ELSE NULL END,
+    write_lease_owner = $1,
+    write_lease_acquired_at = NOW(),
+    write_lease_expires_at = NOW() + ($2::BIGINT * INTERVAL '1 second'),
     updated_at = NOW()
-WHERE workspace_binding_id = $1
+WHERE workspace_binding_id = $3
+  AND (
+        write_lease_owner IS NULL
+        OR write_lease_owner = $1
+        OR write_lease_expires_at < NOW()
+      )
 RETURNING
     workspace_binding_id,
     application_id,

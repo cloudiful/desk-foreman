@@ -358,6 +358,30 @@ pub struct WorkspaceBindingResponse {
     pub updated_at: DateTime<Utc>,
     pub lifecycle_state: String,
     pub archived_at: Option<DateTime<Utc>>,
+    pub resource_kind: Option<String>,
+    pub resource_id: Option<String>,
+    pub write_lease_owner: Option<String>,
+    pub write_lease_acquired_at: Option<DateTime<Utc>>,
+    pub write_lease_expires_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
+pub struct WorkspaceLeaseRequest {
+    #[validate(custom(function = "validate_non_blank"))]
+    pub owner: String,
+    #[serde(default = "default_lease_ttl_seconds")]
+    #[validate(range(min = 60, max = 86_400))]
+    pub ttl_seconds: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
+pub struct WorkspaceLeaseReleaseRequest {
+    #[validate(custom(function = "validate_non_blank"))]
+    pub owner: String,
+}
+
+fn default_lease_ttl_seconds() -> u64 {
+    3_600
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, IntoParams, Validate)]

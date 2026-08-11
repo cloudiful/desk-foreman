@@ -10,7 +10,12 @@ SELECT
     created_at,
     updated_at,
     lifecycle_state,
-    archived_at
+    archived_at,
+    resource_kind,
+    resource_id,
+    write_lease_owner,
+    write_lease_acquired_at,
+    write_lease_expires_at
 FROM workspace_bindings
 WHERE ($1::BIGINT IS NULL OR application_id = $1)
   AND ($2::TEXT IS NULL OR external_user_id = $2)

@@ -42,9 +42,11 @@ pub async fn create_workspace_binding(
     external_user_id: &str,
     workspace_key: &str,
     workspace_root: &str,
+    resource_kind: Option<&str>,
+    resource_id: Option<&str>,
 ) -> anyhow::Result<WorkspaceBindingResponse> {
     let external_user_hash = external_user_hash(external_user_id);
-    sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
+    let binding = sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
         "../sql/create_workspace_binding.sql"
     ))
     .bind(application_id)
@@ -52,7 +54,64 @@ pub async fn create_workspace_binding(
     .bind(workspace_key)
     .bind(external_user_hash)
     .bind(workspace_root)
-    .fetch_one(pool)
+    .bind(resource_kind)
+    .bind(resource_id)
+    .fetch_optional(pool)
+    .await?;
+    if let Some(binding) = binding {
+        return Ok(binding);
+    }
+    // Concurrent first request may have won the insert; return the existing row.
+    find_workspace_binding_any(pool, application_id, external_user_id, workspace_key)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("workspace binding vanished after create"))
+}
+
+pub async fn find_workspace_binding_by_resource(
+    pool: &PgPool,
+    application_id: i64,
+    resource_kind: &str,
+    resource_id: &str,
+) -> anyhow::Result<Option<WorkspaceBindingResponse>> {
+    sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
+        "../sql/find_workspace_binding_by_resource.sql"
+    ))
+    .bind(application_id)
+    .bind(resource_kind)
+    .bind(resource_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(Into::into)
+}
+
+pub async fn acquire_workspace_write_lease(
+    pool: &PgPool,
+    workspace_binding_id: i64,
+    owner: &str,
+    ttl_seconds: u64,
+) -> anyhow::Result<Option<WorkspaceBindingResponse>> {
+    sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
+        "../sql/acquire_workspace_write_lease.sql"
+    ))
+    .bind(owner)
+    .bind(i64::try_from(ttl_seconds).unwrap_or(i64::MAX))
+    .bind(workspace_binding_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(Into::into)
+}
+
+pub async fn release_workspace_write_lease(
+    pool: &PgPool,
+    workspace_binding_id: i64,
+    owner: &str,
+) -> anyhow::Result<Option<WorkspaceBindingResponse>> {
+    sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
+        "../sql/release_workspace_write_lease.sql"
+    ))
+    .bind(workspace_binding_id)
+    .bind(owner)
+    .fetch_optional(pool)
     .await
     .map_err(Into::into)
 }

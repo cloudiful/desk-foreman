@@ -1,5 +1,6 @@
 mod admin;
 mod authn;
+mod internal;
 mod openapi;
 mod tools;
 pub(crate) mod validation;
@@ -70,6 +71,11 @@ pub fn router() -> Router<AppState> {
             post(admin::reset_workspace_binding),
         )
         .route(
+            "/api/admin/workspace-bindings/{binding_id}/lease",
+            post(admin::acquire_workspace_binding_lease)
+                .delete(admin::release_workspace_binding_lease),
+        )
+        .route(
             "/api/admin/users/{user_id}/reset-password",
             post(admin::reset_user_password),
         )
@@ -90,6 +96,7 @@ pub fn router() -> Router<AppState> {
             "/api/admin/approval-settings",
             get(admin::get_approval_settings).patch(admin::update_approval_settings),
         )
+        .merge(internal::router())
         .merge(tools::router())
 }
 

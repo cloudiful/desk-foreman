@@ -8,8 +8,11 @@ use axum_extra::extract::cookie::CookieJar;
 
 use crate::{
     AppState,
-    api::validation::ValidatedQuery,
-    db::types::{ListWorkspaceBindingsParams, WorkspaceBindingResponse},
+    api::validation::{ValidatedJson, ValidatedQuery},
+    db::types::{
+        ListWorkspaceBindingsParams, WorkspaceBindingResponse, WorkspaceLeaseReleaseRequest,
+        WorkspaceLeaseRequest,
+    },
     error::AppError,
     workspace::resolve_workspace_binding_root,
 };
@@ -174,6 +177,121 @@ async fn transition_workspace_binding(
     )
     .await?;
     Ok(Json(binding))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/admin/workspace-bindings/{binding_id}/lease",
+    tag = "admin-users",
+    params(("binding_id" = i64, Path, description = "Workspace binding identifier")),
+    request_body = WorkspaceLeaseRequest,
+    responses(
+        (status = 200, body = WorkspaceBindingResponse),
+        (status = 404, body = crate::error::ErrorResponse),
+        (status = 409, body = crate::error::ErrorResponse)
+    )
+)]
+pub async fn acquire_workspace_binding_lease(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(binding_id): Path<i64>,
+    ValidatedJson(request): ValidatedJson<WorkspaceLeaseRequest>,
+) -> Result<Json<WorkspaceBindingResponse>, AppError> {
+    let admin = require_admin(&state, &jar).await?;
+    acquire_binding_lease(&state, binding_id, &request.owner, request.ttl_seconds).await?;
+    record_admin_audit(
+        &state,
+        &admin,
+        "workspace.lease.acquire",
+        "workspace_binding",
+        binding_id.to_string(),
+        json!({ "owner": request.owner, "ttl_seconds": request.ttl_seconds }),
+    )
+    .await?;
+    let binding = crate::db::queries::find_workspace_binding_by_id(&state.db, binding_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("workspace binding not found"))?;
+    Ok(Json(binding))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/admin/workspace-bindings/{binding_id}/lease",
+    tag = "admin-users",
+    params(("binding_id" = i64, Path, description = "Workspace binding identifier")),
+    request_body = WorkspaceLeaseReleaseRequest,
+    responses((status = 200, body = WorkspaceBindingResponse))
+)]
+pub async fn release_workspace_binding_lease(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(binding_id): Path<i64>,
+    ValidatedJson(request): ValidatedJson<WorkspaceLeaseReleaseRequest>,
+) -> Result<Json<WorkspaceBindingResponse>, AppError> {
+    let admin = require_admin(&state, &jar).await?;
+    release_binding_lease(&state, binding_id, &request.owner).await?;
+    record_admin_audit(
+        &state,
+        &admin,
+        "workspace.lease.release",
+        "workspace_binding",
+        binding_id.to_string(),
+        json!({ "owner": request.owner }),
+    )
+    .await?;
+    let binding = crate::db::queries::find_workspace_binding_by_id(&state.db, binding_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("workspace binding not found"))?;
+    Ok(Json(binding))
+}
+
+pub async fn acquire_binding_lease(
+    state: &AppState,
+    binding_id: i64,
+    owner: &str,
+    ttl_seconds: u64,
+) -> Result<(), AppError> {
+    let Some(binding) =
+        crate::db::queries::find_workspace_binding_by_id(&state.db, binding_id).await?
+    else {
+        return Err(AppError::not_found("workspace binding not found"));
+    };
+    if binding.lifecycle_state != "active" || !binding.is_active {
+        return Err(AppError::conflict("workspace binding is not active"));
+    }
+    if crate::db::queries::acquire_workspace_write_lease(&state.db, binding_id, owner, ttl_seconds)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::conflict(
+            "workspace write lease is held by another owner",
+        ));
+    }
+    Ok(())
+}
+
+pub async fn release_binding_lease(
+    state: &AppState,
+    binding_id: i64,
+    owner: &str,
+) -> Result<(), AppError> {
+    let Some(binding) =
+        crate::db::queries::find_workspace_binding_by_id(&state.db, binding_id).await?
+    else {
+        return Err(AppError::not_found("workspace binding not found"));
+    };
+    if binding.lifecycle_state != "active" || !binding.is_active {
+        return Err(AppError::conflict("workspace binding is not active"));
+    }
+    if crate::db::queries::release_workspace_write_lease(&state.db, binding_id, owner)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::conflict(
+            "workspace write lease is held by a different owner",
+        ));
+    }
+    Ok(())
 }
 
 async fn cancel_binding_sessions(state: &AppState, binding_id: i64) -> Result<(), AppError> {

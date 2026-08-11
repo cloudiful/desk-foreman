@@ -298,5 +298,6 @@ fn test_actor(root: &Path, user_id: i64) -> ActorContext {
             ALL_SCOPES.iter().map(|scope| (*scope).to_string()),
             ResourceLimits::unrestricted(true),
         ),
+        lease_owner: None,
     }
 }

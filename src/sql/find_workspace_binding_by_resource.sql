@@ -17,5 +17,9 @@ SELECT
     write_lease_acquired_at,
     write_lease_expires_at
 FROM workspace_bindings
-WHERE workspace_binding_id = $1
+WHERE application_id = $1
+  AND resource_kind = $2
+  AND resource_id = $3
+  AND is_active = TRUE
+  AND lifecycle_state = 'active'
 LIMIT 1;

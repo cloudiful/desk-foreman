@@ -10,7 +10,12 @@ SELECT
     created_at,
     updated_at,
     lifecycle_state,
-    archived_at
+    archived_at,
+    resource_kind,
+    resource_id,
+    write_lease_owner,
+    write_lease_acquired_at,
+    write_lease_expires_at
 FROM workspace_bindings
 WHERE application_id = $1
   AND external_user_id = $2

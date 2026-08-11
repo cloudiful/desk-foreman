@@ -1,8 +1,8 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     process::Stdio,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use anyhow::Context;
@@ -22,11 +22,27 @@ use super::{ProcessSpawnTarget, RunnerBackend, shell_spawn::append_shell_args};
 pub struct DockerRunnerBackend {
     db: sqlx::PgPool,
     config: RunnerManagerConfig,
+    /// Serializes container create/start reconciliation per owner so concurrent
+    /// first requests cannot race on `docker run --name <same-name>`.
+    runner_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl DockerRunnerBackend {
     pub fn new(db: sqlx::PgPool, config: RunnerManagerConfig) -> Arc<Self> {
-        Arc::new(Self { db, config })
+        Arc::new(Self {
+            db,
+            config,
+            runner_locks: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn runner_lock(&self, owner: &RunnerOwner) -> Arc<tokio::sync::Mutex<()>> {
+        let key = owner.stable_key().to_string();
+        let mut locks = self.runner_locks.lock().expect("runner lock map poisoned");
+        locks
+            .entry(key)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     async fn ensure_runner(
@@ -35,6 +51,8 @@ impl DockerRunnerBackend {
         workspace_root: &Path,
         requested_network_enabled: bool,
     ) -> anyhow::Result<String> {
+        let lock = self.runner_lock(owner);
+        let _guard = lock.lock().await;
         let network_enabled = requested_network_enabled && self.config.network_enabled;
         let container_name = owner.container_name();
         let host_workspace_root = self.host_workspace_root(workspace_root)?;
@@ -102,11 +120,19 @@ impl DockerRunnerBackend {
         container_name: &str,
         network_enabled: bool,
     ) -> anyhow::Result<()> {
+        let user_spec = workspace_owner_user_spec(host_workspace_root).with_context(|| {
+            format!(
+                "failed to resolve workspace owner for {}",
+                host_workspace_root.display()
+            )
+        })?;
         let mut args = vec![
             "run".to_string(),
             "-d".to_string(),
             "--name".to_string(),
             container_name.to_string(),
+            "--user".to_string(),
+            user_spec,
             "--label".to_string(),
             format!("desk-foreman.owner={}", owner.stable_key()),
             "--label".to_string(),
@@ -472,4 +498,20 @@ fn record_owner(
         }),
         other => anyhow::bail!("unsupported workspace runner owner kind: {other}"),
     }
+}
+
+/// Resolves the `--user` spec for runner containers from the workspace
+/// directory ownership on the host, so the container process can write to the
+/// bind-mounted workspace without running as root.
+#[cfg(unix)]
+fn workspace_owner_user_spec(host_workspace_root: &Path) -> anyhow::Result<String> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::metadata(host_workspace_root)
+        .with_context(|| format!("failed to stat {}", host_workspace_root.display()))?;
+    Ok(format!("{}:{}", metadata.uid(), metadata.gid()))
+}
+
+#[cfg(not(unix))]
+fn workspace_owner_user_spec(_host_workspace_root: &Path) -> anyhow::Result<String> {
+    anyhow::bail!("docker runner backend requires a unix host")
 }

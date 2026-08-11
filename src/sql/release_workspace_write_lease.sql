@@ -1,4 +1,12 @@
-SELECT
+UPDATE workspace_bindings
+SET
+    write_lease_owner = NULL,
+    write_lease_acquired_at = NULL,
+    write_lease_expires_at = NULL,
+    updated_at = NOW()
+WHERE workspace_binding_id = $1
+  AND (write_lease_owner IS NULL OR write_lease_owner = $2)
+RETURNING
     workspace_binding_id,
     application_id,
     external_user_id,
@@ -15,7 +23,4 @@ SELECT
     resource_id,
     write_lease_owner,
     write_lease_acquired_at,
-    write_lease_expires_at
-FROM workspace_bindings
-WHERE workspace_binding_id = $1
-LIMIT 1;
+    write_lease_expires_at;

@@ -17,6 +17,7 @@ pub use operations::{
 pub use tokens::{create_mcp_token, delete_mcp_token, list_mcp_tokens, update_mcp_token};
 pub use users::{create_user, delete_user, list_users, reset_user_password, update_user};
 pub use workspace_bindings::{
-    archive_workspace_binding, get_workspace_binding, list_workspace_bindings,
-    reset_workspace_binding, restore_workspace_binding,
+    acquire_workspace_binding_lease, archive_workspace_binding, get_workspace_binding,
+    list_workspace_bindings, release_workspace_binding_lease, reset_workspace_binding,
+    restore_workspace_binding,
 };

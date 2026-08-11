@@ -23,7 +23,6 @@ services:
       - "8080:80"
     environment:
       MCP_BIND_ADDR: 0.0.0.0:3000
-      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-change-me-local-only}
       DATABASE_URL: ${DATABASE_URL:-postgres://desk_foreman:change-me-local-only@postgres:5432/desk_foreman}
       WORKSPACE_ROOT: /workspace
       DEFAULT_SHELL: /bin/bash

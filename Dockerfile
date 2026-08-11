@@ -102,12 +102,13 @@ FROM debian:trixie-slim AS workspace-runner
 ARG TARGETARCH
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates curl git python3 python3-venv ripgrep unzip \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl fd-find git python3 python3-venv ripgrep unzip \
+    && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && rm -rf /var/lib/apt/lists/*
 
 RUN case "${TARGETARCH:-amd64}" in \
-        amd64) UV_ARCH="x86_64-unknown-linux-gnu"; BUN_ARCH="x64" ;; \
-        arm64) UV_ARCH="aarch64-unknown-linux-gnu"; BUN_ARCH="aarch64" ;; \
+        amd64) UV_ARCH="x86_64-unknown-linux-gnu"; BUN_ARCH="x64"; RUST_ARCH="x86_64-unknown-linux-gnu" ;; \
+        arm64) UV_ARCH="aarch64-unknown-linux-gnu"; BUN_ARCH="aarch64"; RUST_ARCH="aarch64-unknown-linux-gnu" ;; \
         *) echo "unsupported TARGETARCH: ${TARGETARCH:-unknown}" >&2; exit 1 ;; \
     esac \
     && curl -fsSL "https://github.com/astral-sh/uv/releases/latest/download/uv-${UV_ARCH}.tar.gz" \
@@ -118,8 +119,21 @@ RUN case "${TARGETARCH:-amd64}" in \
     && curl -fsSL "https://github.com/oven-sh/bun/releases/latest/download/bun-linux-${BUN_ARCH}.zip" -o /tmp/bun.zip \
     && unzip /tmp/bun.zip -d /tmp \
     && install /tmp/bun-linux-${BUN_ARCH}/bun /usr/local/bin/bun \
-    && rm -rf /tmp/bun.zip /tmp/bun-linux-${BUN_ARCH}
+    && rm -rf /tmp/bun.zip /tmp/bun-linux-${BUN_ARCH} \
+    && curl -fsSL "https://static.rust-lang.org/rustup/dist/${RUST_ARCH}/rustup-init" -o /tmp/rustup-init \
+    && chmod +x /tmp/rustup-init \
+    && RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo /tmp/rustup-init -y --profile minimal --default-toolchain stable --no-modify-path \
+    && rm -rf /tmp/rustup-init
 
 WORKDIR /workspace
+
+# The container root filesystem is read-only at runtime; the Rust toolchain
+# lives in image layers while cargo's writable home lives on the workspace
+# mount. Runner containers are started with --user matching the workspace
+# directory owner (see runner-manager docker backend).
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/workspace/.cargo-home
+ENV HOME=/workspace
+ENV PATH=/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin
 
 ENTRYPOINT ["/bin/bash", "-lc", "sleep infinity"]
