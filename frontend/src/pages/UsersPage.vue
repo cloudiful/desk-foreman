@@ -633,6 +633,7 @@ onMounted(() => void load())
             <USelectMenu
               v-model="editing.timezone"
               :items="timezones().map((zone) => ({ label: zone, value: zone }))"
+              value-key="value"
               searchable
               class="w-full"
             />
