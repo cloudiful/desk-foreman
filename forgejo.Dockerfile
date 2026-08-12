@@ -35,7 +35,7 @@ RUN chmod +x /usr/local/bin/start-desk-foreman \
 
 USER desk-foreman
 
-ENV MCP_BIND_ADDR=127.0.0.1:3000
+ENV MCP_BIND_ADDR=0.0.0.0:3000
 ENV WORKSPACE_ROOT=/workspace
 ENV DEFAULT_SHELL=/bin/bash
 ENV SESSION_IDLE_TTL_SEC=1800

@@ -27,8 +27,7 @@ pub(crate) struct RunnerManagerState {
 }
 
 pub(crate) fn build_app(state: RunnerManagerState) -> Router {
-    Router::new()
-        .route("/healthz", get(healthz))
+    let protected = Router::new()
         .route("/internal/runner/exec-shell", post(exec_shell))
         .route("/internal/runner/write-stdin", post(write_stdin))
         .route("/internal/runner/cancel-session", post(cancel_session))
@@ -38,7 +37,11 @@ pub(crate) fn build_app(state: RunnerManagerState) -> Router {
         .route_layer(middleware::from_fn_with_state(
             state,
             bearer_auth_middleware,
-        ))
+        ));
+
+    Router::new()
+        .route("/healthz", get(healthz))
+        .merge(protected)
 }
 
 pub(crate) async fn build_runner_service(
@@ -445,6 +448,20 @@ mod tests {
             .await?;
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        handle.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn healthz_does_not_require_bearer_auth() -> anyhow::Result<()> {
+        let (base_url, handle) = spawn_test_server().await?;
+        let response = Client::new()
+            .get(format!("{base_url}/healthz"))
+            .send()
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.text().await?, "ok");
         handle.abort();
         Ok(())
     }
