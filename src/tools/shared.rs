@@ -377,41 +377,19 @@ pub async fn edit(
         replace_all: params.replace_all,
     };
     let tools = workspace_tools(actor)?;
-    let reviewer = review::reviewer_for_request(
-        state,
-        actor,
-        &ReviewRequest::edit(
-            &request.path,
-            json!({
-                "replace_all": request.replace_all,
-                "old_text_bytes": request.old_text.len(),
-                "new_text_bytes": request.new_text.len(),
-                "workspace_scoped": true,
-            }),
-        ),
-    )
-    .await?;
-    if let Some(reviewer) = reviewer {
-        let decision = reviewer
-            .review(&ReviewRequest::edit(
-                &request.path,
-                json!({
-                    "replace_all": request.replace_all,
-                    "old_text_bytes": request.old_text.len(),
-                    "new_text_bytes": request.new_text.len(),
-                    "workspace_scoped": true,
-                }),
-            ))
-            .await
-            .map_err(|error| ToolError::Forbidden(error.to_string()))?;
-        if !decision.permits_execution() {
-            return Err(ToolError::Forbidden(format!(
-                "operation rejected by approval reviewer ({})",
-                decision.reason_code
-            )));
-        }
-    }
-    let output = tools.edit_text(&request).map_err(map_exact_edit_error)?;
+    let review_request = ReviewRequest::edit(
+        &request.path,
+        json!({
+            "old_text": request.old_text,
+            "new_text": request.new_text,
+            "replace_all": request.replace_all,
+            "workspace_scoped": true,
+        }),
+    );
+    review::ensure_review(state, actor, &review_request).await?;
+    let output = tools
+        .edit_text_with_limit(&request, actor.policy.limits.max_file_bytes)
+        .map_err(map_exact_edit_error)?;
     let output: EditOutput = output.into();
     spawn_tool_audit(
         state,
@@ -558,16 +536,22 @@ fn map_apply_patch_error(error: WorkspaceSdkError) -> ToolError {
 }
 
 fn map_exact_edit_error(error: ExactEditError) -> ToolError {
+    let message = error.to_string();
     match error {
         ExactEditError::Workspace(WorkspaceSdkError::InvalidInput(message)) => {
             ToolError::InvalidInput(message)
         }
         ExactEditError::OldTextEmpty
         | ExactEditError::NoOp
+        | ExactEditError::FileTooLarge { .. }
+        | ExactEditError::InputTooLarge { .. }
         | ExactEditError::NotUtf8 { .. }
         | ExactEditError::ContextNotFound { .. }
         | ExactEditError::Ambiguous { .. } => ToolError::InvalidInput(error.to_string()),
         ExactEditError::Workspace(other) => ToolError::Internal(other.into()),
+        ExactEditError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+            ToolError::NotFound(message)
+        }
         ExactEditError::Io { .. } => ToolError::Internal(error.into()),
     }
 }

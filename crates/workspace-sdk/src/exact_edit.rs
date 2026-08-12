@@ -11,6 +11,8 @@ use thiserror::Error;
 use crate::{WorkspaceSdkError, resolve_workspace_path, workspace_relative_display};
 
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+const MAX_EDIT_FILE_BYTES: usize = 50 * 1024 * 1024;
+const MAX_EDIT_INPUT_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct ExactEditRequest {
@@ -35,6 +37,10 @@ pub enum ExactEditError {
     OldTextEmpty,
     #[error("old_text equals new_text; nothing to replace")]
     NoOp,
+    #[error("{path} exceeds the maximum file size of {max_bytes} bytes")]
+    FileTooLarge { path: String, max_bytes: usize },
+    #[error("edit input exceeds the maximum size of {max_bytes} bytes")]
+    InputTooLarge { max_bytes: usize },
     #[error("{path} is not valid UTF-8")]
     NotUtf8 { path: String },
     #[error("old_text was not found in {path}; re-read the file and retry")]
@@ -58,6 +64,8 @@ impl ExactEditError {
         match self {
             Self::OldTextEmpty => "edit_old_text_empty",
             Self::NoOp => "edit_noop",
+            Self::FileTooLarge { .. } => "edit_file_too_large",
+            Self::InputTooLarge { .. } => "edit_input_too_large",
             Self::NotUtf8 { .. } => "edit_not_utf8",
             Self::ContextNotFound { .. } => "edit_context_not_found",
             Self::Ambiguous { .. } => "edit_context_ambiguous",
@@ -67,9 +75,10 @@ impl ExactEditError {
     }
 }
 
-pub(crate) fn edit_file(
+pub(crate) fn edit_file_with_limit(
     root: &Path,
     request: &ExactEditRequest,
+    max_file_bytes: Option<usize>,
 ) -> Result<ExactEditResult, ExactEditError> {
     if request.old_text.is_empty() {
         return Err(ExactEditError::OldTextEmpty);
@@ -77,8 +86,29 @@ pub(crate) fn edit_file(
     if request.old_text == request.new_text {
         return Err(ExactEditError::NoOp);
     }
+    if request
+        .old_text
+        .len()
+        .saturating_add(request.new_text.len())
+        > MAX_EDIT_INPUT_BYTES
+    {
+        return Err(ExactEditError::InputTooLarge {
+            max_bytes: MAX_EDIT_INPUT_BYTES,
+        });
+    }
 
     let absolute = resolve_workspace_path(root, &request.path)?;
+    let max_file_bytes = max_file_bytes.unwrap_or(MAX_EDIT_FILE_BYTES);
+    let metadata = fs::metadata(&absolute).map_err(|source| ExactEditError::Io {
+        context: format!("failed to inspect {}", request.path),
+        source,
+    })?;
+    if metadata.len() > max_file_bytes as u64 {
+        return Err(ExactEditError::FileTooLarge {
+            path: request.path.clone(),
+            max_bytes: max_file_bytes,
+        });
+    }
     let bytes = fs::read(&absolute).map_err(|source| ExactEditError::Io {
         context: format!("failed to read {}", request.path),
         source,
@@ -261,7 +291,8 @@ mod tests {
         )
         .expect("file");
 
-        let result = edit_file(temp.path(), &request("old\n", "new\n", false)).expect("edit");
+        let result = edit_file_with_limit(temp.path(), &request("old\n", "new\n", false), None)
+            .expect("edit");
         assert_eq!(result.path, "src/lib.rs");
         assert_eq!(result.replacements, 1);
         assert_eq!(
@@ -276,7 +307,7 @@ mod tests {
         fs::write(temp.path().join("src.rs"), "same\nsame\n").expect("file");
         let mut request = request("same", "changed", false);
         request.path = "src.rs".to_string();
-        let error = edit_file(temp.path(), &request).expect_err("ambiguous");
+        let error = edit_file_with_limit(temp.path(), &request, None).expect_err("ambiguous");
         assert!(matches!(
             error,
             ExactEditError::Ambiguous { matches: 2, .. }
@@ -285,5 +316,49 @@ mod tests {
             fs::read_to_string(temp.path().join("src.rs")).unwrap(),
             "same\nsame\n"
         );
+    }
+
+    #[test]
+    fn rejects_files_over_the_requested_limit_before_reading() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::write(temp.path().join("src.rs"), "old\n").expect("file");
+        let error = edit_file_with_limit(
+            temp.path(),
+            &ExactEditRequest {
+                path: "src.rs".to_string(),
+                old_text: "old".to_string(),
+                new_text: "new".to_string(),
+                replace_all: false,
+            },
+            Some(1),
+        )
+        .expect_err("file should exceed the limit");
+        assert!(matches!(
+            error,
+            ExactEditError::FileTooLarge { max_bytes: 1, .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_oversized_edit_input_before_reading() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::write(temp.path().join("src.rs"), "old\n").expect("file");
+        let error = edit_file_with_limit(
+            temp.path(),
+            &ExactEditRequest {
+                path: "src.rs".to_string(),
+                old_text: "x".repeat(MAX_EDIT_INPUT_BYTES),
+                new_text: "new".to_string(),
+                replace_all: false,
+            },
+            None,
+        )
+        .expect_err("input should exceed the limit");
+        assert!(matches!(
+            error,
+            ExactEditError::InputTooLarge {
+                max_bytes: MAX_EDIT_INPUT_BYTES
+            }
+        ));
     }
 }

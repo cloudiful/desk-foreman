@@ -497,7 +497,7 @@ pub struct GitWorkspaceSyncRequest {
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct GitWorkspaceSyncResponse {
     pub status: String,
-    pub initialized: bool,
+    pub cloned: bool,
     pub dirty: bool,
     pub branch: Option<String>,
     pub head_commit: Option<String>,

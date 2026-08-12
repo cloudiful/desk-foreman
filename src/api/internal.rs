@@ -105,17 +105,37 @@ pub async fn sync_resource_workspace_git(
     Path((resource_kind, resource_id)): Path<(String, String)>,
     ValidatedJson(request): ValidatedJson<GitWorkspaceSyncRequest>,
 ) -> Result<Json<GitWorkspaceSyncResponse>, AppError> {
-    if resource_kind != "code_project"
-        || !valid_resource_path_component(&resource_kind)
-        || !valid_resource_path_component(&resource_id)
-    {
+    if resource_kind != "code_project" || !valid_resource_path_component(&resource_id) {
         return Err(AppError::bad_request("invalid resource workspace key"));
+    }
+    let expected_workspace_key = format!("{resource_kind}:{resource_id}");
+    let workspace_key = headers
+        .get(crate::auth::identity::WORKSPACE_KEY_HEADER)
+        .ok_or_else(|| AppError::unauthorized("missing X-DF-Workspace-Key header"))?
+        .to_str()
+        .map_err(|_| AppError::unauthorized("invalid X-DF-Workspace-Key header"))?
+        .trim();
+    if workspace_key != expected_workspace_key {
+        return Err(AppError::forbidden(
+            "workspace key does not match resource path",
+        ));
     }
     let Some(actor) =
         crate::auth::identity::current_actor_from_bearer(&state, &headers, false).await?
     else {
         return Err(AppError::unauthorized("application bearer token required"));
     };
+    let Some(binding) = actor.workspace_binding.as_ref() else {
+        return Err(AppError::unauthorized("application bearer token required"));
+    };
+    if binding.resource_kind.as_deref() != Some(resource_kind.as_str())
+        || binding.resource_id.as_deref() != Some(resource_id.as_str())
+        || binding.workspace_key != expected_workspace_key
+    {
+        return Err(AppError::forbidden(
+            "workspace binding does not match resource path",
+        ));
+    }
     actor.ensure_write_access().map_err(AppError::forbidden)?;
     if !actor.policy.allows(crate::policy::WORKSPACE_SHELL) {
         return Err(AppError::forbidden(
@@ -128,8 +148,8 @@ pub async fn sync_resource_workspace_git(
         ));
     }
     let remote_url = validate_git_remote_url(&request.remote_url)?;
-    let initialized = !actor.workspace_root.join(".git").is_dir();
-    if initialized
+    let needs_initialization = !actor.workspace_root.join(".git").is_dir();
+    if needs_initialization
         && actor
             .workspace_root
             .read_dir()
@@ -141,7 +161,7 @@ pub async fn sync_resource_workspace_git(
             "workspace is not empty and is not a git checkout",
         ));
     }
-    if !initialized {
+    if !needs_initialization {
         let status = run_git_command(
             &state,
             &actor,
@@ -152,7 +172,7 @@ pub async fn sync_resource_workspace_git(
             return Err(AppError::conflict("workspace has uncommitted changes"));
         }
     }
-    let output = if initialized {
+    let output = if needs_initialization {
         let mut args = vec!["clone".to_string(), "--depth".to_string(), "1".to_string()];
         if let Some(branch) = request
             .branch
@@ -166,16 +186,36 @@ pub async fn sync_resource_workspace_git(
         args.extend([remote_url, ".".to_string()]);
         run_git_command(&state, &actor, args).await?
     } else {
-        let mut args = vec!["pull".to_string(), "--ff-only".to_string(), remote_url];
-        if let Some(branch) = request
+        let branch = if let Some(branch) = request
             .branch
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
             validate_git_branch(branch)?;
-            args.push(branch.to_string());
-        }
+            branch.to_string()
+        } else {
+            let current_branch = run_git_command(
+                &state,
+                &actor,
+                vec!["branch".to_string(), "--show-current".to_string()],
+            )
+            .await?;
+            let current_branch = current_branch.stdout.trim();
+            if current_branch.is_empty() {
+                return Err(AppError::conflict(
+                    "branch is required for a detached git workspace",
+                ));
+            }
+            validate_git_branch(current_branch)?;
+            current_branch.to_string()
+        };
+        let args = vec![
+            "pull".to_string(),
+            "--ff-only".to_string(),
+            remote_url,
+            branch,
+        ];
         run_git_command(&state, &actor, args).await?
     };
     if output.exit_code != Some(0) {
@@ -202,7 +242,7 @@ pub async fn sync_resource_workspace_git(
     .await?;
     Ok(Json(GitWorkspaceSyncResponse {
         status: "ready".to_string(),
-        initialized,
+        cloned: needs_initialization,
         dirty: false,
         branch: Some(branch.stdout.trim().to_string()),
         head_commit: Some(head.stdout.trim().to_string()),

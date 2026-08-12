@@ -48,7 +48,15 @@ impl WorkspaceFileTools {
     }
 
     pub fn edit_text(&self, request: &ExactEditRequest) -> Result<ExactEditResult, ExactEditError> {
-        crate::exact_edit::edit_file(&self.workspace_root, request)
+        self.edit_text_with_limit(request, None)
+    }
+
+    pub fn edit_text_with_limit(
+        &self,
+        request: &ExactEditRequest,
+        max_file_bytes: Option<usize>,
+    ) -> Result<ExactEditResult, ExactEditError> {
+        crate::exact_edit::edit_file_with_limit(&self.workspace_root, request, max_file_bytes)
     }
 
     #[cfg(feature = "approval")]
