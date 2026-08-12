@@ -1,0 +1,5 @@
+dist/
+src/generated/
+components.d.ts
+auto-imports.d.ts
+openapi.json

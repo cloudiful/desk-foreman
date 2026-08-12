@@ -1,7 +1,4 @@
 <script setup lang="ts">
-import Button from 'primevue/button'
-import Card from 'primevue/card'
-import Password from 'primevue/password'
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { authState } from '../api/auth'
@@ -13,17 +10,23 @@ const confirmPassword = ref('')
 const error = ref('')
 const loading = ref(false)
 
+function validate(): string | null {
+  if (!currentPassword.value) return 'Enter your current password'
+  if (newPassword.value.length < 8)
+    return 'New password must be at least 8 characters'
+  if (newPassword.value !== confirmPassword.value)
+    return 'Passwords do not match'
+  return null
+}
+
 async function submit(): Promise<void> {
-  error.value = ''
-  if (newPassword.value.length < 8) {
-    error.value = 'Password must be at least 8 characters'
-    return
-  }
-  if (newPassword.value !== confirmPassword.value) {
-    error.value = 'Passwords do not match'
+  const problem = validate()
+  if (problem) {
+    error.value = problem
     return
   }
   loading.value = true
+  error.value = ''
   try {
     await authState.changeCurrentPassword(
       currentPassword.value,
@@ -40,46 +43,84 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <div class="flex min-h-screen items-center justify-center px-4">
-    <Card class="app-shell-panel w-full max-w-md rounded-[2rem]">
-      <template #title>
-        <div class="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-          Desk Foreman
+  <div
+    class="flex min-h-screen items-center justify-center bg-(--ui-bg-muted) px-4"
+  >
+    <div class="w-full max-w-sm">
+      <div class="mb-8 flex flex-col items-center gap-3">
+        <div
+          class="flex size-12 items-center justify-center rounded-xl bg-(--ui-primary) text-white shadow-lg shadow-(--ui-primary)/20"
+        >
+          <UIcon name="i-lucide-key-round" class="size-6" />
         </div>
-        <div class="mt-2 text-3xl font-semibold">Set a new password</div>
-      </template>
-      <template #content>
-        <form class="space-y-4" @submit.prevent="submit">
-          <Password
+        <div class="text-center">
+          <h1
+            class="text-xl font-semibold tracking-tight text-(--ui-text-highlighted)"
+          >
+            Set a new password
+          </h1>
+          <p class="mt-1 text-sm text-(--ui-text-muted)">
+            You must change the default password before continuing
+          </p>
+        </div>
+      </div>
+
+      <form
+        class="space-y-4 rounded-xl border border-(--ui-border) bg-(--ui-bg) p-6 shadow-sm"
+        @submit.prevent="submit"
+      >
+        <UFormField label="Current password">
+          <UInput
             v-model="currentPassword"
-            class="w-full"
-            fluid
-            :feedback="false"
-            placeholder="Current password"
+            name="current_password"
+            type="password"
+            autocomplete="current-password"
+            size="lg"
+            placeholder="••••••••"
+            leading-icon="i-lucide-lock"
           />
-          <Password
+        </UFormField>
+        <UFormField label="New password" hint="At least 8 characters">
+          <UInput
             v-model="newPassword"
-            class="w-full"
-            fluid
-            toggle-mask
-            placeholder="New password"
+            name="new_password"
+            type="password"
+            autocomplete="new-password"
+            size="lg"
+            placeholder="••••••••"
+            leading-icon="i-lucide-lock"
           />
-          <Password
+        </UFormField>
+        <UFormField label="Confirm new password">
+          <UInput
             v-model="confirmPassword"
-            class="w-full"
-            fluid
-            :feedback="false"
-            placeholder="Confirm new password"
+            name="confirm_password"
+            type="password"
+            autocomplete="new-password"
+            size="lg"
+            placeholder="••••••••"
+            leading-icon="i-lucide-lock"
           />
-          <p v-if="error" class="text-sm text-red-700">{{ error }}</p>
-          <Button
-            type="submit"
-            label="Change password"
-            class="w-full"
-            :loading="loading"
-          />
-        </form>
-      </template>
-    </Card>
+        </UFormField>
+
+        <UAlert
+          v-if="error"
+          :title="error"
+          color="error"
+          variant="subtle"
+          icon="i-lucide-circle-alert"
+        />
+
+        <UButton
+          type="submit"
+          size="lg"
+          block
+          :loading="loading"
+          leading-icon="i-lucide-check"
+        >
+          Change password
+        </UButton>
+      </form>
+    </div>
   </div>
 </template>

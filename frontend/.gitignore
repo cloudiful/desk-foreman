@@ -5,6 +5,8 @@
 /*.js
 !/eslint.config.js
 /*.d.ts
+!/components.d.ts
+!/auto-imports.d.ts
 /src/**/*.js
 /src/**/*.d.ts
 !/src/env.d.ts

@@ -1,12 +1,4 @@
 <script setup lang="ts">
-import Button from 'primevue/button'
-import Column from 'primevue/column'
-import DataTable from 'primevue/datatable'
-import Dialog from 'primevue/dialog'
-import InputSwitch from 'primevue/inputswitch'
-import InputNumber from 'primevue/inputnumber'
-import InputText from 'primevue/inputtext'
-import Select from 'primevue/select'
 import { computed, onMounted, ref } from 'vue'
 import {
   createAdminApplication,
@@ -16,52 +8,55 @@ import {
   listAdminApplications,
   updateAdminApplication,
 } from '../api/users'
+import { useNotify } from '../composables/useNotify'
+import {
+  formatBytes,
+  formatDateTime,
+  formatMilliseconds,
+  formatRelative,
+} from '../utils/format'
 import type {
   ApplicationResponse,
   ApplicationTokenResponse,
   CreateApplicationTokenResponse,
 } from '../generated/openapi/types.gen'
 
-type EditableApplication = ApplicationResponse
-type TokenModalApplication = Pick<
-  ApplicationResponse,
-  'application_id' | 'name'
->
+const AVAILABLE_SCOPES = [
+  'workspace.read',
+  'workspace.search',
+  'workspace.shell',
+  'workspace.patch',
+] as const
 
-const rows = ref<EditableApplication[]>([])
-const allTokens = ref<ApplicationTokenResponse[]>([])
+const APPROVAL_MODES = [
+  { label: 'Inherit global settings', value: 'inherit' },
+  { label: 'Disabled', value: 'disabled' },
+  { label: 'Use application reviewer', value: 'enabled' },
+] as const
+
+const { success, error: notifyError } = useNotify()
+
+const rows = ref<ApplicationResponse[]>([])
 const loading = ref(false)
 const error = ref('')
-const dialogVisible = ref(false)
-const tokenDialogVisible = ref(false)
-const tokenCreateName = ref('')
-const tokenScopes = ref(
-  'workspace.read, workspace.search, workspace.shell, workspace.patch',
-)
-const tokenExpiresAt = ref('')
-const tokenCreateLoading = ref(false)
-const tokenBusyId = ref<number | null>(null)
-const tokenOwner = ref<TokenModalApplication | null>(null)
-const revealedToken = ref<CreateApplicationTokenResponse | null>(null)
-const editing = ref<EditableApplication | null>(null)
+const search = ref('')
+const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
 
-const visibleTokens = computed(() => {
-  if (!tokenOwner.value) return []
-  return allTokens.value.filter(
-    (token) => token.application_id === tokenOwner.value?.application_id,
-  )
+const filtered = computed(() => {
+  const query = search.value.trim().toLowerCase()
+  return rows.value.filter((row) => {
+    if (statusFilter.value === 'active' && !row.is_active) return false
+    if (statusFilter.value === 'inactive' && row.is_active) return false
+    if (!query) return true
+    return row.name.toLowerCase().includes(query)
+  })
 })
 
 async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const [applications, tokens] = await Promise.all([
-      listAdminApplications(),
-      listAdminApplicationTokens(),
-    ])
-    rows.value = applications
-    allTokens.value = tokens
+    rows.value = await listAdminApplications()
   } catch (err) {
     error.value =
       err instanceof Error ? err.message : 'Failed to load applications'
@@ -70,355 +65,658 @@ async function load(): Promise<void> {
   }
 }
 
-function startCreate(): void {
-  editing.value = {
+// ----- create/edit -----
+interface ApplicationForm {
+  application_id: number
+  name: string
+  workspace_template: string
+  default_shell: string
+  default_scopes: string[]
+  max_timeout_ms: number | string | null | undefined
+  max_output_bytes: number | string | null | undefined
+  max_file_bytes: number | string | null | undefined
+  max_sessions: number | string | null | undefined
+  network_enabled: boolean
+  is_active: boolean
+  approval_mode: string
+  approval_endpoint: string
+  approval_model: string
+}
+
+const editing = ref<ApplicationForm | null>(null)
+const drawerOpen = ref(false)
+const saving = ref(false)
+const formError = ref('')
+
+function toNumberOrNull(
+  value: number | string | null | undefined,
+): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function blankForm(): ApplicationForm {
+  return {
     application_id: 0,
     name: '',
-    is_active: true,
-    workspace_template: null,
-    default_shell: null,
-    default_scopes: [
-      'workspace.read',
-      'workspace.search',
-      'workspace.shell',
-      'workspace.patch',
-    ],
+    workspace_template: '',
+    default_shell: '/bin/bash',
+    default_scopes: [...AVAILABLE_SCOPES],
     max_timeout_ms: null,
     max_output_bytes: null,
     max_file_bytes: null,
     max_sessions: null,
     network_enabled: true,
+    is_active: true,
     approval_mode: 'inherit',
-    approval_endpoint: null,
-    approval_model: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    approval_endpoint: '',
+    approval_model: '',
   }
-  dialogVisible.value = true
 }
 
-function startEdit(row: EditableApplication): void {
-  editing.value = { ...row }
-  dialogVisible.value = true
+function startCreate(): void {
+  formError.value = ''
+  editing.value = blankForm()
+  drawerOpen.value = true
 }
 
-async function saveApplication(): Promise<void> {
+function startEdit(row: ApplicationResponse): void {
+  formError.value = ''
+  editing.value = {
+    application_id: row.application_id,
+    name: row.name,
+    workspace_template: row.workspace_template ?? '',
+    default_shell: row.default_shell ?? '',
+    default_scopes: row.default_scopes,
+    max_timeout_ms: row.max_timeout_ms,
+    max_output_bytes: row.max_output_bytes,
+    max_file_bytes: row.max_file_bytes,
+    max_sessions: row.max_sessions,
+    network_enabled: row.network_enabled,
+    is_active: row.is_active,
+    approval_mode: row.approval_mode,
+    approval_endpoint: row.approval_endpoint ?? '',
+    approval_model: row.approval_model ?? '',
+  }
+  drawerOpen.value = true
+}
+
+async function save(): Promise<void> {
   if (!editing.value) return
-  error.value = ''
+  if (!editing.value.name.trim()) {
+    formError.value = 'Name is required'
+    return
+  }
+  saving.value = true
+  formError.value = ''
+  const body = {
+    name: editing.value.name.trim(),
+    workspace_template: editing.value.workspace_template.trim() || null,
+    default_shell: editing.value.default_shell.trim() || null,
+    default_scopes: editing.value.default_scopes,
+    max_timeout_ms: toNumberOrNull(editing.value.max_timeout_ms),
+    max_output_bytes: toNumberOrNull(editing.value.max_output_bytes),
+    max_file_bytes: toNumberOrNull(editing.value.max_file_bytes),
+    max_sessions: toNumberOrNull(editing.value.max_sessions),
+    network_enabled: editing.value.network_enabled,
+    approval_mode: editing.value.approval_mode,
+    approval_endpoint: editing.value.approval_endpoint.trim() || null,
+    approval_model: editing.value.approval_model.trim() || null,
+  }
   try {
-    if (!editing.value.name.trim()) {
-      error.value = 'Name is required'
-      return
-    }
     if (editing.value.application_id === 0) {
-      await createAdminApplication({
-        name: editing.value.name.trim(),
-        workspace_template: editing.value.workspace_template?.trim() || null,
-        default_shell: editing.value.default_shell?.trim() || null,
-        default_scopes: editing.value.default_scopes,
-        max_timeout_ms: editing.value.max_timeout_ms,
-        max_output_bytes: editing.value.max_output_bytes,
-        max_file_bytes: editing.value.max_file_bytes,
-        max_sessions: editing.value.max_sessions,
-        network_enabled: editing.value.network_enabled,
-        approval_mode: editing.value.approval_mode,
-        approval_endpoint: editing.value.approval_endpoint?.trim() || null,
-        approval_model: editing.value.approval_model?.trim() || null,
-      })
+      await createAdminApplication(body)
+      success('Application created', body.name)
     } else {
       await updateAdminApplication(editing.value.application_id, {
-        name: editing.value.name.trim(),
+        ...body,
         is_active: editing.value.is_active,
-        workspace_template: editing.value.workspace_template?.trim() || null,
-        default_shell: editing.value.default_shell?.trim() || null,
-        default_scopes: editing.value.default_scopes,
-        max_timeout_ms: editing.value.max_timeout_ms,
-        max_output_bytes: editing.value.max_output_bytes,
-        max_file_bytes: editing.value.max_file_bytes,
-        max_sessions: editing.value.max_sessions,
-        network_enabled: editing.value.network_enabled,
-        approval_mode: editing.value.approval_mode,
-        approval_endpoint: editing.value.approval_endpoint?.trim() || null,
-        approval_model: editing.value.approval_model?.trim() || null,
       })
+      success('Application updated', body.name)
     }
-    dialogVisible.value = false
+    drawerOpen.value = false
     editing.value = null
     await load()
   } catch (err) {
-    error.value =
+    formError.value =
       err instanceof Error ? err.message : 'Failed to save application'
+  } finally {
+    saving.value = false
   }
 }
 
-function openTokenDialog(application: EditableApplication): void {
-  tokenOwner.value = {
-    application_id: application.application_id,
-    name: application.name,
-  }
-  tokenCreateName.value = ''
-  tokenScopes.value =
-    'workspace.read, workspace.search, workspace.shell, workspace.patch'
+// ----- tokens -----
+const tokenOwner = ref<ApplicationResponse | null>(null)
+const allTokens = ref<ApplicationTokenResponse[]>([])
+const tokenDrawerOpen = ref(false)
+const tokenName = ref('')
+const tokenScopes = ref<string[]>([...AVAILABLE_SCOPES])
+const tokenExpiresAt = ref('')
+const creatingToken = ref(false)
+const revealedToken = ref<CreateApplicationTokenResponse | null>(null)
+const revokeTarget = ref<ApplicationTokenResponse | null>(null)
+const revoking = ref(false)
+
+const visibleTokens = computed(() =>
+  tokenOwner.value
+    ? allTokens.value.filter(
+        (t) => t.application_id === tokenOwner.value?.application_id,
+      )
+    : [],
+)
+
+const revokeModalOpen = computed<boolean>({
+  get: () => Boolean(revokeTarget.value),
+  set: (open) => {
+    if (!open) revokeTarget.value = null
+  },
+})
+
+async function openTokenDrawer(row: ApplicationResponse): Promise<void> {
+  tokenOwner.value = row
+  tokenName.value = ''
+  tokenScopes.value = [...AVAILABLE_SCOPES]
   tokenExpiresAt.value = ''
   revealedToken.value = null
-  tokenDialogVisible.value = true
+  tokenDrawerOpen.value = true
+  await loadTokens()
+}
+
+async function loadTokens(): Promise<void> {
+  try {
+    allTokens.value = await listAdminApplicationTokens()
+  } catch (err) {
+    notifyError(
+      'Failed to load application tokens',
+      err instanceof Error ? err.message : undefined,
+    )
+  }
 }
 
 async function createToken(): Promise<void> {
-  if (!tokenOwner.value) return
-  tokenCreateLoading.value = true
-  error.value = ''
+  if (!tokenOwner.value || !tokenName.value.trim()) return
+  creatingToken.value = true
   try {
     revealedToken.value = await createAdminApplicationToken({
       application_id: tokenOwner.value.application_id,
-      token_name: tokenCreateName.value.trim(),
-      scopes: tokenScopes.value
-        .split(',')
-        .map((scope) => scope.trim())
-        .filter(Boolean),
-      expires_at: tokenExpiresAt.value || null,
+      token_name: tokenName.value.trim(),
+      scopes: tokenScopes.value,
+      expires_at: tokenExpiresAt.value
+        ? new Date(tokenExpiresAt.value).toISOString()
+        : null,
     })
-    tokenCreateName.value = ''
-    allTokens.value = await listAdminApplicationTokens()
+    tokenName.value = ''
+    await loadTokens()
+    success('Token created')
   } catch (err) {
-    error.value =
-      err instanceof Error ? err.message : 'Failed to create application token'
+    notifyError(
+      'Failed to create token',
+      err instanceof Error ? err.message : undefined,
+    )
   } finally {
-    tokenCreateLoading.value = false
+    creatingToken.value = false
   }
 }
 
-async function revokeToken(token: ApplicationTokenResponse): Promise<void> {
-  tokenBusyId.value = token.token_id
-  error.value = ''
+async function confirmRevokeToken(): Promise<void> {
+  if (!revokeTarget.value) return
+  revoking.value = true
   try {
-    await deleteAdminApplicationToken(token.token_id)
-    allTokens.value = await listAdminApplicationTokens()
+    await deleteAdminApplicationToken(revokeTarget.value.token_id)
+    success('Token revoked', revokeTarget.value.token_name)
+    revokeTarget.value = null
+    await loadTokens()
   } catch (err) {
-    error.value =
-      err instanceof Error ? err.message : 'Failed to revoke application token'
+    notifyError(
+      'Failed to revoke token',
+      err instanceof Error ? err.message : undefined,
+    )
   } finally {
-    tokenBusyId.value = null
+    revoking.value = false
   }
 }
 
-onMounted(() => {
-  void load()
-})
+onMounted(() => void load())
 </script>
 
 <template>
-  <section class="space-y-4">
-    <div class="app-shell-panel rounded-[2rem] p-5">
-      <div
-        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-      >
-        <div>
-          <div class="text-xs uppercase tracking-[0.25em] text-[var(--muted)]">
-            Admin
-          </div>
-          <h2 class="mt-2 text-2xl font-semibold">Applications</h2>
-        </div>
-        <Button label="Create application" @click="startCreate" />
-      </div>
-      <p v-if="error" class="mt-3 text-sm text-red-700">{{ error }}</p>
-    </div>
-
-    <div class="app-shell-panel overflow-hidden rounded-[2rem] p-3">
-      <DataTable :value="rows" :loading="loading" striped-rows>
-        <Column field="name" header="Name" />
-        <Column field="workspace_template" header="Template" />
-        <Column field="default_shell" header="Default shell" />
-        <Column header="Active">
-          <template #body="{ data }">
-            {{ data.is_active ? 'Yes' : 'No' }}
-          </template>
-        </Column>
-        <Column header="Actions">
-          <template #body="{ data }">
-            <div class="flex gap-2">
-              <Button
-                label="Edit"
-                size="small"
-                severity="secondary"
-                @click="startEdit(data)"
-              />
-              <Button
-                label="App tokens"
-                size="small"
-                severity="contrast"
-                @click="openTokenDialog(data)"
-              />
-            </div>
-          </template>
-        </Column>
-      </DataTable>
-    </div>
-
-    <Dialog
-      v-model:visible="dialogVisible"
-      modal
-      :style="{ width: '34rem' }"
-      header="Application"
+  <div class="space-y-6">
+    <PageHeader
+      title="Applications"
+      description="Integrations with workspace access and per-application policies"
     >
-      <div v-if="editing" class="space-y-4">
-        <div class="space-y-2">
-          <label class="block text-sm font-medium">Name</label>
-          <InputText v-model="editing.name" class="w-full" />
-        </div>
-        <div class="space-y-2">
-          <label class="block text-sm font-medium">Workspace template</label>
-          <InputText v-model="editing.workspace_template" class="w-full" />
-        </div>
-        <div class="space-y-2">
-          <label class="block text-sm font-medium">Default shell</label>
-          <InputText v-model="editing.default_shell" class="w-full" />
-        </div>
-        <div class="space-y-2">
-          <label class="block text-sm font-medium">Default scopes</label>
-          <InputText
-            :model-value="editing.default_scopes.join(', ')"
-            class="w-full"
-            @update:model-value="
-              editing.default_scopes = String($event)
-                .split(',')
-                .map((scope) => scope.trim())
-                .filter(Boolean)
-            "
-          />
-        </div>
-        <div class="grid gap-3 sm:grid-cols-2">
-          <InputNumber
-            v-model="editing.max_timeout_ms"
-            input-class="w-full"
-            placeholder="Max timeout (ms)"
-          />
-          <InputNumber
-            v-model="editing.max_output_bytes"
-            input-class="w-full"
-            placeholder="Max output bytes"
-          />
-          <InputNumber
-            v-model="editing.max_file_bytes"
-            input-class="w-full"
-            placeholder="Max file bytes"
-          />
-          <InputNumber
-            v-model="editing.max_sessions"
-            input-class="w-full"
-            placeholder="Max sessions"
-          />
-        </div>
-        <div class="space-y-3 rounded-2xl bg-black/4 p-4">
-          <div class="text-sm font-medium">Approval reviewer</div>
-          <Select
-            v-model="editing.approval_mode"
-            :options="[
-              { label: 'Inherit global', value: 'inherit' },
-              { label: 'Disabled', value: 'disabled' },
-              { label: 'Use application reviewer', value: 'enabled' },
-            ]"
-            option-label="label"
-            option-value="value"
-            class="w-full"
-          />
-          <InputText
-            v-if="editing.approval_mode === 'enabled'"
-            v-model="editing.approval_endpoint"
-            class="w-full"
-            placeholder="Responses API base URL"
-          />
-          <InputText
-            v-if="editing.approval_mode === 'enabled'"
-            v-model="editing.approval_model"
-            class="w-full"
-            placeholder="Model"
-          />
-        </div>
-        <div
-          v-if="editing.application_id !== 0"
-          class="flex items-center justify-between rounded-2xl bg-black/4 px-4 py-3"
-        >
-          <span>Active</span>
-          <InputSwitch v-model="editing.is_active" />
-        </div>
-        <div
-          class="flex items-center justify-between rounded-2xl bg-black/4 px-4 py-3"
-        >
-          <span>Network enabled</span>
-          <InputSwitch v-model="editing.network_enabled" />
-        </div>
-      </div>
-      <template #footer>
-        <Button
-          label="Cancel"
-          severity="secondary"
-          text
-          @click="dialogVisible = false"
+      <template #actions>
+        <UButton
+          icon="i-lucide-refresh-cw"
+          variant="outline"
+          color="neutral"
+          :loading="loading"
+          @click="load"
         />
-        <Button label="Save" @click="saveApplication" />
+        <UButton icon="i-lucide-plus" @click="startCreate">
+          Create application
+        </UButton>
       </template>
-    </Dialog>
+    </PageHeader>
 
-    <Dialog
-      v-model:visible="tokenDialogVisible"
-      modal
-      :style="{ width: '42rem' }"
-      :header="`Application tokens · ${tokenOwner?.name || ''}`"
+    <section
+      class="rounded-xl border border-(--ui-border) bg-(--ui-bg) shadow-sm"
     >
-      <div class="space-y-4">
-        <div class="flex gap-3">
-          <InputText
-            v-model="tokenCreateName"
-            class="flex-1"
-            placeholder="Token name"
-          />
-          <Button
-            label="Create"
-            :loading="tokenCreateLoading"
-            :disabled="!tokenCreateName.trim()"
-            @click="createToken"
-          />
-        </div>
-        <div class="grid gap-3 md:grid-cols-2">
-          <InputText
-            v-model="tokenScopes"
-            placeholder="Scopes, comma separated"
-          />
-          <InputText
-            v-model="tokenExpiresAt"
-            type="datetime-local"
-            placeholder="Expires at"
-          />
-        </div>
-        <div
-          v-if="revealedToken"
-          class="rounded-2xl bg-amber-50 p-4 text-sm text-amber-900"
-        >
-          <div class="font-medium">Copy this token now</div>
-          <div class="mt-2 break-all font-mono">{{ revealedToken.token }}</div>
-        </div>
-        <DataTable :value="visibleTokens" striped-rows>
-          <Column field="token_name" header="Token name" />
-          <Column field="created_at" header="Created at" />
-          <Column field="last_used_at" header="Last used" />
-          <Column field="expires_at" header="Expires" />
-          <Column header="Scopes">
-            <template #body="{ data }">{{ data.scopes.join(', ') }}</template>
-          </Column>
-          <Column header="Actions">
-            <template #body="{ data }">
-              <Button
-                label="Revoke"
-                size="small"
-                severity="danger"
-                :loading="tokenBusyId === data.token_id"
-                @click="revokeToken(data)"
-              />
-            </template>
-          </Column>
-        </DataTable>
+      <div
+        class="flex flex-col gap-3 border-b border-(--ui-border) p-4 md:flex-row md:items-center"
+      >
+        <UInput
+          v-model="search"
+          placeholder="Search applications…"
+          leading-icon="i-lucide-search"
+          class="md:max-w-xs"
+        />
+        <USelect
+          v-model="statusFilter"
+          :items="[
+            { label: 'All statuses', value: 'all' },
+            { label: 'Active', value: 'active' },
+            { label: 'Inactive', value: 'inactive' },
+          ]"
+          class="w-36"
+        />
+        <span class="ml-auto text-sm text-(--ui-text-muted)">
+          {{ filtered.length }} applications
+        </span>
       </div>
-    </Dialog>
-  </section>
+
+      <ErrorAlert v-if="error" :error="error" class="m-4" @retry="load" />
+
+      <DataTable
+        :rows="filtered"
+        :columns="[
+          { key: 'name', label: 'Application' },
+          { key: 'limits', label: 'Limits' },
+          { key: 'scopes', label: 'Scopes' },
+          { key: 'status', label: 'Status' },
+          { key: 'updated_at', label: 'Updated' },
+          { key: 'actions', label: '', class: 'text-right' },
+        ]"
+        :loading="loading"
+        :row-key="(row) => row.application_id as number"
+        :empty-title="
+          search ? 'No matching applications' : 'No applications yet'
+        "
+        :empty-description="
+          search
+            ? 'Try a different search.'
+            : 'Create the first application to get started.'
+        "
+      >
+        <template #cell-name="{ row }">
+          <div class="flex items-center gap-2">
+            <div
+              class="flex size-8 items-center justify-center rounded-md bg-(--ui-bg-elevated) text-(--ui-text-muted)"
+            >
+              <UIcon name="i-lucide-app-window" class="size-4" />
+            </div>
+            <div class="min-w-0">
+              <div class="truncate font-medium text-(--ui-text-highlighted)">
+                {{ row.name }}
+              </div>
+              <div class="truncate font-mono text-xs text-(--ui-text-muted)">
+                #{{ row.application_id }} ·
+                {{ row.default_shell ?? 'default shell' }}
+              </div>
+            </div>
+          </div>
+        </template>
+        <template #cell-limits="{ row }">
+          <span class="text-xs text-(--ui-text-muted)">
+            <template v-if="row.max_timeout_ms">
+              timeout {{ formatMilliseconds(row.max_timeout_ms as number)
+              }}<br />
+            </template>
+            <template v-else>no timeout<br /></template>
+            <template v-if="row.max_output_bytes">
+              output {{ formatBytes(row.max_output_bytes as number) }}
+            </template>
+            <template v-else>unlimited output</template>
+          </span>
+        </template>
+        <template #cell-scopes="{ row }">
+          <UBadge variant="subtle" color="neutral" size="sm">
+            {{ (row.default_scopes as string[]).length }} scopes
+          </UBadge>
+        </template>
+        <template #cell-status="{ row }">
+          <StatusBadge
+            :status="(row.is_active as boolean) ? 'active' : 'inactive'"
+          />
+        </template>
+        <template #cell-updated_at="{ row }">
+          <span class="whitespace-nowrap text-sm text-(--ui-text-muted)">
+            {{ formatRelative(row.updated_at as string) }}
+          </span>
+        </template>
+        <template #cell-actions="{ row }">
+          <div class="flex justify-end gap-1">
+            <UButton
+              icon="i-lucide-pencil"
+              variant="ghost"
+              color="neutral"
+              size="sm"
+              aria-label="Edit application"
+              @click="startEdit(row as unknown as ApplicationResponse)"
+            />
+            <UButton
+              icon="i-lucide-key-round"
+              variant="ghost"
+              color="neutral"
+              size="sm"
+              aria-label="Application tokens"
+              @click="openTokenDrawer(row as unknown as ApplicationResponse)"
+            />
+          </div>
+        </template>
+      </DataTable>
+    </section>
+
+    <!-- Application drawer -->
+    <UDrawer v-model:open="drawerOpen" title="Application">
+      <template #body>
+        <form v-if="editing" class="space-y-6" @submit.prevent="save">
+          <div class="space-y-4">
+            <div
+              class="text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
+            >
+              General
+            </div>
+            <UFormField label="Name">
+              <UInput v-model="editing.name" placeholder="e.g. code-agent" />
+            </UFormField>
+            <UFormField
+              label="Workspace template"
+              hint="Optional template directory copied into new workspaces"
+            >
+              <UInput
+                v-model="editing.workspace_template"
+                placeholder="e.g. web-app-template"
+              />
+            </UFormField>
+            <UFormField label="Default shell">
+              <UInput v-model="editing.default_shell" placeholder="/bin/bash" />
+            </UFormField>
+            <UFormField label="Scopes">
+              <UCheckboxGroup
+                v-model="editing.default_scopes"
+                :items="[...AVAILABLE_SCOPES]"
+                orientation="horizontal"
+              />
+            </UFormField>
+          </div>
+
+          <div class="space-y-4">
+            <div
+              class="text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
+            >
+              Resource limits
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <UFormField label="Max timeout (ms)">
+                <UInput
+                  v-model="editing.max_timeout_ms"
+                  type="number"
+                  min="0"
+                  placeholder="Unlimited"
+                />
+              </UFormField>
+              <UFormField label="Max output (bytes)">
+                <UInput
+                  v-model="editing.max_output_bytes"
+                  type="number"
+                  min="0"
+                  placeholder="Unlimited"
+                />
+              </UFormField>
+              <UFormField label="Max file (bytes)">
+                <UInput
+                  v-model="editing.max_file_bytes"
+                  type="number"
+                  min="0"
+                  placeholder="Unlimited"
+                />
+              </UFormField>
+              <UFormField label="Max sessions">
+                <UInput
+                  v-model="editing.max_sessions"
+                  type="number"
+                  min="0"
+                  placeholder="Unlimited"
+                />
+              </UFormField>
+            </div>
+            <div
+              class="flex items-center justify-between rounded-lg border border-(--ui-border) p-3"
+            >
+              <div>
+                <div class="text-sm font-medium text-(--ui-text-highlighted)">
+                  Network access
+                </div>
+                <div class="text-xs text-(--ui-text-muted)">
+                  Allow outbound network for sessions
+                </div>
+              </div>
+              <USwitch v-model="editing.network_enabled" />
+            </div>
+            <div
+              v-if="editing.application_id !== 0"
+              class="flex items-center justify-between rounded-lg border border-(--ui-border) p-3"
+            >
+              <div>
+                <div class="text-sm font-medium text-(--ui-text-highlighted)">
+                  Active
+                </div>
+                <div class="text-xs text-(--ui-text-muted)">
+                  Inactive applications cannot authenticate
+                </div>
+              </div>
+              <USwitch v-model="editing.is_active" />
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <div
+              class="text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
+            >
+              Approval reviewer
+            </div>
+            <UFormField label="Mode">
+              <USelect
+                v-model="editing.approval_mode"
+                :items="
+                  APPROVAL_MODES as unknown as {
+                    label: string
+                    value: string
+                  }[]
+                "
+                class="w-full"
+              />
+            </UFormField>
+            <template v-if="editing.approval_mode === 'enabled'">
+              <UFormField label="Responses API base URL">
+                <UInput
+                  v-model="editing.approval_endpoint"
+                  placeholder="https://api.openai.com/v1"
+                />
+              </UFormField>
+              <UFormField label="Model">
+                <UInput
+                  v-model="editing.approval_model"
+                  placeholder="Reviewer model"
+                />
+              </UFormField>
+            </template>
+          </div>
+
+          <UAlert
+            v-if="formError"
+            :title="formError"
+            color="error"
+            variant="subtle"
+          />
+        </form>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton
+            variant="outline"
+            color="neutral"
+            @click="
+              () => {
+                drawerOpen = false
+              }
+            "
+          >
+            Cancel
+          </UButton>
+          <UButton :loading="saving" @click="save">
+            {{
+              editing?.application_id === 0
+                ? 'Create application'
+                : 'Save changes'
+            }}
+          </UButton>
+        </div>
+      </template>
+    </UDrawer>
+
+    <!-- Tokens drawer -->
+    <UDrawer v-model:open="tokenDrawerOpen" title="Application tokens">
+      <template #body>
+        <div class="space-y-6">
+          <div
+            v-if="tokenOwner"
+            class="flex items-center gap-3 rounded-lg border border-(--ui-border) p-3"
+          >
+            <div
+              class="flex size-8 items-center justify-center rounded-md bg-(--ui-bg-elevated) text-(--ui-text-muted)"
+            >
+              <UIcon name="i-lucide-app-window" class="size-4" />
+            </div>
+            <div>
+              <div class="text-sm font-medium text-(--ui-text-highlighted)">
+                {{ tokenOwner.name }}
+              </div>
+              <div class="font-mono text-xs text-(--ui-text-muted)">
+                #{{ tokenOwner.application_id }}
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-4 rounded-lg border border-(--ui-border) p-4">
+            <div class="text-sm font-semibold text-(--ui-text-highlighted)">
+              Create a token
+            </div>
+            <UFormField label="Token name">
+              <UInput
+                v-model="tokenName"
+                placeholder="e.g. ci-agent"
+                @keyup.enter="createToken"
+              />
+            </UFormField>
+            <UFormField label="Scopes">
+              <UCheckboxGroup
+                v-model="tokenScopes"
+                :items="[...AVAILABLE_SCOPES]"
+                orientation="horizontal"
+              />
+            </UFormField>
+            <UFormField label="Expires at" hint="Optional">
+              <UInput v-model="tokenExpiresAt" type="datetime-local" />
+            </UFormField>
+            <UButton
+              block
+              icon="i-lucide-plus"
+              :loading="creatingToken"
+              :disabled="!tokenName.trim()"
+              @click="createToken"
+            >
+              Create token
+            </UButton>
+          </div>
+
+          <UAlert
+            v-if="revealedToken"
+            title="Copy this token now"
+            description="The full token is shown only once and cannot be retrieved later."
+            color="warning"
+            variant="subtle"
+          >
+            <template #actions>
+              <TokenReveal :token="revealedToken.token" />
+            </template>
+          </UAlert>
+
+          <div>
+            <div
+              class="mb-2 text-sm font-semibold text-(--ui-text-highlighted)"
+            >
+              Active tokens
+            </div>
+            <div v-if="visibleTokens.length" class="space-y-2">
+              <div
+                v-for="token in visibleTokens"
+                :key="token.token_id"
+                class="flex items-center justify-between gap-3 rounded-lg border border-(--ui-border) px-3 py-2.5"
+              >
+                <div class="min-w-0">
+                  <div
+                    class="truncate text-sm font-medium text-(--ui-text-highlighted)"
+                  >
+                    {{ token.token_name }}
+                  </div>
+                  <div class="mt-0.5 text-xs text-(--ui-text-muted)">
+                    Created {{ formatDateTime(token.created_at) }}
+                    <template v-if="token.expires_at">
+                      · expires {{ formatDateTime(token.expires_at) }}
+                    </template>
+                  </div>
+                  <div class="text-xs text-(--ui-text-dimmed)">
+                    {{ token.scopes.join(', ') || 'no scopes' }}
+                  </div>
+                </div>
+                <UButton
+                  icon="i-lucide-trash-2"
+                  variant="ghost"
+                  color="error"
+                  size="sm"
+                  :aria-label="`Revoke ${token.token_name}`"
+                  @click="
+                    () => {
+                      revokeTarget = token
+                    }
+                  "
+                />
+              </div>
+            </div>
+            <p v-else class="text-sm text-(--ui-text-muted)">
+              No tokens for this application yet.
+            </p>
+          </div>
+        </div>
+      </template>
+    </UDrawer>
+
+    <!-- Revoke token confirm -->
+    <ConfirmModal
+      v-model:open="revokeModalOpen"
+      title="Revoke token"
+      :description="
+        revokeTarget
+          ? `Clients using ${revokeTarget.token_name} will lose access immediately.`
+          : undefined
+      "
+      confirm-label="Revoke"
+      confirm-color="error"
+      :loading="revoking"
+      @confirm="confirmRevokeToken"
+    />
+  </div>
 </template>

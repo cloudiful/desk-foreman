@@ -1,24 +1,25 @@
 <script setup lang="ts">
-import Button from 'primevue/button'
-import Card from 'primevue/card'
-import InputText from 'primevue/inputtext'
-import Password from 'primevue/password'
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { authState } from '../api/auth'
 
 const router = useRouter()
+
 const loginName = ref('admin')
 const password = ref('')
 const loading = ref(false)
 const error = ref('')
 
 async function submit(): Promise<void> {
+  if (!loginName.value.trim() || !password.value) {
+    error.value = 'Enter your login name and password'
+    return
+  }
   loading.value = true
   error.value = ''
   try {
     await authState.loginWithPassword({
-      login_name: loginName.value,
+      login_name: loginName.value.trim(),
       password: password.value,
     })
     await router.push('/')
@@ -31,43 +32,72 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <div class="flex min-h-screen items-center justify-center px-4">
-    <Card class="app-shell-panel w-full max-w-md rounded-[2rem]">
-      <template #title>
-        <div class="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">
-          Desk Foreman
+  <div
+    class="flex min-h-screen items-center justify-center bg-(--ui-bg-muted) px-4"
+  >
+    <div class="w-full max-w-sm">
+      <div class="mb-8 flex flex-col items-center gap-3">
+        <div
+          class="flex size-12 items-center justify-center rounded-xl bg-(--ui-primary) text-white shadow-lg shadow-(--ui-primary)/20"
+        >
+          <UIcon name="i-lucide-hammer" class="size-6" />
         </div>
-        <div class="mt-2 text-3xl font-semibold">Sign in</div>
-      </template>
-      <template #content>
-        <form class="space-y-4" @submit.prevent="submit">
-          <div class="space-y-2">
-            <label class="block text-sm font-medium">Login name</label>
-            <InputText
-              v-model="loginName"
-              class="w-full"
-              autocomplete="username"
-            />
-          </div>
-          <div class="space-y-2">
-            <label class="block text-sm font-medium">Password</label>
-            <Password
-              v-model="password"
-              class="w-full"
-              fluid
-              :feedback="false"
-              toggle-mask
-            />
-          </div>
-          <p v-if="error" class="text-sm text-red-700">{{ error }}</p>
-          <Button
-            type="submit"
-            label="Login"
-            class="w-full"
-            :loading="loading"
+        <div class="text-center">
+          <h1
+            class="text-xl font-semibold tracking-tight text-(--ui-text-highlighted)"
+          >
+            Desk Foreman
+          </h1>
+          <p class="mt-1 text-sm text-(--ui-text-muted)">
+            Sign in to the control plane
+          </p>
+        </div>
+      </div>
+
+      <form
+        class="space-y-4 rounded-xl border border-(--ui-border) bg-(--ui-bg) p-6 shadow-sm"
+        @submit.prevent="submit"
+      >
+        <UFormField label="Login name">
+          <UInput
+            v-model="loginName"
+            name="login_name"
+            autocomplete="username"
+            size="lg"
+            placeholder="admin"
+            leading-icon="i-lucide-user"
           />
-        </form>
-      </template>
-    </Card>
+        </UFormField>
+        <UFormField label="Password">
+          <UInput
+            v-model="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            size="lg"
+            placeholder="••••••••"
+            leading-icon="i-lucide-lock"
+          />
+        </UFormField>
+
+        <UAlert
+          v-if="error"
+          :title="error"
+          color="error"
+          variant="subtle"
+          icon="i-lucide-circle-alert"
+        />
+
+        <UButton
+          type="submit"
+          size="lg"
+          block
+          :loading="loading"
+          leading-icon="i-lucide-log-in"
+        >
+          Sign in
+        </UButton>
+      </form>
+    </div>
   </div>
 </template>

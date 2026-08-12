@@ -102,7 +102,7 @@ Desk Foreman can optionally review side-effecting operations with an OpenAI Resp
 
 ## Frontend
 
-- `frontend/` is a Vue 3 + PrimeVue + Tailwind admin SPA
+- `frontend/` is a Vue 3 + Nuxt UI + Tailwind CSS admin SPA (dark mode by default)
 - Rust exports `openapi.json` and the frontend consumes generated OpenAPI SDK stubs
 - `frontend` scripts use `bun` by default
 - `bun.lock` is intentionally not committed; CI resolves frontend deps at build time
