@@ -2,9 +2,9 @@
 
 Workspace-scoped MCP service for managed Desk Foreman workspaces. It exposes a shell-first coding surface with standard `shell`, `write_stdin`, `cancel_session`, `read`, `glob`, `grep`, and `apply_patch` tools, plus a PostgreSQL-backed multi-user admin console. Each MCP token is bound to one user, and every user runs inside an isolated workspace rooted under `WORKSPACE_ROOT`.
 
-The repository is now a Cargo workspace. The root crate is still `desk-foreman`, and `crates/runner-manager` has been split out as a separate crate for the future runner-control plane.
+The repository is a Cargo workspace. The root crate is `desk-foreman`, and `crates/runner-manager` is the local pull-based execution agent.
 
-The current main service no longer assumes in-process runner orchestration. It calls a runner-manager service over HTTP through `RUNNER_MANAGER_URL` plus `RUNNER_MANAGER_TOKEN`.
+The main service is the runner control plane. Runner managers connect to it with a pull-based protocol, fetch jobs, and execute them in local Docker workspace runners.
 
 ## Workspace SDK
 
@@ -42,6 +42,7 @@ Desk Foreman can optionally review side-effecting operations with an OpenAI Resp
 
 - `POST /mcp`
 - `POST /api/auth/login`
+- `POST /api/auth/change-password`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
 - `GET /api/admin/users`
@@ -60,6 +61,8 @@ Desk Foreman can optionally review side-effecting operations with an OpenAI Resp
 - `GET /api/admin/runner-sessions`
 - `GET /api/admin/operations/summary`
 - `GET|PATCH /api/admin/approval-settings`
+- `GET|POST /api/admin/runner-managers`
+- `PATCH /api/admin/runner-managers/{runner_manager_id}`
 - `POST /api/admin/workspace-bindings/{binding_id}/archive|restore|reset`
 - `POST|DELETE /api/admin/workspace-bindings/{binding_id}/lease` (admin, web session)
 - `POST|DELETE /api/internal/workspace-bindings/{binding_id}/lease` (application bearer token)
@@ -74,30 +77,16 @@ Desk Foreman can optionally review side-effecting operations with an OpenAI Resp
 - `DATABASE_URL` required
 - `WORKSPACE_ROOT` default `/workspace`, used as the base directory for per-user workspaces such as `/workspace/users/<user_id>`
 - `DEFAULT_SHELL` default `bash`
-- `RUNNER_MANAGER_URL` default `http://127.0.0.1:3001`
-- `RUNNER_MANAGER_TOKEN` required, shared auth token for `desk-foreman` <-> `runner-manager`
-- `RUNNER_MANAGER_BIND_ADDR` default `0.0.0.0:3001`, used by the `runner-manager` process
-- `RUNNER_HOST_WORKSPACE_ROOT` optional for `runner-manager`, required when manager runs in a container and must create Docker bind mounts using host paths
-- `RUNNER_BACKEND` `docker` or `direct`, default `docker`, used by `runner-manager`
-- `RUNNER_IMAGE` default `desk-foreman-workspace-runner:local`, used by `runner-manager`
-- `RUNNER_WORKDIR` default `/workspace`, used by `runner-manager`
-- `RUNNER_NETWORK_ENABLED` default `false`, used by `runner-manager`; enable only for an explicitly approved runner
-- `RUNNER_MAX_OUTPUT_BYTES` default `262144`, used by `runner-manager`
-- `RUNNER_MAX_SESSIONS` default `32`, used by `runner-manager`
-- `RUNNER_PIDS_LIMIT` default `256`, used by Docker runners
-- `RUNNER_MEMORY_LIMIT` default `1g`, used by Docker runners
-- `RUNNER_CPU_LIMIT` default `2`, used by Docker runners
-- `RUNNER_ALLOW_DIRECT` must be `true` to use the development-only `direct` backend
-- `RUNNER_IDLE_TTL_SEC` default `1800`, used by `runner-manager`
-- `DOCKER_CLI` default `docker`, used by `runner-manager`
-- `DOCKER_HOST` optional Docker endpoint override for `runner-manager`
-- `RUNNER_RUNTIME_CLASS` optional Docker runtime name such as `runsc` for future gVisor rollout
+- `DESK_FOREMAN_URL` required by `runner-manager`, for example `http://desk-foreman:3000`
+- `RUNNER_MANAGER_TOKEN` required by `runner-manager`; create or register it from the admin Runner managers page
+- `RUNNER_HOST_WORKSPACE_ROOT` required by a containerized Docker runner-manager, and must be the host path corresponding to its `/workspace` mount
+- Runner image, network access, resource limits, and enabled state are managed from the admin Runner managers page
 - `SESSION_IDLE_TTL_SEC` default `1800`
 - `WEB_SESSION_TTL_SEC` default `604800`
 - `WEB_COOKIE_NAME` default `desk_foreman_session`
 - `WEB_COOKIE_SECURE` default `false`
-- `BOOTSTRAP_ADMIN_LOGIN` optional
-- `BOOTSTRAP_ADMIN_PASSWORD` optional
+- `BOOTSTRAP_ADMIN_LOGIN` default `admin`
+- `BOOTSTRAP_ADMIN_PASSWORD` default `admin`; the first login must change it
 - `BOOTSTRAP_ADMIN_DISPLAY_NAME` optional
 - `BOOTSTRAP_ADMIN_EMAIL` optional
 - `BOOTSTRAP_ADMIN_TIMEZONE` default `UTC`
@@ -124,18 +113,13 @@ Desk Foreman can optionally review side-effecting operations with an OpenAI Resp
 
 ```bash
 DATABASE_URL=postgres://desk_foreman:change-me-local-only@127.0.0.1:5432/desk_foreman \
-RUNNER_MANAGER_TOKEN=change-me-runner-token-local-only \
-RUNNER_MANAGER_URL=http://127.0.0.1:3001 \
-BOOTSTRAP_ADMIN_LOGIN=admin \
-BOOTSTRAP_ADMIN_PASSWORD=change-me-admin-local-only \
 cargo run
 ```
 
 ```bash
-DATABASE_URL=postgres://desk_foreman:change-me-local-only@127.0.0.1:5432/desk_foreman \
-WORKSPACE_ROOT=/absolute/path/to/workspace-root \
+DESK_FOREMAN_URL=http://127.0.0.1:3000 \
+RUNNER_MANAGER_TOKEN=change-me-runner-manager-token-local-only \
 RUNNER_HOST_WORKSPACE_ROOT=/absolute/path/to/workspace-root \
-RUNNER_MANAGER_TOKEN=change-me-runner-token-local-only \
 cargo run -p desk-foreman-runner-manager
 ```
 
@@ -145,14 +129,14 @@ docker compose --profile build-only up --build
 
 Then log into the admin UI, create per-user MCP tokens there, and open `http://localhost:8080`.
 
-The Compose defaults are local-development placeholders. Set `POSTGRES_PASSWORD`, `DATABASE_URL`, `RUNNER_MANAGER_TOKEN`, and `BOOTSTRAP_ADMIN_PASSWORD` before exposing the service outside a local machine.
+The Compose defaults are local-development placeholders. Set `POSTGRES_PASSWORD`, `DATABASE_URL`, and the runner manager connection variables before exposing the service outside a local machine.
 
 ## Runner Split
 
-- `desk-foreman`: MCP, HTTP API, auth, admin UI, audit, workspace binding, runner client.
-- `runner-manager`: runner control plane crate responsible for shell execution backends and workspace-runner lifecycle.
+- `desk-foreman`: MCP, HTTP API, auth, admin UI, audit, workspace binding, runner job broker, and runner configuration.
+- `runner-manager`: pull-based runner agent responsible for local shell execution and workspace-runner lifecycle.
 - `workspace-runner`: per-workspace execution runtime image.
 
-Current compose deployment keeps `/var/run/docker.sock` only on `runner-manager`. `desk-foreman` talks to it over HTTP and no longer needs direct Docker access.
+Current compose deployment keeps `/var/run/docker.sock` only on `runner-manager`. Runner managers pull jobs from desk-foreman and no longer require PostgreSQL access.
 
 `runner-manager` now has direct-backend HTTP integration tests covering `exec-shell`, `write-stdin`, `run-command`, and bearer-auth enforcement. Run them with `cargo test -p desk-foreman-runner-manager`.

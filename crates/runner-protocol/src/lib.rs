@@ -1,6 +1,11 @@
 use std::path::PathBuf;
 
+use serde_json::Value;
 use utoipa::ToSchema;
+
+pub const RUNNER_JOB_TIMEOUT_SECS: u64 = 3_660;
+pub const RUNNER_JOB_POLL_TIMEOUT_SECS: u64 = 10;
+pub const RUNNER_MANAGER_HEARTBEAT_TTL_SECS: u64 = 30;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum RunnerOwner {
@@ -146,4 +151,19 @@ pub struct ShellToolOutput {
     pub stdout_bytes: usize,
     pub stderr_bytes: usize,
     pub timed_out: bool,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, ToSchema)]
+pub struct RunnerJob {
+    pub job_id: String,
+    pub kind: String,
+    pub payload: Value,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, ToSchema)]
+pub struct RunnerJobResult {
+    pub job_id: String,
+    pub ok: bool,
+    pub result: Option<Value>,
+    pub error: Option<String>,
 }

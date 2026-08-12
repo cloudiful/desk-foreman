@@ -2,6 +2,7 @@ mod backend;
 mod direct;
 mod docker;
 mod local_service;
+pub(crate) mod session_gate;
 mod shell_manager;
 mod shell_session;
 mod shell_spawn;

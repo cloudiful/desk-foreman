@@ -136,6 +136,19 @@ pub async fn reset_user_password(
     Ok(result.rows_affected() > 0)
 }
 
+pub async fn change_password(
+    pool: &PgPool,
+    user_id: i64,
+    password_hash: &str,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query(include_str!("../sql/change_password.sql"))
+        .bind(user_id)
+        .bind(password_hash)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn deactivate_user(pool: &PgPool, user_id: i64) -> anyhow::Result<bool> {
     let result = sqlx::query(include_str!("../sql/deactivate_user.sql"))
         .bind(user_id)

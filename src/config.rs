@@ -9,12 +9,6 @@ use anyhow::{Context, bail};
 use crate::policy::{ALL_SCOPES, ResourceLimits};
 
 #[derive(Clone, Debug)]
-pub struct RunnerClientConfig {
-    pub base_url: String,
-    pub auth_token: String,
-}
-
-#[derive(Clone, Debug)]
 pub struct AppConfig {
     pub bind_addr: String,
     pub workspace_root: PathBuf,
@@ -24,7 +18,6 @@ pub struct AppConfig {
     pub server_scopes: Vec<String>,
     pub server_limits: ResourceLimits,
     pub workspace_retention: Duration,
-    pub runner_client: RunnerClientConfig,
     pub database_url: String,
     pub web_session_ttl: Duration,
     pub web_cookie_name: String,
@@ -93,12 +86,6 @@ impl AppConfig {
                 .unwrap_or(30)
                 .saturating_mul(86_400),
         );
-        let runner_client = RunnerClientConfig {
-            base_url: env::var("RUNNER_MANAGER_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:3001".to_string()),
-            auth_token: env::var("RUNNER_MANAGER_TOKEN")
-                .context("RUNNER_MANAGER_TOKEN is required for runner client")?,
-        };
         let database_url =
             env::var("DATABASE_URL").context("DATABASE_URL is required for web/admin features")?;
         let web_session_ttl = Duration::from_secs(
@@ -129,13 +116,16 @@ impl AppConfig {
             server_scopes,
             server_limits,
             workspace_retention,
-            runner_client,
             database_url,
             web_session_ttl,
             web_cookie_name,
             web_cookie_secure,
-            bootstrap_admin_login: env::var("BOOTSTRAP_ADMIN_LOGIN").ok(),
-            bootstrap_admin_password: env::var("BOOTSTRAP_ADMIN_PASSWORD").ok(),
+            bootstrap_admin_login: Some(
+                env::var("BOOTSTRAP_ADMIN_LOGIN").unwrap_or_else(|_| "admin".to_string()),
+            ),
+            bootstrap_admin_password: Some(
+                env::var("BOOTSTRAP_ADMIN_PASSWORD").unwrap_or_else(|_| "admin".to_string()),
+            ),
             bootstrap_admin_display_name: env::var("BOOTSTRAP_ADMIN_DISPLAY_NAME").ok(),
             bootstrap_admin_email: env::var("BOOTSTRAP_ADMIN_EMAIL").ok(),
             bootstrap_admin_timezone,

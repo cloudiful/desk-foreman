@@ -211,6 +211,7 @@ mod tests {
             workspace_root,
             is_admin: false,
             is_active: true,
+            must_change_password: false,
             deleted_at: None,
             last_login_at: None,
             created_at: Utc::now(),

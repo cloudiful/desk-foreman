@@ -24,6 +24,9 @@ import {
   resetUserPassword,
   updateApplication,
   updateApprovalSettings,
+  listRunnerManagers,
+  createRunnerManager,
+  updateRunnerManager,
   updateUser,
   type ApplicationResponse,
   type ApplicationTokenResponse,
@@ -50,6 +53,10 @@ import {
   type UpdateApplicationTokenRequest,
   type UpdateMcpTokenRequest,
   type UpdateApprovalSettingsRequest,
+  type RunnerManagerResponse,
+  type CreateRunnerManagerRequest,
+  type CreateRunnerManagerResponse,
+  type UpdateRunnerManagerRequest,
 } from './generated'
 import { requireOk } from './http'
 
@@ -64,6 +71,36 @@ export async function listAdminUsers(query: {
   return (
     data ?? { items: [], total: 0, limit: query.limit, offset: query.offset }
   )
+}
+
+export async function listAdminRunnerManagers(): Promise<
+  RunnerManagerResponse[]
+> {
+  const { data, response } = await listRunnerManagers()
+  await requireOk(response, 'Failed to load runner managers')
+  return data ?? []
+}
+
+export async function createAdminRunnerManager(
+  body: CreateRunnerManagerRequest,
+): Promise<CreateRunnerManagerResponse> {
+  const { data, response } = await createRunnerManager({ body })
+  await requireOk(response, 'Failed to create runner manager')
+  if (!data) throw new Error('Failed to create runner manager')
+  return data
+}
+
+export async function updateAdminRunnerManager(
+  runner_manager_id: number,
+  body: UpdateRunnerManagerRequest,
+): Promise<RunnerManagerResponse> {
+  const { data, response } = await updateRunnerManager({
+    path: { runner_manager_id },
+    body,
+  })
+  await requireOk(response, 'Failed to update runner manager')
+  if (!data) throw new Error('Failed to update runner manager')
+  return data
 }
 
 export async function createAdminUser(

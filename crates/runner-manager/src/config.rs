@@ -1,10 +1,12 @@
 use std::{
     env,
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 
 use anyhow::{Context, bail};
+use tokio::sync::RwLock;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RunnerBackendKind {
@@ -24,12 +26,12 @@ impl RunnerBackendKind {
 
 #[derive(Clone, Debug)]
 pub struct RunnerManagerConfig {
+    pub control_plane_url: Option<String>,
     pub bind_addr: String,
     pub auth_token: String,
     pub backend: RunnerBackendKind,
     pub workspace_root: PathBuf,
     pub host_workspace_root: PathBuf,
-    pub database_url: Option<String>,
     pub image: String,
     pub workdir: String,
     pub network_enabled: bool,
@@ -45,6 +47,8 @@ pub struct RunnerManagerConfig {
     pub runtime_class: Option<String>,
 }
 
+pub type SharedRunnerManagerConfig = Arc<RwLock<RunnerManagerConfig>>;
+
 impl RunnerManagerConfig {
     pub fn from_env() -> anyhow::Result<Self> {
         let workspace_root = workspace_root_from_env("WORKSPACE_ROOT")?;
@@ -58,6 +62,9 @@ impl RunnerManagerConfig {
             bail!("RUNNER_BACKEND=direct requires RUNNER_ALLOW_DIRECT=true");
         }
         Ok(Self {
+            control_plane_url: env::var("DESK_FOREMAN_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
             bind_addr: env::var("RUNNER_MANAGER_BIND_ADDR")
                 .unwrap_or_else(|_| "0.0.0.0:3001".to_string()),
             auth_token: env::var("RUNNER_MANAGER_TOKEN")
@@ -65,7 +72,6 @@ impl RunnerManagerConfig {
             backend,
             workspace_root,
             host_workspace_root,
-            database_url: env::var("DATABASE_URL").ok(),
             image: env::var("RUNNER_IMAGE")
                 .unwrap_or_else(|_| "desk-foreman-workspace-runner:local".to_string()),
             workdir: env::var("RUNNER_WORKDIR").unwrap_or_else(|_| "/workspace".to_string()),
@@ -104,6 +110,59 @@ impl RunnerManagerConfig {
                 .ok()
                 .filter(|value| !value.trim().is_empty()),
         })
+    }
+
+    pub async fn load_control_plane_config(&mut self) -> anyhow::Result<bool> {
+        let Some(base_url) = self.control_plane_url.clone() else {
+            return Ok(false);
+        };
+        let url = format!(
+            "{}/api/internal/runner-manager/config",
+            base_url.trim_end_matches('/')
+        );
+        let response = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(15))
+            .build()
+            .context("failed to build runner manager config client")?
+            .get(&url)
+            .bearer_auth(&self.auth_token)
+            .send()
+            .await
+            .with_context(|| format!("failed to fetch runner manager config from {url}"))?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            tracing::warn!(
+                status = %response.status(),
+                "desk-foreman has no runner manager config yet; using local defaults"
+            );
+            return Ok(false);
+        }
+        if !response.status().is_success() {
+            anyhow::bail!(
+                "desk-foreman rejected runner manager config request with status {}",
+                response.status()
+            );
+        }
+        let config: desk_foreman::db::types::RunnerManagerResponse = response
+            .json()
+            .await
+            .context("failed to decode runner manager config")?;
+        if !config.enabled {
+            bail!("runner manager is disabled in desk-foreman");
+        }
+        self.image = config.image;
+        self.network_enabled = config.network_enabled;
+        self.max_output_bytes = usize::try_from(config.max_output_bytes)
+            .context("runner manager max_output_bytes is out of range")?;
+        self.max_timeout_ms = u64::try_from(config.max_timeout_ms)
+            .context("runner manager max_timeout_ms is out of range")?;
+        self.max_sessions = usize::try_from(config.max_sessions)
+            .context("runner manager max_sessions is out of range")?;
+        self.pids_limit = u64::try_from(config.pids_limit)
+            .context("runner manager pids_limit is out of range")?;
+        self.memory_limit = config.memory_limit;
+        self.cpu_limit = config.cpu_limit;
+        Ok(true)
     }
 }
 

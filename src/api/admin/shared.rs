@@ -11,6 +11,13 @@ pub async fn require_admin(state: &AppState, jar: &CookieJar) -> Result<ActorCon
     if !actor.is_admin() {
         return Err(AppError::forbidden("admin access required"));
     }
+    if actor
+        .user
+        .as_ref()
+        .is_some_and(|user| user.must_change_password)
+    {
+        return Err(AppError::forbidden("password change required"));
+    }
     Ok(actor)
 }
 

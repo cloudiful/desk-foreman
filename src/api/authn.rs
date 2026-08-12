@@ -12,7 +12,7 @@ use crate::{
     db::{
         audit::AuditLogEntry,
         queries,
-        types::{AuthLoginRequest, AuthMeResponse},
+        types::{AuthLoginRequest, AuthMeResponse, ChangePasswordRequest},
     },
     error::AppError,
 };
@@ -78,16 +78,24 @@ pub(crate) async fn current_tool_actor(
 ) -> Result<crate::actor::ActorContext, AppError> {
     let cookie_actor = current_user_from_jar_with_touch(state, jar, true).await?;
     let bearer_actor = current_user_from_bearer(state, headers).await?;
-    match (cookie_actor, bearer_actor) {
+    let actor = match (cookie_actor, bearer_actor) {
         (Some((_, cookie_actor)), Some(bearer_actor)) => {
             if cookie_actor.principal_id != bearer_actor.principal_id {
                 return Err(AppError::unauthorized("conflicting authentication"));
             }
-            Ok(cookie_actor)
+            cookie_actor
         }
-        (Some((_, actor)), None) | (None, Some(actor)) => Ok(actor),
-        (None, None) => Err(AppError::unauthorized("not authenticated")),
+        (Some((_, actor)), None) | (None, Some(actor)) => actor,
+        (None, None) => return Err(AppError::unauthorized("not authenticated")),
+    };
+    if actor
+        .user
+        .as_ref()
+        .is_some_and(|user| user.must_change_password)
+    {
+        return Err(AppError::forbidden("password change required"));
     }
+    Ok(actor)
 }
 
 #[utoipa::path(
@@ -228,4 +236,33 @@ pub async fn me(
             .ok_or_else(|| AppError::unauthorized("not authenticated"))?
             .into(),
     }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/auth/change-password",
+    tag = "auth",
+    request_body = ChangePasswordRequest,
+    responses((status = 204), (status = 400, body = crate::error::ErrorResponse))
+)]
+pub async fn change_password(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    ValidatedJson(request): ValidatedJson<ChangePasswordRequest>,
+) -> Result<StatusCode, AppError> {
+    let Some((_, actor)) = current_user_from_jar(&state, &jar).await? else {
+        return Err(AppError::unauthorized("not authenticated"));
+    };
+    let user = actor
+        .user
+        .as_ref()
+        .ok_or_else(|| AppError::unauthorized("not authenticated"))?;
+    if !auth::verify_password(&request.current_password, &user.password_hash)? {
+        return Err(AppError::unauthorized("invalid current password"));
+    }
+    let password_hash = auth::hash_password(&request.new_password)?;
+    if !queries::change_password(&state.db, user.user_id, &password_hash).await? {
+        return Err(AppError::not_found("user not found"));
+    }
+    Ok(StatusCode::NO_CONTENT)
 }

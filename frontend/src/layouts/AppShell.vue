@@ -17,6 +17,7 @@ const items = computed(() => [
         { path: '/admin/audit', label: 'Audit' },
         { path: '/admin/operations', label: 'Operations' },
         { path: '/admin/approval', label: 'Approval' },
+        { path: '/admin/runner-managers', label: 'Runner managers' },
       ]
     : []),
 ])

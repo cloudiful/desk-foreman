@@ -1,0 +1,31 @@
+INSERT INTO runner_managers (
+    name,
+    endpoint,
+    access_token_hash,
+    image,
+    network_enabled,
+    max_output_bytes,
+    max_timeout_ms,
+    max_sessions,
+    pids_limit,
+    memory_limit,
+    cpu_limit
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING
+    runner_manager_id,
+    name,
+    endpoint,
+    enabled,
+    image,
+    network_enabled,
+    max_output_bytes,
+    max_timeout_ms,
+    max_sessions,
+    pids_limit,
+    memory_limit,
+    cpu_limit,
+    status,
+    last_seen_at,
+    created_at,
+    updated_at;

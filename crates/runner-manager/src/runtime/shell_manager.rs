@@ -14,20 +14,20 @@ use runner_protocol::{
     CancelSessionRequest, ExecRequest, InputRequest, RunnerOwner, RunnerSessionStatus,
     RunnerShellRequest, ShellToolOutput,
 };
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 use super::{
     RunnerBackend,
+    session_gate::{SessionGate, SessionPermit},
     shell_session::ShellSession,
     shell_spawn::{build_command, build_pty_command, open_pty},
 };
 
 pub struct ShellManager {
     runner: Arc<dyn RunnerBackend>,
-    session_idle_ttl: Duration,
-    max_output_bytes: usize,
-    session_slots: Arc<Semaphore>,
+    config: crate::config::SharedRunnerManagerConfig,
+    session_gate: Arc<SessionGate>,
     next_session_id: AtomicU64,
     sessions: Mutex<HashMap<u64, Arc<ManagedSession>>>,
 }
@@ -35,15 +35,12 @@ pub struct ShellManager {
 impl ShellManager {
     pub fn new(
         runner: Arc<dyn RunnerBackend>,
-        session_idle_ttl: Duration,
-        max_output_bytes: usize,
-        max_sessions: usize,
+        config: crate::config::SharedRunnerManagerConfig,
     ) -> Self {
         Self {
             runner,
-            session_idle_ttl,
-            max_output_bytes,
-            session_slots: Arc::new(Semaphore::new(max_sessions.max(1))),
+            config,
+            session_gate: SessionGate::new(),
             next_session_id: AtomicU64::new(1),
             sessions: Mutex::new(HashMap::new()),
         }
@@ -52,11 +49,8 @@ impl ShellManager {
     pub async fn exec(&self, request: ExecRequest) -> anyhow::Result<ShellToolOutput> {
         self.cleanup_expired_sessions().await;
 
-        let slot = self
-            .session_slots
-            .clone()
-            .try_acquire_owned()
-            .context("shell session limit reached")?;
+        let slot = self.session_gate.acquire(&self.config).await;
+        let config = self.config.read().await.clone();
 
         let working_dir = resolve_workspace_path(
             &request.workspace_root,
@@ -68,8 +62,9 @@ impl ShellManager {
             &*self.runner,
             &request,
             working_dir,
-            self.max_output_bytes
-                .min(request.max_output_bytes.unwrap_or(self.max_output_bytes)),
+            config
+                .max_output_bytes
+                .min(request.max_output_bytes.unwrap_or(config.max_output_bytes)),
         )
         .await?;
 
@@ -109,6 +104,10 @@ impl ShellManager {
 
     pub async fn write_stdin(&self, request: InputRequest) -> anyhow::Result<ShellToolOutput> {
         self.cleanup_expired_sessions().await;
+        let config = self.config.read().await.clone();
+        let max_output_bytes = config
+            .max_output_bytes
+            .min(request.max_output_bytes.unwrap_or(config.max_output_bytes));
         let session = {
             let sessions = self.sessions.lock().await;
             sessions
@@ -123,7 +122,7 @@ impl ShellManager {
             &request.chars,
             request.yield_time_ms,
             request.max_output_tokens,
-            request.max_output_bytes,
+            Some(max_output_bytes),
         );
         let output = if let Some(timeout_ms) = request.timeout_ms {
             match timeout(Duration::from_millis(timeout_ms), interact).await {
@@ -132,7 +131,7 @@ impl ShellManager {
                     session.session.kill_timed_out().await?;
                     session
                         .session
-                        .snapshot(request.max_output_tokens, request.max_output_bytes)
+                        .snapshot(request.max_output_tokens, Some(max_output_bytes))
                         .await
                 }
             }
@@ -176,6 +175,7 @@ impl ShellManager {
     }
 
     async fn cleanup_expired_sessions(&self) {
+        let session_idle_ttl = self.config.read().await.idle_ttl;
         let now = Instant::now();
         let snapshot = {
             let sessions = self.sessions.lock().await;
@@ -186,7 +186,7 @@ impl ShellManager {
         };
         let mut expired_ids = Vec::new();
         for (id, session) in snapshot {
-            if now.duration_since(session.session.last_activity().await) > self.session_idle_ttl {
+            if now.duration_since(session.session.last_activity().await) > session_idle_ttl {
                 expired_ids.push(id);
             }
         }
@@ -210,7 +210,7 @@ struct ManagedSession {
     owner: RunnerOwner,
     session_key: Option<String>,
     session: Arc<ShellSession>,
-    _slot: tokio::sync::OwnedSemaphorePermit,
+    _slot: SessionPermit,
 }
 
 impl ManagedSession {

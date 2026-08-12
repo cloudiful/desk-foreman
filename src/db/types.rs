@@ -20,6 +20,14 @@ pub struct AuthLoginRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
+pub struct ChangePasswordRequest {
+    #[validate(length(min = 1, message = "must not be empty"))]
+    pub current_password: String,
+    #[validate(length(min = 8, message = "must be at least 8 characters"))]
+    pub new_password: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
 pub struct CreateUserRequest {
     #[validate(custom(function = "validate_non_blank"))]
     pub login_name: String,
@@ -64,6 +72,7 @@ pub struct UserResponse {
     pub workspace_root: String,
     pub is_admin: bool,
     pub is_active: bool,
+    pub must_change_password: bool,
     pub last_login_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -93,6 +102,7 @@ pub struct UserRecord {
     pub workspace_root: Option<String>,
     pub is_admin: bool,
     pub is_active: bool,
+    pub must_change_password: bool,
     pub deleted_at: Option<DateTime<Utc>>,
     pub last_login_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -567,6 +577,7 @@ impl From<UserRecord> for UserResponse {
             workspace_root: value.workspace_root.unwrap_or_default(),
             is_admin: value.is_admin,
             is_active: value.is_active,
+            must_change_password: value.must_change_password,
             last_login_at: value.last_login_at,
             created_at: value.created_at,
             updated_at: value.updated_at,
@@ -622,6 +633,100 @@ pub struct RunnerSessionResponse {
     pub exit_code: Option<i32>,
     pub timed_out: bool,
     pub wall_time_seconds: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, FromRow)]
+pub struct RunnerManagerResponse {
+    pub runner_manager_id: i64,
+    pub name: String,
+    pub endpoint: String,
+    pub enabled: bool,
+    pub image: String,
+    pub network_enabled: bool,
+    pub max_output_bytes: i64,
+    pub max_timeout_ms: i64,
+    pub max_sessions: i64,
+    pub pids_limit: i64,
+    pub memory_limit: String,
+    pub cpu_limit: String,
+    pub status: String,
+    pub last_seen_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct CreateRunnerManagerResponse {
+    pub manager: RunnerManagerResponse,
+    pub token: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, FromRow)]
+pub struct RunnerManagerRecord {
+    pub runner_manager_id: i64,
+    pub name: String,
+    pub endpoint: String,
+    pub access_token_hash: String,
+    pub enabled: bool,
+    pub image: String,
+    pub network_enabled: bool,
+    pub max_output_bytes: i64,
+    pub max_timeout_ms: i64,
+    pub max_sessions: i64,
+    pub pids_limit: i64,
+    pub memory_limit: String,
+    pub cpu_limit: String,
+    pub status: String,
+    pub last_seen_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
+pub struct CreateRunnerManagerRequest {
+    #[validate(custom(function = "validate_non_blank"))]
+    pub name: String,
+    #[validate(url)]
+    pub endpoint: String,
+    #[serde(default)]
+    pub access_token: Option<String>,
+    #[validate(custom(function = "validate_non_blank"))]
+    pub image: String,
+    pub network_enabled: bool,
+    #[validate(range(min = 1, max = 16_777_216))]
+    pub max_output_bytes: i64,
+    #[validate(range(min = 1, max = 3_600_000))]
+    pub max_timeout_ms: i64,
+    #[validate(range(min = 1, max = 1024))]
+    pub max_sessions: i64,
+    #[validate(range(min = 1, max = 65_536))]
+    pub pids_limit: i64,
+    #[validate(custom(function = "validate_non_blank"))]
+    pub memory_limit: String,
+    #[validate(custom(function = "validate_non_blank"))]
+    pub cpu_limit: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
+pub struct UpdateRunnerManagerRequest {
+    #[validate(url)]
+    pub endpoint: String,
+    pub enabled: bool,
+    #[validate(custom(function = "validate_non_blank"))]
+    pub image: String,
+    pub network_enabled: bool,
+    #[validate(range(min = 1, max = 16_777_216))]
+    pub max_output_bytes: i64,
+    #[validate(range(min = 1, max = 3_600_000))]
+    pub max_timeout_ms: i64,
+    #[validate(range(min = 1, max = 1024))]
+    pub max_sessions: i64,
+    #[validate(range(min = 1, max = 65_536))]
+    pub pids_limit: i64,
+    #[validate(custom(function = "validate_non_blank"))]
+    pub memory_limit: String,
+    #[validate(custom(function = "validate_non_blank"))]
+    pub cpu_limit: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, FromRow)]

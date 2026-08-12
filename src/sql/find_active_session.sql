@@ -14,6 +14,7 @@ SELECT
     u.workspace_root,
     u.is_admin,
     u.is_active,
+    u.must_change_password,
     u.deleted_at,
     u.last_login_at,
     u.created_at,

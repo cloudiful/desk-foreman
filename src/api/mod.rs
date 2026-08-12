@@ -17,6 +17,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/auth/login", post(authn::login))
         .route("/api/auth/logout", post(authn::logout))
         .route("/api/auth/me", get(authn::me))
+        .route("/api/auth/change-password", post(authn::change_password))
         .route(
             "/api/admin/users",
             get(admin::list_users).post(admin::create_user),
@@ -95,6 +96,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/api/admin/approval-settings",
             get(admin::get_approval_settings).patch(admin::update_approval_settings),
+        )
+        .route(
+            "/api/admin/runner-managers",
+            get(admin::list_runner_managers).post(admin::create_runner_manager),
+        )
+        .route(
+            "/api/admin/runner-managers/{runner_manager_id}",
+            patch(admin::update_runner_manager),
         )
         .merge(internal::router())
         .merge(tools::router())

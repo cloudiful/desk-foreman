@@ -90,6 +90,7 @@ function startCreate(): void {
     workspace_root: '',
     is_admin: false,
     is_active: true,
+    must_change_password: false,
     last_login_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),

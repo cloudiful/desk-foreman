@@ -8,7 +8,7 @@ import { useRouter } from 'vue-router'
 import { authState } from '../api/auth'
 
 const router = useRouter()
-const loginName = ref('')
+const loginName = ref('admin')
 const password = ref('')
 const loading = ref(false)
 const error = ref('')

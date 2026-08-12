@@ -17,7 +17,7 @@ use validator::Validate;
 use crate::{
     AppState,
     actor::{ActorContext, ActorMode},
-    config::{AppConfig, RunnerClientConfig},
+    config::AppConfig,
     db::types::UserRecord,
     policy::{ALL_SCOPES, AccessPolicy, ResourceLimits},
     runner::{RunnerFuture, RunnerService},
@@ -223,10 +223,6 @@ fn app_state(root: PathBuf) -> AppState {
                 network_enabled: true,
             },
             workspace_retention: Duration::from_secs(30 * 86_400),
-            runner_client: RunnerClientConfig {
-                base_url: "http://127.0.0.1:3001".to_string(),
-                auth_token: "test-token".to_string(),
-            },
             database_url: "postgres://example.invalid/test".to_string(),
             web_session_ttl: Duration::from_secs(3600),
             web_cookie_name: "desk_foreman_session".to_string(),
@@ -240,6 +236,11 @@ fn app_state(root: PathBuf) -> AppState {
             build_started_at: SystemTime::now(),
         }),
         runner: FakeRunnerService::new() as Arc<dyn RunnerService>,
+        runner_broker: crate::runner::RunnerBroker::new(
+            PgPoolOptions::new()
+                .connect_lazy("postgres://example.invalid/test")
+                .expect("lazy pool"),
+        ),
         db: PgPoolOptions::new()
             .connect_lazy("postgres://example.invalid/test")
             .expect("lazy pool"),
@@ -283,6 +284,7 @@ fn test_actor(root: &Path, user_id: i64) -> ActorContext {
             workspace_root: Some(workspace_root.to_string_lossy().to_string()),
             is_admin: user_id == 1,
             is_active: true,
+            must_change_password: false,
             deleted_at: None,
             last_login_at: None,
             created_at: Utc::now(),

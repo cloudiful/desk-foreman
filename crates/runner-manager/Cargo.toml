@@ -6,14 +6,12 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
-chrono.workspace = true
 desk-foreman = { path = "../.." }
 runner-protocol.workspace = true
 pty-process.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

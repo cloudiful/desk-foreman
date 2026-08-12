@@ -4,6 +4,7 @@ import {
   login,
   logout,
   me,
+  changePassword,
   type AuthLoginRequest,
   type AuthMeResponse,
 } from './generated'
@@ -47,10 +48,22 @@ async function logoutCurrentUser(): Promise<void> {
   currentUser.value = null
 }
 
+async function changeCurrentPassword(
+  current_password: string,
+  new_password: string,
+): Promise<void> {
+  const { response } = await changePassword({
+    body: { current_password, new_password },
+  })
+  await requireOk(response, 'Failed to change password')
+  await initialize(true)
+}
+
 export const authState = {
   currentUser,
   initializing: computed(() => initializing.value),
   initialize,
   loginWithPassword,
   logoutCurrentUser,
+  changeCurrentPassword,
 }

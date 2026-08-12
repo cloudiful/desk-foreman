@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use anyhow::Context;
 use axum::{
     Json, Router,
     extract::State,
@@ -9,21 +8,20 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use desk_foreman::{db, error::ErrorResponse, runner::RunnerService};
+use desk_foreman::{error::ErrorResponse, runner::RunnerService};
 use runner_protocol::{
     CancelSessionRequest, CommandOutput, ExecRequest, InputRequest, RunnerCommandRequest,
     RunnerSessionStatus, ShellToolOutput,
 };
 
-use crate::config::{RunnerBackendKind, RunnerManagerConfig};
+use crate::config::{RunnerBackendKind, SharedRunnerManagerConfig};
 use crate::runtime::{DirectRunnerBackend, DockerRunnerBackend, LocalRunnerService, RunnerBackend};
 
 #[derive(Clone)]
 pub(crate) struct RunnerManagerState {
     pub(crate) auth_token: Arc<str>,
+    pub(crate) config: SharedRunnerManagerConfig,
     pub(crate) runner: Arc<dyn RunnerService>,
-    pub(crate) max_output_bytes: usize,
-    pub(crate) max_timeout_ms: u64,
 }
 
 pub(crate) fn build_app(state: RunnerManagerState) -> Router {
@@ -45,31 +43,17 @@ pub(crate) fn build_app(state: RunnerManagerState) -> Router {
 }
 
 pub(crate) async fn build_runner_service(
-    config: &RunnerManagerConfig,
+    config: SharedRunnerManagerConfig,
 ) -> anyhow::Result<Arc<dyn RunnerService>> {
-    let backend: Arc<dyn RunnerBackend> = match config.backend {
+    let initial = config.read().await.clone();
+    let backend: Arc<dyn RunnerBackend> = match initial.backend {
         RunnerBackendKind::Direct => DirectRunnerBackend::new() as Arc<dyn RunnerBackend>,
         RunnerBackendKind::Docker => {
-            let database_url = config
-                .database_url
-                .as_deref()
-                .context("DATABASE_URL is required when RUNNER_BACKEND=docker")?;
-            let pool = sqlx::postgres::PgPoolOptions::new()
-                .max_connections(5)
-                .connect(database_url)
-                .await
-                .context("failed to connect runner-manager to postgres")?;
-            db::migrate(&pool).await?;
-            DockerRunnerBackend::new(pool, config.clone()) as Arc<dyn RunnerBackend>
+            DockerRunnerBackend::new(Arc::clone(&config)) as Arc<dyn RunnerBackend>
         }
     };
 
-    let service = LocalRunnerService::new(
-        backend,
-        config.idle_ttl,
-        config.max_output_bytes,
-        config.max_sessions,
-    );
+    let service = LocalRunnerService::new(backend, config);
     service.reconcile().await?;
     Ok(service as Arc<dyn RunnerService>)
 }
@@ -80,22 +64,32 @@ async fn healthz() -> &'static str {
 
 async fn exec_shell(
     State(state): State<RunnerManagerState>,
-    Json(request): Json<ExecRequest>,
+    Json(mut request): Json<ExecRequest>,
 ) -> Result<Json<ShellToolOutput>, AppError> {
-    validate_limits(request.timeout_ms, request.max_output_bytes, &state)?;
+    let check_timeout = request.timeout_ms;
+    apply_limits(
+        &mut request.timeout_ms,
+        &mut request.max_output_bytes,
+        check_timeout,
+        &state,
+    )
+    .await?;
     let output = state.runner.exec_shell(request).await?;
     Ok(Json(output))
 }
 
 async fn write_stdin(
     State(state): State<RunnerManagerState>,
-    Json(request): Json<InputRequest>,
+    Json(mut request): Json<InputRequest>,
 ) -> Result<Json<ShellToolOutput>, AppError> {
-    validate_limits(
-        request.timeout_ms.or(request.yield_time_ms),
-        request.max_output_bytes,
+    let check_timeout = request.timeout_ms.or(request.yield_time_ms);
+    apply_limits(
+        &mut request.timeout_ms,
+        &mut request.max_output_bytes,
+        check_timeout,
         &state,
-    )?;
+    )
+    .await?;
     let output = state.runner.write_stdin(request).await?;
     Ok(Json(output))
 }
@@ -116,28 +110,47 @@ async fn list_sessions(
 
 async fn run_command(
     State(state): State<RunnerManagerState>,
-    Json(request): Json<RunnerCommandRequest>,
+    Json(mut request): Json<RunnerCommandRequest>,
 ) -> Result<Json<CommandOutput>, AppError> {
-    validate_limits(request.timeout_ms, request.max_output_bytes, &state)?;
+    let check_timeout = request.timeout_ms;
+    apply_limits(
+        &mut request.timeout_ms,
+        &mut request.max_output_bytes,
+        check_timeout,
+        &state,
+    )
+    .await?;
     let output = state.runner.run_command(request).await?;
     Ok(Json(output))
 }
 
-fn validate_limits(
-    timeout_ms: Option<u64>,
-    max_output_bytes: Option<usize>,
+async fn apply_limits(
+    timeout_ms: &mut Option<u64>,
+    max_output_bytes: &mut Option<usize>,
+    check_timeout: Option<u64>,
     state: &RunnerManagerState,
 ) -> Result<(), AppError> {
-    if timeout_ms.is_some_and(|value| value > state.max_timeout_ms) {
+    let config = state.config.read().await;
+    if check_timeout.is_some_and(|value| value > config.max_timeout_ms) {
         return Err(AppError::BadRequest(
             "command timeout exceeds runner-manager limit".to_string(),
         ));
     }
-    if max_output_bytes.is_some_and(|value| value > state.max_output_bytes) {
+    if max_output_bytes.is_some_and(|value| value > config.max_output_bytes) {
         return Err(AppError::BadRequest(
             "command output exceeds runner-manager limit".to_string(),
         ));
     }
+    *timeout_ms = Some(
+        timeout_ms
+            .unwrap_or(config.max_timeout_ms)
+            .min(config.max_timeout_ms),
+    );
+    *max_output_bytes = Some(
+        max_output_bytes
+            .unwrap_or(config.max_output_bytes)
+            .min(config.max_output_bytes),
+    );
     Ok(())
 }
 
@@ -225,17 +238,12 @@ mod tests {
     use crate::runtime::{DirectRunnerBackend, LocalRunnerService};
 
     async fn spawn_test_server() -> anyhow::Result<(String, tokio::task::JoinHandle<()>)> {
-        let runner = LocalRunnerService::new(
-            DirectRunnerBackend::new(),
-            Duration::from_secs(60),
-            262_144,
-            4,
-        );
+        let config = Arc::new(tokio::sync::RwLock::new(test_config()));
+        let runner = LocalRunnerService::new(DirectRunnerBackend::new(), Arc::clone(&config));
         let state = RunnerManagerState {
             auth_token: Arc::<str>::from("test-token"),
+            config,
             runner,
-            max_output_bytes: 262_144,
-            max_timeout_ms: 600_000,
         };
         let app = build_app(state);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -246,6 +254,30 @@ mod tests {
                 .expect("test server should run");
         });
         Ok((format!("http://{addr}"), handle))
+    }
+
+    fn test_config() -> crate::config::RunnerManagerConfig {
+        crate::config::RunnerManagerConfig {
+            control_plane_url: None,
+            bind_addr: "127.0.0.1:0".to_string(),
+            auth_token: "test-token".to_string(),
+            backend: crate::config::RunnerBackendKind::Direct,
+            workspace_root: std::path::PathBuf::from("/tmp"),
+            host_workspace_root: std::path::PathBuf::from("/tmp"),
+            image: "test-image".to_string(),
+            workdir: "/workspace".to_string(),
+            network_enabled: false,
+            max_output_bytes: 262_144,
+            max_timeout_ms: 600_000,
+            max_sessions: 4,
+            pids_limit: 256,
+            memory_limit: "1g".to_string(),
+            cpu_limit: "2".to_string(),
+            idle_ttl: Duration::from_secs(60),
+            docker_cli: "docker".to_string(),
+            docker_host: None,
+            runtime_class: None,
+        }
     }
 
     fn owner() -> RunnerOwner {

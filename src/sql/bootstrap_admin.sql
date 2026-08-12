@@ -5,6 +5,7 @@ INSERT INTO users (
     email,
     timezone,
     is_admin,
-    is_active
+    is_active,
+    must_change_password
 )
-VALUES ($1, $2, $3, $4, $5, TRUE, TRUE);
+VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, TRUE);

@@ -25,7 +25,7 @@ use axum::{
     routing::{get, get_service},
 };
 use config::AppConfig;
-use runner::{HttpRunnerClient, RunnerService};
+use runner::{PullRunnerService, RunnerBroker, RunnerService};
 use server::{ServerConfig as HttpServerConfig, axum::Server as AxumServer, mcp};
 use tools::DeskForemanService;
 use tower_http::services::ServeDir;
@@ -35,6 +35,7 @@ pub struct AppState {
     pub config: Arc<AppConfig>,
     pub approval: Arc<approval::ApprovalService>,
     pub runner: Arc<dyn RunnerService>,
+    pub runner_broker: Arc<RunnerBroker>,
     pub db: sqlx::PgPool,
 }
 
@@ -43,13 +44,15 @@ pub async fn run() -> anyhow::Result<()> {
     let db = db::connect(&config).await?;
     db::migrate(&db).await?;
     db::bootstrap_admin(&db, &config).await?;
-    let runner: Arc<dyn RunnerService> =
-        HttpRunnerClient::new(config.runner_client.clone()) as Arc<dyn RunnerService>;
+    let runner_broker = RunnerBroker::new(db.clone());
+    runner_broker.spawn_liveness_monitor();
+    let runner = PullRunnerService::new(Arc::clone(&runner_broker)) as Arc<dyn RunnerService>;
 
     let state = AppState {
         config: Arc::clone(&config),
         approval: Arc::new(approval::ApprovalService::from_env()),
         runner,
+        runner_broker,
         db,
     };
     lifecycle::spawn_janitor(state.clone());

@@ -11,6 +11,11 @@ const router = createRouter({
       meta: { guestOnly: true },
     },
     {
+      path: '/change-password',
+      component: () => import('../pages/ChangePasswordPage.vue'),
+      meta: { requiresAuth: true, passwordChange: true },
+    },
+    {
       path: '/',
       component: AppShell,
       meta: { requiresAuth: true },
@@ -46,6 +51,11 @@ const router = createRouter({
           component: () => import('../pages/ApprovalSettingsPage.vue'),
           meta: { requiresAdmin: true },
         },
+        {
+          path: 'admin/runner-managers',
+          component: () => import('../pages/RunnerManagersPage.vue'),
+          meta: { requiresAdmin: true },
+        },
       ],
     },
   ],
@@ -54,6 +64,18 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   await authState.initialize()
   if (to.meta.guestOnly && authState.currentUser.value) {
+    return '/'
+  }
+  if (
+    authState.currentUser.value?.must_change_password &&
+    !to.meta.passwordChange
+  ) {
+    return '/change-password'
+  }
+  if (
+    !authState.currentUser.value?.must_change_password &&
+    to.meta.passwordChange
+  ) {
     return '/'
   }
   if (to.meta.requiresAuth && !authState.currentUser.value) {

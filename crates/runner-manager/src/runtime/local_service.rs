@@ -7,6 +7,7 @@ use runner_protocol::{
 };
 
 use super::{RunnerBackend, shell_manager::ShellManager};
+use crate::config::SharedRunnerManagerConfig;
 
 pub struct LocalRunnerService {
     backend: Arc<dyn RunnerBackend>,
@@ -14,18 +15,8 @@ pub struct LocalRunnerService {
 }
 
 impl LocalRunnerService {
-    pub fn new(
-        backend: Arc<dyn RunnerBackend>,
-        session_idle_ttl: std::time::Duration,
-        max_output_bytes: usize,
-        max_sessions: usize,
-    ) -> Arc<Self> {
-        let shell = Arc::new(ShellManager::new(
-            Arc::clone(&backend),
-            session_idle_ttl,
-            max_output_bytes,
-            max_sessions,
-        ));
+    pub fn new(backend: Arc<dyn RunnerBackend>, config: SharedRunnerManagerConfig) -> Arc<Self> {
+        let shell = Arc::new(ShellManager::new(Arc::clone(&backend), config));
         Arc::new(Self { backend, shell })
     }
 
