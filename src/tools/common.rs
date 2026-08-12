@@ -265,9 +265,30 @@ pub(super) fn spawn_tool_audit(
 
 pub(super) fn mcp_error(error: ToolError) -> rmcp::ErrorData {
     match error {
-        ToolError::InvalidInput(message)
-        | ToolError::NotFound(message)
-        | ToolError::Forbidden(message) => rmcp::ErrorData::invalid_params(message, None),
+        ToolError::InvalidInput(message) => rmcp::ErrorData::invalid_params(
+            message.clone(),
+            Some(json!({
+                "code": "invalid_input",
+                "message": message,
+                "retryable": false,
+            })),
+        ),
+        ToolError::NotFound(message) => rmcp::ErrorData::resource_not_found(
+            message.clone(),
+            Some(json!({
+                "code": "not_found",
+                "message": message,
+                "retryable": true,
+            })),
+        ),
+        ToolError::Forbidden(message) => rmcp::ErrorData::invalid_request(
+            message.clone(),
+            Some(json!({
+                "code": "forbidden",
+                "message": message,
+                "retryable": false,
+            })),
+        ),
         ToolError::Internal(error) => internal_error(error),
     }
 }

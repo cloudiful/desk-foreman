@@ -17,7 +17,9 @@ use crate::{
             mcp_error, parse_and_validate_tool_params, schema_for_input, shell_call_result,
             structured_text_result, write_annotations,
         },
-        params::{ApplyPatchParams, CancelSessionParams, ShellParams, WriteStdinParams},
+        params::{
+            ApplyPatchParams, CancelSessionParams, EditParams, ShellParams, WriteStdinParams,
+        },
         shared,
     },
 };
@@ -27,6 +29,7 @@ pub(super) fn register_routes(router: &mut ToolRouter<DeskForemanService>) {
     router.add_route(write_stdin_route());
     router.add_route(cancel_session_route());
     router.add_route(apply_patch_route());
+    router.add_route(edit_route());
 }
 
 fn exec_command_route() -> rmcp::handler::server::router::tool::ToolRoute<DeskForemanService> {
@@ -92,6 +95,20 @@ fn apply_patch_route() -> rmcp::handler::server::router::tool::ToolRoute<DeskFor
     )
 }
 
+fn edit_route() -> rmcp::handler::server::router::tool::ToolRoute<DeskForemanService> {
+    ToolRoute::new_dyn(
+        Tool::new_with_raw(
+            "edit",
+            Some(Cow::Borrowed(
+                "Replace exact text in one workspace file. Re-read the file when the text is missing or ambiguous; use apply_patch for new files or multi-file changes.",
+            )),
+            schema_for_input::<EditParams>(),
+        )
+        .with_annotations(write_annotations()),
+        |ctx| Box::pin(async move { edit_handler(ctx).await }),
+    )
+}
+
 async fn exec_command_handler(
     context: ToolCallContext<'_, DeskForemanService>,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
@@ -138,4 +155,15 @@ async fn apply_patch_handler(
         .await
         .map_err(mcp_error)?;
     structured_text_result(output.summary.clone(), &output)
+}
+
+async fn edit_handler(
+    context: ToolCallContext<'_, DeskForemanService>,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    let actor = actor_from_mcp_context(&context.service.state, &context.request_context)?;
+    let params: EditParams = parse_and_validate_tool_params(context.arguments.unwrap_or_default())?;
+    let output = shared::edit(&context.service.state, &actor, &params)
+        .await
+        .map_err(mcp_error)?;
+    structured_text_result(format!("Edited {}", output.path), &output)
 }

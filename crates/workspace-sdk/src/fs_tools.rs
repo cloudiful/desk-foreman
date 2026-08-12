@@ -7,10 +7,11 @@ use std::{
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ApplyPatchSummary, DirectoryEntry, FileFingerprint, ListDirectoryPageOutput,
-    ListDirectoryPageParams, PathKind, ReadFilePageOutput, ReadFilePageParams, StatPathOutput,
-    StatPathParams, WalkWorkspacePageOutput, WalkWorkspacePageParams, WorkspaceSdkError,
-    patch::apply_patch, resolve_workspace_path, workspace_relative_display,
+    ApplyPatchSummary, DirectoryEntry, ExactEditError, ExactEditRequest, ExactEditResult,
+    FileFingerprint, ListDirectoryPageOutput, ListDirectoryPageParams, PathKind,
+    ReadFilePageOutput, ReadFilePageParams, StatPathOutput, StatPathParams,
+    WalkWorkspacePageOutput, WalkWorkspacePageParams, WorkspaceSdkError, patch::apply_patch,
+    resolve_workspace_path, workspace_relative_display,
 };
 
 pub struct WorkspaceFileTools {
@@ -44,6 +45,10 @@ impl WorkspaceFileTools {
     pub fn apply_patch_text(&self, patch: &str) -> Result<ApplyPatchSummary, WorkspaceSdkError> {
         validate_patch_input(patch)?;
         apply_patch(&self.workspace_root, patch)
+    }
+
+    pub fn edit_text(&self, request: &ExactEditRequest) -> Result<ExactEditResult, ExactEditError> {
+        crate::exact_edit::edit_file(&self.workspace_root, request)
     }
 
     #[cfg(feature = "approval")]
@@ -131,27 +136,30 @@ impl WorkspaceFileTools {
             ));
         }
         let absolute = resolve_workspace_path(&self.workspace_root, &params.path)?;
-        let mut total_entries = 0;
-        let mut entries = Vec::with_capacity(params.limit);
+        let mut paths = Vec::new();
         for entry in fs::read_dir(&absolute).map_err(|error| {
             WorkspaceSdkError::io(format!("failed to list {}", params.path), error)
         })? {
             let entry = entry.map_err(|error| {
                 WorkspaceSdkError::io(format!("failed to list {}", params.path), error)
             })?;
-            if total_entries >= params.offset && entries.len() < params.limit {
-                let path = entry.path();
-                entries.push(DirectoryEntry {
-                    path: workspace_relative_display(&self.workspace_root, &path),
-                    kind: if path.is_dir() {
-                        PathKind::Dir
-                    } else {
-                        PathKind::File
-                    },
-                });
-            }
-            total_entries += 1;
+            paths.push(entry.path());
         }
+        paths.sort_by_cached_key(|path| workspace_relative_display(&self.workspace_root, path));
+        let total_entries = paths.len();
+        let entries = paths
+            .into_iter()
+            .skip(params.offset)
+            .take(params.limit)
+            .map(|path| DirectoryEntry {
+                path: workspace_relative_display(&self.workspace_root, &path),
+                kind: if path.is_dir() {
+                    PathKind::Dir
+                } else {
+                    PathKind::File
+                },
+            })
+            .collect();
         Ok(ListDirectoryPageOutput {
             path: workspace_relative_display(&self.workspace_root, &absolute),
             entries,
@@ -324,6 +332,34 @@ where
             ));
         }
         self.tools.apply_patch_text(patch)
+    }
+
+    pub async fn edit_text(
+        &self,
+        request: &ExactEditRequest,
+    ) -> Result<ExactEditResult, ExactEditError> {
+        let decision = self
+            .reviewer
+            .review(&desk_foreman_approval::ReviewRequest::edit(
+                &request.path,
+                serde_json::json!({
+                    "old_text": request.old_text,
+                    "new_text": request.new_text,
+                    "replace_all": request.replace_all,
+                }),
+            ))
+            .await
+            .map_err(|error| ExactEditError::Io {
+                context: "approval reviewer failed".to_string(),
+                source: std::io::Error::other(error),
+            })?;
+        if !decision.permits_execution() {
+            return Err(ExactEditError::Io {
+                context: "approval denied".to_string(),
+                source: std::io::Error::other(decision.rationale),
+            });
+        }
+        self.tools.edit_text(request)
     }
 }
 

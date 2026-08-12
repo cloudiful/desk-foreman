@@ -474,6 +474,35 @@ pub struct ApplicationTokenRecord {
     pub network_enabled: bool,
 }
 
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ApplicationCapabilitiesResponse {
+    pub application_id: i64,
+    pub application_name: String,
+    pub scopes: Vec<String>,
+    pub max_timeout_ms: Option<u64>,
+    pub max_output_bytes: Option<usize>,
+    pub max_file_bytes: Option<usize>,
+    pub max_sessions: Option<usize>,
+    pub network_enabled: bool,
+    pub runner_available: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
+pub struct GitWorkspaceSyncRequest {
+    #[validate(custom(function = "validate_non_blank"))]
+    pub remote_url: String,
+    pub branch: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct GitWorkspaceSyncResponse {
+    pub status: String,
+    pub initialized: bool,
+    pub dirty: bool,
+    pub branch: Option<String>,
+    pub head_commit: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct McpTokenPolicy {
     pub expires_at: Option<DateTime<Utc>>,

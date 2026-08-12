@@ -63,6 +63,23 @@ pub(crate) async fn mcp_actor_from_bearer(
     Ok(None)
 }
 
+pub(crate) async fn application_token_from_bearer(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<ApplicationTokenRecord>, AppError> {
+    let Some(token) = bearer_token(headers)? else {
+        return Ok(None);
+    };
+    let token_hash = crate::auth::hash_bearer_token(token);
+    let Some(application) =
+        queries::find_active_application_token_hash(&state.db, &token_hash).await?
+    else {
+        return Ok(None);
+    };
+    let _ = queries::touch_application_token(&state.db, &token_hash).await;
+    Ok(Some(application))
+}
+
 fn bearer_token(headers: &HeaderMap) -> Result<Option<&str>, AppError> {
     let Some(value) = headers.get(AUTHORIZATION) else {
         return Ok(None);

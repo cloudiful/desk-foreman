@@ -12,6 +12,7 @@ pub enum ReviewAction {
     Shell,
     Stdin,
     Patch,
+    Edit,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -65,6 +66,15 @@ impl ReviewRequest {
         Self {
             action: ReviewAction::Patch,
             input: patch.into(),
+            workdir: None,
+            context,
+        }
+    }
+
+    pub fn edit(path: impl Into<String>, context: Value) -> Self {
+        Self {
+            action: ReviewAction::Edit,
+            input: path.into(),
             workdir: None,
             context,
         }
