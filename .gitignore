@@ -1,6 +1,7 @@
 /target
 Cargo.lock
 /openapi.json
+/ci-image-input
 .env
 .env.*
 !.env.example

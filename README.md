@@ -116,15 +116,9 @@ Desk Foreman can optionally review side-effecting operations with an OpenAI Resp
 - `frontend/` is a Vue 3 + PrimeVue + Tailwind admin SPA
 - Rust exports `openapi.json` and the frontend consumes generated OpenAPI SDK stubs
 - `frontend` scripts use `bun` by default
-- `bun.lock` is intentionally not committed; CI and Docker resolve frontend deps at build time
+- `bun.lock` is intentionally not committed; CI resolves frontend deps at build time
 - Local dev frontend runs on `5173`
 - Containerized frontend is served by `nginx` on port `80`
-
-## GitHub Actions
-
-- `.github/workflows/release.yml` builds the `runtime`, `runner-manager`, and `workspace-runner` images for Linux amd64 and arm64.
-- Version tags publish multi-architecture images to GitHub Container Registry; the main branch publishes the arm64 variants.
-- Docker builds use public Docker Hub images and official Debian repositories.
 
 ## Run
 
