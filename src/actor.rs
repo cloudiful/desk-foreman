@@ -109,7 +109,8 @@ pub fn actor_from_mcp_context(
 ) -> Result<ActorContext, rmcp::ErrorData> {
     let actor = context
         .extensions
-        .get::<McpActor>()
+        .get::<axum::http::request::Parts>()
+        .and_then(|parts| parts.extensions.get::<McpActor>())
         .cloned()
         .ok_or_else(|| rmcp::ErrorData::invalid_request("missing MCP actor context", None))?;
     actor_from_mcp_actor(state, actor)

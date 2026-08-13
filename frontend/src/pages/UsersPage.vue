@@ -25,6 +25,7 @@ const AVAILABLE_SCOPES = [
   'workspace.shell',
   'workspace.patch',
 ] as const
+type AvailableScope = (typeof AVAILABLE_SCOPES)[number]
 
 const { success, error: notifyError } = useNotify()
 
@@ -302,7 +303,7 @@ const tokenOwner = ref<UserResponse | null>(null)
 const allTokens = ref<McpTokenResponse[]>([])
 const tokenDrawerOpen = ref(false)
 const tokenName = ref('')
-const tokenScopes = ref<string[]>([...AVAILABLE_SCOPES])
+const tokenScopes = ref<AvailableScope[]>([...AVAILABLE_SCOPES])
 const tokenExpiresAt = ref('')
 const creatingToken = ref(false)
 const revealedToken = ref<CreateMcpTokenResponse | null>(null)

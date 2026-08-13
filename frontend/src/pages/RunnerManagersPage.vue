@@ -412,24 +412,32 @@ onMounted(() => void load())
             </div>
             <div class="grid grid-cols-2 gap-3">
               <UFormField label="Max sessions">
-                <UInput v-model="editing.max_sessions" type="number" min="1" />
+                <UInput
+                  v-model.number="editing.max_sessions"
+                  type="number"
+                  min="1"
+                />
               </UFormField>
               <UFormField label="Max output (bytes)">
                 <UInput
-                  v-model="editing.max_output_bytes"
+                  v-model.number="editing.max_output_bytes"
                   type="number"
                   min="0"
                 />
               </UFormField>
               <UFormField label="Max timeout (ms)">
                 <UInput
-                  v-model="editing.max_timeout_ms"
+                  v-model.number="editing.max_timeout_ms"
                   type="number"
                   min="0"
                 />
               </UFormField>
               <UFormField label="PID limit">
-                <UInput v-model="editing.pids_limit" type="number" min="0" />
+                <UInput
+                  v-model.number="editing.pids_limit"
+                  type="number"
+                  min="0"
+                />
               </UFormField>
               <UFormField label="Memory limit">
                 <UInput v-model="editing.memory_limit" placeholder="1g" />

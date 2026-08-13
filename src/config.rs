@@ -11,6 +11,7 @@ use crate::policy::{ALL_SCOPES, ResourceLimits};
 #[derive(Clone, Debug)]
 pub struct AppConfig {
     pub bind_addr: String,
+    pub mcp_allowed_hosts: Vec<String>,
     pub workspace_root: PathBuf,
     pub default_shell: String,
     pub session_idle_ttl: Duration,
@@ -34,6 +35,10 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn from_env() -> anyhow::Result<Self> {
         let bind_addr = env::var("MCP_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".to_string());
+        let mcp_allowed_hosts = env::var("MCP_ALLOWED_HOSTS")
+            .ok()
+            .map(|value| comma_separated_values(&value))
+            .unwrap_or_default();
         let workspace_root = workspace_root_from_env("WORKSPACE_ROOT")?;
 
         let default_shell = env::var("DEFAULT_SHELL").unwrap_or_else(|_| "bash".to_string());
@@ -109,6 +114,7 @@ impl AppConfig {
 
         Ok(Self {
             bind_addr,
+            mcp_allowed_hosts,
             workspace_root,
             default_shell,
             session_idle_ttl,
@@ -135,6 +141,15 @@ impl AppConfig {
     }
 }
 
+fn comma_separated_values(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 fn workspace_root_from_env(name: &str) -> anyhow::Result<PathBuf> {
     let raw = env::var(name).unwrap_or_else(|_| "/workspace".into());
     canonical_workspace_root(name, Path::new(&raw))
@@ -148,4 +163,17 @@ fn canonical_workspace_root(name: &str, path: &Path) -> anyhow::Result<PathBuf> 
         bail!("{name} must be a directory");
     }
     Ok(workspace_root)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::comma_separated_values;
+
+    #[test]
+    fn comma_separated_values_trim_and_drop_blanks() {
+        assert_eq!(
+            comma_separated_values("localhost, desk.example.com:443, ,127.0.0.1"),
+            ["localhost", "desk.example.com:443", "127.0.0.1"]
+        );
+    }
 }

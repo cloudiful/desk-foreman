@@ -1,4 +1,4 @@
-import { useToast } from '@nuxt/ui/runtime/composables/useToast'
+import { useToast } from '@nuxt/ui/composables'
 
 export function useNotify() {
   const toast = useToast()

@@ -197,13 +197,28 @@ onMounted(() => void load())
           <UInput v-model="model" placeholder="Reviewer model" />
         </UFormField>
         <UFormField label="Timeout (ms)">
-          <UInput v-model="timeoutMs" type="number" min="100" max="30000" />
+          <UInput
+            v-model.number="timeoutMs"
+            type="number"
+            min="100"
+            max="30000"
+          />
         </UFormField>
         <UFormField label="Max input (bytes)">
-          <UInput v-model="maxInputBytes" type="number" min="1" max="524288" />
+          <UInput
+            v-model.number="maxInputBytes"
+            type="number"
+            min="1"
+            max="524288"
+          />
         </UFormField>
         <UFormField label="Concurrent reviews">
-          <UInput v-model="maxConcurrent" type="number" min="1" max="64" />
+          <UInput
+            v-model.number="maxConcurrent"
+            type="number"
+            min="1"
+            max="64"
+          />
         </UFormField>
       </form>
     </section>

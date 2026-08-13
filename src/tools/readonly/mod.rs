@@ -12,7 +12,7 @@ use rmcp::{
         router::tool::{ToolRoute, ToolRouter},
         tool::ToolCallContext,
     },
-    model::CallToolResult,
+    model::{CallToolResponse, CallToolResult},
 };
 
 use crate::actor::actor_from_mcp_context;
@@ -35,7 +35,7 @@ fn read_route() -> ToolRoute<DeskForemanService> {
             "read",
             "Read a file or directory from the managed workspace with bounded, paginated output.",
         ),
-        |ctx| Box::pin(async move { read_handler(ctx).await }),
+        |ctx| Box::pin(async move { read_handler(ctx).await.map(CallToolResponse::from) }),
     )
 }
 
@@ -45,7 +45,7 @@ fn glob_route() -> ToolRoute<DeskForemanService> {
             "glob",
             "Find workspace files by glob pattern.",
         ),
-        |ctx| Box::pin(async move { glob_handler(ctx).await }),
+        |ctx| Box::pin(async move { glob_handler(ctx).await.map(CallToolResponse::from) }),
     )
 }
 
@@ -55,7 +55,7 @@ fn grep_route() -> ToolRoute<DeskForemanService> {
             "grep",
             "Search workspace file contents with ripgrep.",
         ),
-        |ctx| Box::pin(async move { grep_handler(ctx).await }),
+        |ctx| Box::pin(async move { grep_handler(ctx).await.map(CallToolResponse::from) }),
     )
 }
 

@@ -5,7 +5,7 @@ use rmcp::{
         router::tool::{ToolRoute, ToolRouter},
         tool::{ToolCallContext, schema_for_output},
     },
-    model::{CallToolResult, Tool},
+    model::{CallToolResponse, CallToolResult, Tool},
 };
 
 use crate::{
@@ -33,7 +33,7 @@ pub(super) fn register_routes(router: &mut ToolRouter<DeskForemanService>) {
 }
 
 fn exec_command_route() -> rmcp::handler::server::router::tool::ToolRoute<DeskForemanService> {
-    let output_schema = schema_for_output::<ShellToolOutput>().expect("shell output schema");
+    let output_schema = schema_for_output::<ShellToolOutput>();
     ToolRoute::new_dyn(
         Tool::new_with_raw(
             "shell",
@@ -44,12 +44,12 @@ fn exec_command_route() -> rmcp::handler::server::router::tool::ToolRoute<DeskFo
         )
         .with_annotations(write_annotations())
         .with_raw_output_schema(output_schema),
-        |ctx| Box::pin(async move { exec_command_handler(ctx).await }),
+        |ctx| Box::pin(async move { exec_command_handler(ctx).await.map(CallToolResponse::from) }),
     )
 }
 
 fn write_stdin_route() -> rmcp::handler::server::router::tool::ToolRoute<DeskForemanService> {
-    let output_schema = schema_for_output::<ShellToolOutput>().expect("shell output schema");
+    let output_schema = schema_for_output::<ShellToolOutput>();
     ToolRoute::new_dyn(
         Tool::new_with_raw(
             "write_stdin",
@@ -60,13 +60,12 @@ fn write_stdin_route() -> rmcp::handler::server::router::tool::ToolRoute<DeskFor
         )
         .with_annotations(write_annotations())
         .with_raw_output_schema(output_schema),
-        |ctx| Box::pin(async move { write_stdin_handler(ctx).await }),
+        |ctx| Box::pin(async move { write_stdin_handler(ctx).await.map(CallToolResponse::from) }),
     )
 }
 
 fn cancel_session_route() -> rmcp::handler::server::router::tool::ToolRoute<DeskForemanService> {
-    let output_schema =
-        schema_for_output::<shared::CancelSessionOutput>().expect("cancel output schema");
+    let output_schema = schema_for_output::<shared::CancelSessionOutput>();
     ToolRoute::new_dyn(
         Tool::new_with_raw(
             "cancel_session",
@@ -77,7 +76,13 @@ fn cancel_session_route() -> rmcp::handler::server::router::tool::ToolRoute<Desk
         )
         .with_annotations(write_annotations())
         .with_raw_output_schema(output_schema),
-        |ctx| Box::pin(async move { cancel_session_handler(ctx).await }),
+        |ctx| {
+            Box::pin(async move {
+                cancel_session_handler(ctx)
+                    .await
+                    .map(CallToolResponse::from)
+            })
+        },
     )
 }
 
@@ -91,7 +96,7 @@ fn apply_patch_route() -> rmcp::handler::server::router::tool::ToolRoute<DeskFor
             schema_for_input::<ApplyPatchParams>(),
         )
         .with_annotations(write_annotations()),
-        |ctx| Box::pin(async move { apply_patch_handler(ctx).await }),
+        |ctx| Box::pin(async move { apply_patch_handler(ctx).await.map(CallToolResponse::from) }),
     )
 }
 
@@ -105,7 +110,7 @@ fn edit_route() -> rmcp::handler::server::router::tool::ToolRoute<DeskForemanSer
             schema_for_input::<EditParams>(),
         )
         .with_annotations(write_annotations()),
-        |ctx| Box::pin(async move { edit_handler(ctx).await }),
+        |ctx| Box::pin(async move { edit_handler(ctx).await.map(CallToolResponse::from) }),
     )
 }
 

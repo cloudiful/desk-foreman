@@ -27,6 +27,19 @@ const AVAILABLE_SCOPES = [
   'workspace.shell',
   'workspace.patch',
 ] as const
+type AvailableScope = (typeof AVAILABLE_SCOPES)[number]
+
+function availableScopes(scopes: string[]): AvailableScope[] {
+  return scopes.filter((scope): scope is AvailableScope =>
+    AVAILABLE_SCOPES.includes(scope as AvailableScope),
+  )
+}
+
+function unknownScopes(scopes: string[]): string[] {
+  return scopes.filter(
+    (scope) => !AVAILABLE_SCOPES.includes(scope as AvailableScope),
+  )
+}
 
 const APPROVAL_MODES = [
   { label: 'Inherit global settings', value: 'inherit' },
@@ -71,11 +84,11 @@ interface ApplicationForm {
   name: string
   workspace_template: string
   default_shell: string
-  default_scopes: string[]
-  max_timeout_ms: number | string | null | undefined
-  max_output_bytes: number | string | null | undefined
-  max_file_bytes: number | string | null | undefined
-  max_sessions: number | string | null | undefined
+  default_scopes: AvailableScope[]
+  max_timeout_ms: number | string
+  max_output_bytes: number | string
+  max_file_bytes: number | string
+  max_sessions: number | string
   network_enabled: boolean
   is_active: boolean
   approval_mode: string
@@ -84,6 +97,7 @@ interface ApplicationForm {
 }
 
 const editing = ref<ApplicationForm | null>(null)
+const editingUnknownScopes = ref<string[]>([])
 const drawerOpen = ref(false)
 const saving = ref(false)
 const formError = ref('')
@@ -103,10 +117,10 @@ function blankForm(): ApplicationForm {
     workspace_template: '',
     default_shell: '/bin/bash',
     default_scopes: [...AVAILABLE_SCOPES],
-    max_timeout_ms: null,
-    max_output_bytes: null,
-    max_file_bytes: null,
-    max_sessions: null,
+    max_timeout_ms: '',
+    max_output_bytes: '',
+    max_file_bytes: '',
+    max_sessions: '',
     network_enabled: true,
     is_active: true,
     approval_mode: 'inherit',
@@ -117,6 +131,7 @@ function blankForm(): ApplicationForm {
 
 function startCreate(): void {
   formError.value = ''
+  editingUnknownScopes.value = []
   editing.value = blankForm()
   drawerOpen.value = true
 }
@@ -128,17 +143,18 @@ function startEdit(row: ApplicationResponse): void {
     name: row.name,
     workspace_template: row.workspace_template ?? '',
     default_shell: row.default_shell ?? '',
-    default_scopes: row.default_scopes,
-    max_timeout_ms: row.max_timeout_ms,
-    max_output_bytes: row.max_output_bytes,
-    max_file_bytes: row.max_file_bytes,
-    max_sessions: row.max_sessions,
+    default_scopes: availableScopes(row.default_scopes),
+    max_timeout_ms: row.max_timeout_ms ?? '',
+    max_output_bytes: row.max_output_bytes ?? '',
+    max_file_bytes: row.max_file_bytes ?? '',
+    max_sessions: row.max_sessions ?? '',
     network_enabled: row.network_enabled,
     is_active: row.is_active,
     approval_mode: row.approval_mode,
     approval_endpoint: row.approval_endpoint ?? '',
     approval_model: row.approval_model ?? '',
   }
+  editingUnknownScopes.value = unknownScopes(row.default_scopes)
   drawerOpen.value = true
 }
 
@@ -154,7 +170,10 @@ async function save(): Promise<void> {
     name: editing.value.name.trim(),
     workspace_template: editing.value.workspace_template.trim() || null,
     default_shell: editing.value.default_shell.trim() || null,
-    default_scopes: editing.value.default_scopes,
+    default_scopes: [
+      ...editing.value.default_scopes,
+      ...editingUnknownScopes.value,
+    ],
     max_timeout_ms: toNumberOrNull(editing.value.max_timeout_ms),
     max_output_bytes: toNumberOrNull(editing.value.max_output_bytes),
     max_file_bytes: toNumberOrNull(editing.value.max_file_bytes),
@@ -191,7 +210,7 @@ const tokenOwner = ref<ApplicationResponse | null>(null)
 const allTokens = ref<ApplicationTokenResponse[]>([])
 const tokenDrawerOpen = ref(false)
 const tokenName = ref('')
-const tokenScopes = ref<string[]>([...AVAILABLE_SCOPES])
+const tokenScopes = ref<AvailableScope[]>([...AVAILABLE_SCOPES])
 const tokenExpiresAt = ref('')
 const creatingToken = ref(false)
 const revealedToken = ref<CreateApplicationTokenResponse | null>(null)
@@ -461,7 +480,7 @@ onMounted(() => void load())
             <div class="grid grid-cols-2 gap-3">
               <UFormField label="Max timeout (ms)">
                 <UInput
-                  v-model="editing.max_timeout_ms"
+                  v-model.number="editing.max_timeout_ms"
                   type="number"
                   min="0"
                   placeholder="Unlimited"
@@ -469,7 +488,7 @@ onMounted(() => void load())
               </UFormField>
               <UFormField label="Max output (bytes)">
                 <UInput
-                  v-model="editing.max_output_bytes"
+                  v-model.number="editing.max_output_bytes"
                   type="number"
                   min="0"
                   placeholder="Unlimited"
@@ -477,7 +496,7 @@ onMounted(() => void load())
               </UFormField>
               <UFormField label="Max file (bytes)">
                 <UInput
-                  v-model="editing.max_file_bytes"
+                  v-model.number="editing.max_file_bytes"
                   type="number"
                   min="0"
                   placeholder="Unlimited"
@@ -485,7 +504,7 @@ onMounted(() => void load())
               </UFormField>
               <UFormField label="Max sessions">
                 <UInput
-                  v-model="editing.max_sessions"
+                  v-model.number="editing.max_sessions"
                   type="number"
                   min="0"
                   placeholder="Unlimited"

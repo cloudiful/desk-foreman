@@ -25,8 +25,10 @@ use axum::{
     routing::{get, get_service},
 };
 use config::AppConfig;
+use rmcp::transport::streamable_http_server::{
+    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+};
 use runner::{PullRunnerService, RunnerBroker, RunnerService};
-use server::{ServerConfig as HttpServerConfig, axum::Server as AxumServer, mcp};
 use tools::DeskForemanService;
 use tower_http::services::ServeDir;
 
@@ -57,11 +59,20 @@ pub async fn run() -> anyhow::Result<()> {
     };
     lifecycle::spawn_janitor(state.clone());
 
-    let mcp_service = mcp::service(mcp::ServerConfig::new().with_service_path("/mcp"), {
-        let state = state.clone();
-        move || DeskForemanService::new(state.clone())
-    })
-    .context("failed to build MCP service")?;
+    let mcp_server_config = if config.mcp_allowed_hosts.is_empty() {
+        StreamableHttpServerConfig::default().disable_allowed_hosts()
+    } else {
+        StreamableHttpServerConfig::default()
+            .with_allowed_hosts(config.mcp_allowed_hosts.iter().cloned())
+    };
+    let mcp_service = StreamableHttpService::new(
+        {
+            let state = state.clone();
+            move || Ok(DeskForemanService::new(state.clone()))
+        },
+        LocalSessionManager::default().into(),
+        mcp_server_config,
+    );
 
     let mut public = Router::new()
         .route("/healthz", get(healthz))
@@ -73,16 +84,12 @@ pub async fn run() -> anyhow::Result<()> {
     let protected = Router::new().nest_service("/mcp", mcp_service).route_layer(
         middleware::from_fn_with_state(state.clone(), bearer_auth_middleware),
     );
-    let app = public.merge(protected);
+    let app = public.merge(protected).with_state(state);
+    let listener = tokio::net::TcpListener::bind(&config.bind_addr)
+        .await
+        .context("failed to bind HTTP listener")?;
 
-    let config = HttpServerConfig::new()
-        .with_listen_addr(config.bind_addr.clone())
-        .with_app_data(state)
-        .build()
-        .context("invalid HTTP server config")?;
-
-    AxumServer::new_with_state(config, app)
-        .start()
+    axum::serve(listener, app)
         .await
         .context("HTTP server exited unexpectedly")
 }

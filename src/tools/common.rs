@@ -7,7 +7,7 @@ use std::{
 
 use rmcp::{
     handler::server::{tool::schema_for_output, wrapper::Parameters},
-    model::{CallToolResult, Content, JsonObject, Tool, ToolAnnotations},
+    model::{CallToolResult, ContentBlock, JsonObject, Tool, ToolAnnotations},
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -41,7 +41,7 @@ where
     I: JsonSchema + 'static,
     O: JsonSchema + 'static,
 {
-    let output_schema = schema_for_output::<O>().expect("output schema must be available");
+    let output_schema = schema_for_output::<O>();
     Tool::new_with_raw(
         name,
         Some(Cow::Borrowed(description)),
@@ -340,7 +340,7 @@ pub(super) fn shell_call_result(output: ShellToolOutput) -> CallToolResult {
         output.output.clone()
     };
 
-    let mut result = CallToolResult::success(vec![Content::text(text)]);
+    let mut result = CallToolResult::success(vec![ContentBlock::text(text)]);
     result.structured_content = Some(structured);
     result.is_error = Some(false);
     result
@@ -351,7 +351,7 @@ pub(super) fn structured_text_result<T: Serialize>(
     output: &T,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let structured = serde_json::to_value(output).map_err(internal_error)?;
-    let mut result = CallToolResult::success(vec![Content::text(text)]);
+    let mut result = CallToolResult::success(vec![ContentBlock::text(text)]);
     result.structured_content = Some(structured);
     result.is_error = Some(false);
     Ok(result)

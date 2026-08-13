@@ -74,6 +74,7 @@ Desk Foreman can optionally review side-effecting operations with an OpenAI Resp
 ## Environment
 
 - `MCP_BIND_ADDR` default `0.0.0.0:3000`
+- `MCP_ALLOWED_HOSTS` optional comma-separated Host allowlist for MCP HTTP requests; empty preserves unrestricted legacy behavior. Entries are matched against the forwarded `Host` header, and entries with a port require an exact port match.
 - `DATABASE_URL` required
 - `WORKSPACE_ROOT` default `/workspace`, used as the base directory for per-user workspaces such as `/workspace/users/<user_id>`
 - `DEFAULT_SHELL` default `bash`
