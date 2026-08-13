@@ -185,7 +185,7 @@ pub async fn create_application_token(
     .bind(request.max_output_bytes)
     .bind(request.max_file_bytes)
     .bind(request.max_sessions)
-    .bind(request.network_enabled)
+    .bind(request.network_enabled.unwrap_or(true))
     .fetch_one(pool)
     .await?;
     Ok((token, row))
