@@ -47,6 +47,7 @@ pub async fn create_runner_manager(
     .bind(request.pids_limit)
     .bind(&request.memory_limit)
     .bind(&request.cpu_limit)
+    .bind(&request.host_workspace_root)
     .fetch_one(pool)
     .await?;
     Ok((record, generated.then_some(token)))
@@ -70,6 +71,7 @@ pub async fn update_runner_manager(
             .bind(request.pids_limit)
             .bind(&request.memory_limit)
             .bind(&request.cpu_limit)
+            .bind(&request.host_workspace_root)
             .fetch_optional(pool)
             .await?,
     )

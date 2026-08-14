@@ -649,6 +649,7 @@ pub struct RunnerManagerResponse {
     pub pids_limit: i64,
     pub memory_limit: String,
     pub cpu_limit: String,
+    pub host_workspace_root: Option<String>,
     pub status: String,
     pub last_seen_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -676,6 +677,7 @@ pub struct RunnerManagerRecord {
     pub pids_limit: i64,
     pub memory_limit: String,
     pub cpu_limit: String,
+    pub host_workspace_root: Option<String>,
     pub status: String,
     pub last_seen_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -705,6 +707,8 @@ pub struct CreateRunnerManagerRequest {
     pub memory_limit: String,
     #[validate(custom(function = "validate_non_blank"))]
     pub cpu_limit: String,
+    #[serde(default)]
+    pub host_workspace_root: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
@@ -727,6 +731,8 @@ pub struct UpdateRunnerManagerRequest {
     pub memory_limit: String,
     #[validate(custom(function = "validate_non_blank"))]
     pub cpu_limit: String,
+    #[serde(default)]
+    pub host_workspace_root: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, FromRow)]

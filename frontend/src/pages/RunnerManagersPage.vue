@@ -60,6 +60,7 @@ interface RunnerForm {
   endpoint: string
   access_token: string
   image: string
+  host_workspace_root: string
   network_enabled: boolean
   max_output_bytes: number | string
   max_timeout_ms: number | string
@@ -86,6 +87,7 @@ function blankForm(): RunnerForm {
     endpoint: DEFAULT_ENDPOINT,
     access_token: '',
     image: 'desk-foreman-workspace-runner:local',
+    host_workspace_root: '',
     network_enabled: false,
     max_output_bytes: 262144,
     max_timeout_ms: 600000,
@@ -113,6 +115,7 @@ function openEdit(row: RunnerManagerResponse): void {
     endpoint: row.endpoint,
     access_token: '',
     image: row.image,
+    host_workspace_root: row.host_workspace_root ?? '',
     network_enabled: row.network_enabled,
     max_output_bytes: row.max_output_bytes,
     max_timeout_ms: row.max_timeout_ms,
@@ -152,6 +155,7 @@ async function save(): Promise<void> {
         endpoint: editing.value.endpoint.trim(),
         access_token: editing.value.access_token.trim() || null,
         image: editing.value.image.trim(),
+        host_workspace_root: editing.value.host_workspace_root.trim() || null,
         network_enabled: editing.value.network_enabled,
         max_output_bytes: toNumber(editing.value.max_output_bytes, 262144),
         max_timeout_ms: toNumber(editing.value.max_timeout_ms, 600000),
@@ -170,6 +174,7 @@ async function save(): Promise<void> {
         endpoint: editing.value.endpoint.trim(),
         enabled: enabled.value,
         image: editing.value.image.trim(),
+        host_workspace_root: editing.value.host_workspace_root.trim() || null,
         network_enabled: editing.value.network_enabled,
         max_output_bytes: toNumber(editing.value.max_output_bytes, 262144),
         max_timeout_ms: toNumber(editing.value.max_timeout_ms, 600000),
@@ -344,6 +349,15 @@ onMounted(() => void load())
               <UInput
                 v-model="editing.endpoint"
                 placeholder="http://runner-manager:3001"
+              />
+            </UFormField>
+            <UFormField
+              label="Host workspace root"
+              hint="Optional: host path runner containers bind-mount the workspace from"
+            >
+              <UInput
+                v-model="editing.host_workspace_root"
+                placeholder="/home/user/desk-foreman/vol/workspace"
               />
             </UFormField>
             <UFormField

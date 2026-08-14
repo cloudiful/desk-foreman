@@ -62,6 +62,7 @@ impl DockerRunnerBackend {
         if inspected.is_none() {
             self.create_runner(
                 owner,
+                workspace_root,
                 &host_workspace_root,
                 &container_name,
                 network_enabled,
@@ -86,15 +87,19 @@ impl DockerRunnerBackend {
     async fn create_runner(
         &self,
         owner: &RunnerOwner,
+        workspace_root: &Path,
         host_workspace_root: &Path,
         container_name: &str,
         network_enabled: bool,
         config: &RunnerManagerConfig,
     ) -> anyhow::Result<()> {
-        let user_spec = workspace_owner_user_spec(host_workspace_root).with_context(|| {
+        // Ownership is read from the workspace as visible to runner-manager;
+        // the host path is only meaningful to the docker daemon for the bind
+        // mount below.
+        let user_spec = workspace_owner_user_spec(workspace_root).with_context(|| {
             format!(
                 "failed to resolve workspace owner for {}",
-                host_workspace_root.display()
+                workspace_root.display()
             )
         })?;
         let mut args = vec![
@@ -372,8 +377,8 @@ fn docker_host_env(config: &RunnerManagerConfig) -> Vec<(String, String)> {
 }
 
 /// Resolves the `--user` spec for runner containers from the workspace
-/// directory ownership on the host, so the container process can write to the
-/// bind-mounted workspace without running as root.
+/// directory ownership as seen by runner-manager, so the container process can
+/// write to the bind-mounted workspace without running as root.
 #[cfg(unix)]
 fn workspace_owner_user_spec(host_workspace_root: &Path) -> anyhow::Result<String> {
     use std::os::unix::fs::MetadataExt;

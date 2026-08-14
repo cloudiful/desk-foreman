@@ -9,9 +9,10 @@ INSERT INTO runner_managers (
     max_sessions,
     pids_limit,
     memory_limit,
-    cpu_limit
+    cpu_limit,
+    host_workspace_root
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING
     runner_manager_id,
     name,
@@ -25,6 +26,7 @@ RETURNING
     pids_limit,
     memory_limit,
     cpu_limit,
+    host_workspace_root,
     status,
     last_seen_at,
     created_at,

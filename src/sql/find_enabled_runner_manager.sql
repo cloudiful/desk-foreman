@@ -12,6 +12,7 @@ SELECT
     pids_limit,
     memory_limit,
     cpu_limit,
+    host_workspace_root,
     status,
     last_seen_at,
     created_at,

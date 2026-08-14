@@ -103,6 +103,7 @@ pub async fn runner_manager_config(
         pids_limit: manager.pids_limit,
         memory_limit: manager.memory_limit,
         cpu_limit: manager.cpu_limit,
+        host_workspace_root: manager.host_workspace_root,
         status: manager.status,
         last_seen_at: manager.last_seen_at,
         created_at: manager.created_at,

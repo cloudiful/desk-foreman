@@ -10,6 +10,7 @@ SET
     pids_limit = $9,
     memory_limit = $10,
     cpu_limit = $11,
+    host_workspace_root = $12,
     updated_at = NOW()
 WHERE runner_manager_id = $1
 RETURNING
@@ -25,6 +26,7 @@ RETURNING
     pids_limit,
     memory_limit,
     cpu_limit,
+    host_workspace_root,
     status,
     last_seen_at,
     created_at,

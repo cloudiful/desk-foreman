@@ -162,6 +162,13 @@ impl RunnerManagerConfig {
             .context("runner manager pids_limit is out of range")?;
         self.memory_limit = config.memory_limit;
         self.cpu_limit = config.cpu_limit;
+        if let Some(host_workspace_root) = config
+            .host_workspace_root
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            self.host_workspace_root = PathBuf::from(host_workspace_root);
+        }
         Ok(true)
     }
 }
