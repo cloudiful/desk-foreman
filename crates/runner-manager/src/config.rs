@@ -167,7 +167,7 @@ impl RunnerManagerConfig {
             .as_deref()
             .filter(|value| !value.trim().is_empty())
         {
-            self.host_workspace_root = PathBuf::from(host_workspace_root);
+            self.host_workspace_root = PathBuf::from(host_workspace_root.trim());
         }
         Ok(true)
     }

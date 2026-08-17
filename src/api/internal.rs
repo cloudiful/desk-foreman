@@ -379,7 +379,10 @@ async fn run_git_command(
             network_enabled: actor.policy.limits.network_enabled,
         })
         .await
-        .map_err(AppError::internal)
+        .map_err(|error| {
+            tracing::error!(error = %error, "workspace runner command failed");
+            AppError::service_unavailable("workspace runner is unavailable")
+        })
 }
 
 fn validate_git_remote_url(value: &str) -> Result<String, AppError> {

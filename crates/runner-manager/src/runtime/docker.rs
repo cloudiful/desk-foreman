@@ -14,7 +14,11 @@ use tokio::process::Command;
 
 use crate::config::{RunnerManagerConfig, SharedRunnerManagerConfig};
 
-use super::{ProcessSpawnTarget, RunnerBackend, shell_spawn::append_shell_args};
+use super::{
+    ProcessSpawnTarget, RunnerBackend,
+    docker_command::{ensure_docker_command_succeeded, is_missing_container_error},
+    shell_spawn::append_shell_args,
+};
 
 pub struct DockerRunnerBackend {
     config: SharedRunnerManagerConfig,
@@ -145,11 +149,8 @@ impl DockerRunnerBackend {
         args.push("sleep".to_string());
         args.push("infinity".to_string());
 
-        let output = self.docker_output_owned(args, None, None).await;
-        if let Err(error) = output {
-            return Err(error);
-        }
-        Ok(())
+        let output = self.docker_output_owned(args, None, None).await?;
+        ensure_docker_command_succeeded("create runner container", &output)
     }
 
     async fn inspect_container(
@@ -171,7 +172,7 @@ impl DockerRunnerBackend {
                     .to_string();
                 Ok(Some(ContainerState { status }))
             }
-            Err(error) if error.to_string().contains("No such object") => Ok(None),
+            Err(error) if is_missing_container_error(&error.to_string()) => Ok(None),
             Err(error) => Err(error),
         }
     }

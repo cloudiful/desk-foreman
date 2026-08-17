@@ -112,12 +112,15 @@ async fn execute_job(
             result: Some(value),
             error: None,
         },
-        Err(error) => RunnerJobResult {
-            job_id,
-            ok: false,
-            result: None,
-            error: Some(error.to_string()),
-        },
+        Err(error) => {
+            tracing::error!(job_id, kind = %job.kind, error = %error, "runner job failed");
+            RunnerJobResult {
+                job_id,
+                ok: false,
+                result: None,
+                error: Some(error.to_string()),
+            }
+        }
     };
     result
 }

@@ -4,7 +4,7 @@ mod server;
 mod upstream;
 
 use crate::{
-    config::{RunnerManagerConfig, SharedRunnerManagerConfig},
+    config::{RunnerBackendKind, RunnerManagerConfig, SharedRunnerManagerConfig},
     server::{RunnerManagerState, build_app, build_runner_service},
 };
 use anyhow::Context;
@@ -34,6 +34,17 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
+    }
+    let initial = config.read().await.clone();
+    if initial.backend == RunnerBackendKind::Docker
+        && initial.host_workspace_root == initial.workspace_root
+    {
+        tracing::warn!(
+            "host_workspace_root is not configured and defaults to WORKSPACE_ROOT; \
+             docker bind mounts will use it as the host path, which is only correct \
+             for bare-metal deployments. For containerized deployments set it on the \
+             runner manager in the desk-foreman admin UI"
+        );
     }
     let runner = build_runner_service(std::sync::Arc::clone(&config)).await?;
     let state = RunnerManagerState {

@@ -12,6 +12,7 @@ pub enum AppError {
     NotFound(String),
     Conflict(String),
     BadRequest(String),
+    ServiceUnavailable(String),
     Internal(anyhow::Error),
 }
 
@@ -41,6 +42,10 @@ impl AppError {
         Self::BadRequest(message.into())
     }
 
+    pub fn service_unavailable(message: impl Into<String>) -> Self {
+        Self::ServiceUnavailable(message.into())
+    }
+
     pub fn internal(error: anyhow::Error) -> Self {
         Self::Internal(error)
     }
@@ -54,6 +59,7 @@ impl IntoResponse for AppError {
             Self::NotFound(message) => (StatusCode::NOT_FOUND, message),
             Self::Conflict(message) => (StatusCode::CONFLICT, message),
             Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
+            Self::ServiceUnavailable(message) => (StatusCode::SERVICE_UNAVAILABLE, message),
             Self::Internal(error) => {
                 tracing::error!(error = %error, "request failed");
                 (
@@ -72,5 +78,20 @@ where
 {
     fn from(value: E) -> Self {
         Self::Internal(value.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{http::StatusCode, response::IntoResponse};
+
+    use super::AppError;
+
+    #[test]
+    fn runner_unavailable_errors_return_service_unavailable() {
+        let response =
+            AppError::service_unavailable("workspace runner is unavailable").into_response();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }

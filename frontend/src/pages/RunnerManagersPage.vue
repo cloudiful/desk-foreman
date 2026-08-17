@@ -353,11 +353,11 @@ onMounted(() => void load())
             </UFormField>
             <UFormField
               label="Host workspace root"
-              hint="Optional: host path runner containers bind-mount the workspace from"
+              hint="Optional: host path for runner workspace bind mounts; must match the workspace directory mounted into the runner manager"
             >
               <UInput
                 v-model="editing.host_workspace_root"
-                placeholder="/home/user/desk-foreman/vol/workspace"
+                placeholder="/opt/desk-foreman/vol/workspace"
               />
             </UFormField>
             <UFormField
