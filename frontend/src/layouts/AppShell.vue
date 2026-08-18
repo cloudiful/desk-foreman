@@ -187,23 +187,25 @@ async function logout(): Promise<void> {
     </div>
 
     <USlideover v-model:open="navOpen" side="left" title="Desk Foreman">
-      <nav class="mt-2 space-y-1 px-2">
-        <RouterLink
-          v-for="item in nav"
-          :key="item.path"
-          :to="item.path"
-          class="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium"
-          :class="
-            isActive(item.path)
-              ? 'bg-(--ui-primary)/10 text-(--ui-primary)'
-              : 'text-(--ui-text-muted) hover:bg-(--ui-bg-elevated)'
-          "
-          @click="navOpen = false"
-        >
-          <UIcon :name="item.icon" class="size-4.5" />
-          {{ item.label }}
-        </RouterLink>
-      </nav>
+      <template #body>
+        <nav class="mt-2 space-y-1 px-2">
+          <RouterLink
+            v-for="item in nav"
+            :key="item.path"
+            :to="item.path"
+            class="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium"
+            :class="
+              isActive(item.path)
+                ? 'bg-(--ui-primary)/10 text-(--ui-primary)'
+                : 'text-(--ui-text-muted) hover:bg-(--ui-bg-elevated)'
+            "
+            @click="navOpen = false"
+          >
+            <UIcon :name="item.icon" class="size-4.5" />
+            {{ item.label }}
+          </RouterLink>
+        </nav>
+      </template>
     </USlideover>
   </div>
 </template>

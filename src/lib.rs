@@ -31,7 +31,7 @@ use rmcp::transport::streamable_http_server::{
 };
 use runner::{PullRunnerService, RunnerBroker, RunnerService};
 use tools::DeskForemanService;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -80,7 +80,12 @@ pub async fn run() -> anyhow::Result<()> {
         .route("/readyz", get(readyz))
         .merge(api::router());
     if state.config.frontend_dist.is_dir() {
-        public = public.fallback_service(get_service(ServeDir::new(&state.config.frontend_dist)));
+        let index = state.config.frontend_dist.join("index.html");
+        public = public.fallback_service(get_service(
+            ServeDir::new(&state.config.frontend_dist)
+                .append_index_html_on_directories(true)
+                .fallback(ServeFile::new(index)),
+        ));
     }
     let protected = Router::new().nest_service("/mcp", mcp_service).route_layer(
         middleware::from_fn_with_state(state.clone(), bearer_auth_middleware),
