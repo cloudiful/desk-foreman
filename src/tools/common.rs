@@ -293,6 +293,28 @@ pub(super) fn mcp_error(error: ToolError) -> rmcp::ErrorData {
     }
 }
 
+pub(super) fn tool_error_result(error: ToolError) -> Result<CallToolResult, rmcp::ErrorData> {
+    let (code, message, suggested_action) = match error {
+        ToolError::InvalidInput(message) => ("invalid_input", message, "fix_arguments_and_retry"),
+        ToolError::NotFound(message) => ("not_found", message, "inspect_workspace_and_retry"),
+        other => return Err(mcp_error(other)),
+    };
+    Ok(CallToolResult::structured_error(json!({
+        "ok": false,
+        "error": {
+            "code": code,
+            "category": "tool_input",
+            "message": message,
+            "repairable": true,
+            "retryable": false,
+            "suggested_action": suggested_action,
+            "task_id": null,
+            "details": null,
+            "trace_id": null,
+        }
+    })))
+}
+
 pub(super) fn parse_and_validate_tool_params<T>(input: JsonObject) -> Result<T, rmcp::ErrorData>
 where
     T: serde::de::DeserializeOwned + Validate,

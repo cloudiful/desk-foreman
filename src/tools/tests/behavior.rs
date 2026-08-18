@@ -2,7 +2,7 @@ use serde_json::json;
 use tempfile::tempdir;
 
 use crate::tools::{
-    ToolError,
+    ToolError, common,
     params::{ApplyPatchParams, GrepParams, ReadParams, ShellParams, WriteStdinParams},
     readonly, shared,
 };
@@ -251,6 +251,27 @@ async fn shared_read_file_returns_typed_output() {
     assert_eq!(output.path, "notes.txt");
     assert_eq!(output.content.as_deref(), Some("beta\n"));
     assert!(!output.truncated);
+}
+
+#[tokio::test]
+async fn missing_read_path_is_a_repairable_tool_error() {
+    let temp = tempdir().expect("tempdir");
+    let actor = test_actor(temp.path(), 10);
+    let params: ReadParams = parse_params(json!({
+        "filePath": "missing.rs"
+    }))
+    .expect("params");
+
+    let error = shared::read(&app_state(temp.path().to_path_buf()), &actor, &params)
+        .expect_err("missing path should fail");
+    assert!(matches!(error, ToolError::NotFound(_)));
+
+    let result = common::tool_error_result(error).expect("tool-level error result");
+    let payload = result.structured_content.expect("structured error");
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(payload["error"]["code"], "not_found");
+    assert_eq!(payload["error"]["repairable"], true);
+    assert_eq!(payload["error"]["retryable"], false);
 }
 
 #[tokio::test]

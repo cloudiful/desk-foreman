@@ -331,7 +331,11 @@ onMounted(() => void load())
     <!-- Create/edit drawer -->
     <UDrawer v-model:open="drawerOpen" title="Runner manager">
       <template #body>
-        <form v-if="editing" class="space-y-6" @submit.prevent="save">
+        <form
+          v-if="editing"
+          class="mx-auto w-full max-w-5xl space-y-6"
+          @submit.prevent="save"
+        >
           <div class="space-y-4">
             <div
               class="text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
@@ -343,12 +347,14 @@ onMounted(() => void load())
                 v-model="editing.name"
                 placeholder="e.g. homelab-docker"
                 :disabled="editingId !== null"
+                class="w-full"
               />
             </UFormField>
             <UFormField label="Endpoint">
               <UInput
                 v-model="editing.endpoint"
                 placeholder="http://runner-manager:3001"
+                class="w-full"
               />
             </UFormField>
             <UFormField
@@ -358,6 +364,7 @@ onMounted(() => void load())
               <UInput
                 v-model="editing.host_workspace_root"
                 placeholder="/opt/desk-foreman/vol/workspace"
+                class="w-full"
               />
             </UFormField>
             <UFormField
@@ -370,6 +377,7 @@ onMounted(() => void load())
                 type="password"
                 placeholder="Leave blank to issue a new token"
                 autocomplete="off"
+                class="w-full"
               />
             </UFormField>
             <div
@@ -397,6 +405,7 @@ onMounted(() => void load())
               <UInput
                 v-model="editing.image"
                 placeholder="desk-foreman-workspace-runner:local"
+                class="w-full"
               />
             </UFormField>
             <div
@@ -430,6 +439,7 @@ onMounted(() => void load())
                   v-model.number="editing.max_sessions"
                   type="number"
                   min="1"
+                  class="w-full"
                 />
               </UFormField>
               <UFormField label="Max output (bytes)">
@@ -437,6 +447,7 @@ onMounted(() => void load())
                   v-model.number="editing.max_output_bytes"
                   type="number"
                   min="0"
+                  class="w-full"
                 />
               </UFormField>
               <UFormField label="Max timeout (ms)">
@@ -444,6 +455,7 @@ onMounted(() => void load())
                   v-model.number="editing.max_timeout_ms"
                   type="number"
                   min="0"
+                  class="w-full"
                 />
               </UFormField>
               <UFormField label="PID limit">
@@ -451,13 +463,22 @@ onMounted(() => void load())
                   v-model.number="editing.pids_limit"
                   type="number"
                   min="0"
+                  class="w-full"
                 />
               </UFormField>
               <UFormField label="Memory limit">
-                <UInput v-model="editing.memory_limit" placeholder="1g" />
+                <UInput
+                  v-model="editing.memory_limit"
+                  placeholder="1g"
+                  class="w-full"
+                />
               </UFormField>
               <UFormField label="CPU limit">
-                <UInput v-model="editing.cpu_limit" placeholder="2" />
+                <UInput
+                  v-model="editing.cpu_limit"
+                  placeholder="2"
+                  class="w-full"
+                />
               </UFormField>
             </div>
             <p class="text-xs text-(--ui-text-dimmed)">
@@ -474,7 +495,7 @@ onMounted(() => void load())
         </form>
       </template>
       <template #footer>
-        <div class="flex justify-end gap-2">
+        <div class="mx-auto flex w-full max-w-5xl justify-end gap-2">
           <UButton
             variant="outline"
             color="neutral"

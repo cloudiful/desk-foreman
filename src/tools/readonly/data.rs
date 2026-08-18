@@ -157,8 +157,12 @@ fn workspace_tools(root: &Path) -> Result<WorkspaceFileTools, ToolError> {
 }
 
 fn map_readonly_sdk_error(error: WorkspaceSdkError) -> ToolError {
+    let message = error.to_string();
     match error {
         WorkspaceSdkError::InvalidInput(message) => ToolError::InvalidInput(message),
+        WorkspaceSdkError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+            ToolError::NotFound(message)
+        }
         other => ToolError::Internal(other.into()),
     }
 }

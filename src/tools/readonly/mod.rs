@@ -18,7 +18,9 @@ use rmcp::{
 use crate::actor::actor_from_mcp_context;
 use crate::tools::{
     DeskForemanService,
-    common::{mcp_error, parse_and_validate_tool_params, readonly_tool, structured_text_result},
+    common::{
+        parse_and_validate_tool_params, readonly_tool, structured_text_result, tool_error_result,
+    },
     params::{GlobParams, GrepParams, ReadParams},
     shared,
 };
@@ -64,7 +66,10 @@ async fn read_handler(
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let actor = actor_from_mcp_context(&context.service.state, &context.request_context)?;
     let params: ReadParams = parse_and_validate_tool_params(context.arguments.unwrap_or_default())?;
-    let output = shared::read(&context.service.state, &actor, &params).map_err(mcp_error)?;
+    let output = match shared::read(&context.service.state, &actor, &params) {
+        Ok(output) => output,
+        Err(error) => return tool_error_result(error),
+    };
     structured_text_result(data::read_output_text(&output), &output)
 }
 
@@ -73,9 +78,10 @@ async fn glob_handler(
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let actor = actor_from_mcp_context(&context.service.state, &context.request_context)?;
     let params: GlobParams = parse_and_validate_tool_params(context.arguments.unwrap_or_default())?;
-    let output = shared::glob(&context.service.state, &actor, &params)
-        .await
-        .map_err(mcp_error)?;
+    let output = match shared::glob(&context.service.state, &actor, &params).await {
+        Ok(output) => output,
+        Err(error) => return tool_error_result(error),
+    };
     structured_text_result(output.matches.join("\n"), &output)
 }
 
@@ -84,9 +90,10 @@ async fn grep_handler(
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let actor = actor_from_mcp_context(&context.service.state, &context.request_context)?;
     let params: GrepParams = parse_and_validate_tool_params(context.arguments.unwrap_or_default())?;
-    let output = shared::grep(&context.service.state, &actor, &params)
-        .await
-        .map_err(mcp_error)?;
+    let output = match shared::grep(&context.service.state, &actor, &params).await {
+        Ok(output) => output,
+        Err(error) => return tool_error_result(error),
+    };
     let text = output
         .matches
         .iter()
