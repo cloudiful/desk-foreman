@@ -13,6 +13,7 @@ import { requireOk } from './http'
 const currentUser = ref<AuthMeResponse['user'] | null>(null)
 const initializing = ref(false)
 let initialized = false
+let initializePromise: Promise<void> | null = null
 
 client.setConfig({
   baseUrl: window.location.origin,
@@ -20,19 +21,23 @@ client.setConfig({
 })
 
 async function initialize(force = false): Promise<void> {
-  if ((initialized && !force) || initializing.value) return
-  initializing.value = true
-  try {
-    const { data, response } = await me()
-    if (response?.ok && data?.user) {
-      currentUser.value = data.user
-    } else {
+  if (initialized && !force) return
+  if (initializePromise) return initializePromise
+  initializePromise = (async () => {
+    initializing.value = true
+    try {
+      const { data, response } = await me()
+      currentUser.value = response?.ok && data?.user ? data.user : null
+      initialized = Boolean(response?.ok || response?.status === 401)
+    } catch {
       currentUser.value = null
+      initialized = false
+    } finally {
+      initializing.value = false
+      initializePromise = null
     }
-  } finally {
-    initialized = true
-    initializing.value = false
-  }
+  })()
+  return initializePromise
 }
 
 async function loginWithPassword(body: AuthLoginRequest): Promise<void> {
@@ -46,6 +51,12 @@ async function logoutCurrentUser(): Promise<void> {
   const { response } = await logout()
   await requireOk(response, 'Logout failed')
   currentUser.value = null
+  initialized = false
+}
+
+function invalidate(): void {
+  currentUser.value = null
+  initialized = false
 }
 
 async function changeCurrentPassword(
@@ -66,4 +77,5 @@ export const authState = {
   loginWithPassword,
   logoutCurrentUser,
   changeCurrentPassword,
+  invalidate,
 }

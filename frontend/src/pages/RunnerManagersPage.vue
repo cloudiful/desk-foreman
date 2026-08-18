@@ -22,6 +22,7 @@ const rows = ref<RunnerManagerResponse[]>([])
 const loading = ref(false)
 const error = ref('')
 const search = ref('')
+let loadSequence = 0
 
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -43,15 +44,19 @@ const stats = computed(() => {
 })
 
 async function load(): Promise<void> {
+  const sequence = ++loadSequence
   loading.value = true
   error.value = ''
   try {
-    rows.value = await listAdminRunnerManagers()
+    const result = await listAdminRunnerManagers()
+    if (sequence === loadSequence) rows.value = result
   } catch (err) {
-    error.value =
-      err instanceof Error ? err.message : 'Failed to load runner managers'
+    if (sequence === loadSequence) {
+      error.value =
+        err instanceof Error ? err.message : 'Failed to load runner managers'
+    }
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -100,6 +105,8 @@ function blankForm(): RunnerForm {
 
 function openCreate(): void {
   formError.value = ''
+  createdToken.value = null
+  tokenModalOpen.value = false
   editingId.value = null
   enabled.value = true
   editing.value = blankForm()
@@ -108,6 +115,8 @@ function openCreate(): void {
 
 function openEdit(row: RunnerManagerResponse): void {
   formError.value = ''
+  createdToken.value = null
+  tokenModalOpen.value = false
   editingId.value = row.runner_manager_id
   enabled.value = row.enabled
   editing.value = {
@@ -127,6 +136,14 @@ function openEdit(row: RunnerManagerResponse): void {
   drawerOpen.value = true
 }
 
+function handleRunnerDrawerOpen(open: boolean): void {
+  if (!open && !saving.value) {
+    editing.value = null
+    editingId.value = null
+    formError.value = ''
+  }
+}
+
 function toNumber(
   value: number | string | null | undefined,
   fallback: number,
@@ -137,7 +154,7 @@ function toNumber(
 }
 
 async function save(): Promise<void> {
-  if (!editing.value) return
+  if (!editing.value || saving.value) return
   if (!editing.value.name.trim()) {
     formError.value = 'Name is required'
     return
@@ -329,10 +346,16 @@ onMounted(() => void load())
     </section>
 
     <!-- Create/edit drawer -->
-    <UDrawer v-model:open="drawerOpen" title="Runner manager">
+    <UDrawer
+      v-model:open="drawerOpen"
+      :title="editingId === null ? 'Create runner manager' : 'Edit runner manager'"
+      :dismissible="!saving"
+      @update:open="handleRunnerDrawerOpen"
+    >
       <template #body>
         <form
           v-if="editing"
+          id="runner-manager-form"
           class="mx-auto w-full max-w-5xl space-y-6"
           @submit.prevent="save"
         >
@@ -499,6 +522,7 @@ onMounted(() => void load())
           <UButton
             variant="outline"
             color="neutral"
+            :disabled="saving"
             @click="
               () => {
                 drawerOpen = false
@@ -507,7 +531,12 @@ onMounted(() => void load())
           >
             Cancel
           </UButton>
-          <UButton :loading="saving" @click="save">
+          <UButton
+            type="submit"
+            form="runner-manager-form"
+            :loading="saving"
+            :disabled="saving"
+          >
             {{ editingId === null ? 'Register manager' : 'Save changes' }}
           </UButton>
         </div>
@@ -519,20 +548,23 @@ onMounted(() => void load())
       v-model:open="tokenModalOpen"
       title="Runner token"
       description="The runner manager needs this token to authenticate with the control plane."
+      @update:open="(open) => { if (!open) createdToken = null }"
     >
-      <div class="space-y-4">
-        <UAlert
-          title="Copy this token now"
-          description="It is shown only once and cannot be retrieved later."
-          color="warning"
-          variant="subtle"
-        />
-        <TokenReveal v-if="createdToken?.token" :token="createdToken.token" />
-        <p class="text-xs text-(--ui-text-muted)">
-          Configure it on the runner manager as
-          <code class="font-mono">RUNNER_MANAGER_TOKEN</code>.
-        </p>
-      </div>
+      <template #body>
+        <div class="space-y-4">
+          <UAlert
+            title="Copy this token now"
+            description="It is shown only once and cannot be retrieved later."
+            color="warning"
+            variant="subtle"
+          />
+          <TokenReveal v-if="createdToken?.token" :token="createdToken.token" />
+          <p class="text-xs text-(--ui-text-muted)">
+            Configure it on the runner manager as
+            <code class="font-mono">RUNNER_MANAGER_TOKEN</code>.
+          </p>
+        </div>
+      </template>
       <template #footer>
         <UButton
           block

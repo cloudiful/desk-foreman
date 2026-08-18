@@ -68,6 +68,9 @@ export async function listAdminUsers(query: {
   offset: number
   sort_by?: string
   sort_dir?: 'asc' | 'desc'
+  search?: string
+  is_admin?: boolean
+  is_active?: boolean
 }): Promise<UserPageResponse> {
   const { data, response } = await listUsers({ query })
   await requireOk(response, 'Failed to load users')

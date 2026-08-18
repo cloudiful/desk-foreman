@@ -8,6 +8,7 @@ export function useNotify() {
   }
 
   function error(title: string, description?: string): void {
+    if (description === '') return
     toast.add({ title, description, color: 'error' })
   }
 

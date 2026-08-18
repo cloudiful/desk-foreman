@@ -4,16 +4,21 @@ export function useAsyncData<T>(loader: () => Promise<T>) {
   const data = ref<T | null>(null) as { value: T | null }
   const loading = ref(false)
   const error = ref('')
+  let requestSequence = 0
 
   async function load(): Promise<void> {
+    const sequence = ++requestSequence
     loading.value = true
     error.value = ''
     try {
-      data.value = await loader()
+      const result = await loader()
+      if (sequence === requestSequence) data.value = result
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Request failed'
+      if (sequence === requestSequence) {
+        error.value = err instanceof Error ? err.message : 'Request failed'
+      }
     } finally {
-      loading.value = false
+      if (sequence === requestSequence) loading.value = false
     }
   }
 

@@ -68,15 +68,19 @@ const filtered = computed(() => {
 })
 
 async function load(): Promise<void> {
+  const sequence = ++loadSequence
   loading.value = true
   error.value = ''
   try {
-    rows.value = await listAdminApplications()
+    const result = await listAdminApplications()
+    if (sequence === loadSequence) rows.value = result
   } catch (err) {
-    error.value =
-      err instanceof Error ? err.message : 'Failed to load applications'
+    if (sequence === loadSequence) {
+      error.value =
+        err instanceof Error ? err.message : 'Failed to load applications'
+    }
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -112,6 +116,7 @@ const saving = ref(false)
 const formError = ref('')
 const approvalTesting = ref(false)
 const approvalTestResult = ref<ApprovalTestResponse | null>(null)
+let loadSequence = 0
 
 function toNumberOrNull(
   value: number | string | null | undefined,
@@ -185,8 +190,17 @@ function startEdit(row: ApplicationResponse): void {
   drawerOpen.value = true
 }
 
+function handleApplicationDrawerOpen(open: boolean): void {
+  if (!open && !saving.value) {
+    editing.value = null
+    editingUnknownScopes.value = []
+    formError.value = ''
+    approvalTestResult.value = null
+  }
+}
+
 async function save(): Promise<void> {
-  if (!editing.value) return
+  if (!editing.value || saving.value) return
   if (!editing.value.name.trim()) {
     formError.value = 'Name is required'
     return
@@ -245,7 +259,12 @@ async function save(): Promise<void> {
 }
 
 async function testApplicationApproval(): Promise<void> {
-  if (!editing.value || editing.value.application_id === 0) return
+  if (
+    !editing.value ||
+    editing.value.application_id === 0 ||
+    approvalTesting.value
+  )
+    return
   approvalTesting.value = true
   formError.value = ''
   try {
@@ -277,6 +296,7 @@ const creatingToken = ref(false)
 const revealedToken = ref<CreateApplicationTokenResponse | null>(null)
 const revokeTarget = ref<ApplicationTokenResponse | null>(null)
 const revoking = ref(false)
+let tokenLoadSequence = 0
 
 const visibleTokens = computed(() =>
   tokenOwner.value
@@ -303,9 +323,18 @@ async function openTokenDrawer(row: ApplicationResponse): Promise<void> {
   await loadTokens()
 }
 
+function handleTokenDrawerOpen(open: boolean): void {
+  if (!open) {
+    revealedToken.value = null
+    tokenOwner.value = null
+  }
+}
+
 async function loadTokens(): Promise<void> {
+  const sequence = ++tokenLoadSequence
   try {
-    allTokens.value = await listAdminApplicationTokens()
+    const result = await listAdminApplicationTokens()
+    if (sequence === tokenLoadSequence) allTokens.value = result
   } catch (err) {
     notifyError(
       'Failed to load application tokens',
@@ -315,7 +344,7 @@ async function loadTokens(): Promise<void> {
 }
 
 async function createToken(): Promise<void> {
-  if (!tokenOwner.value || !tokenName.value.trim()) return
+  if (!tokenOwner.value || !tokenName.value.trim() || creatingToken.value) return
   creatingToken.value = true
   try {
     revealedToken.value = await createAdminApplicationToken({
@@ -340,7 +369,7 @@ async function createToken(): Promise<void> {
 }
 
 async function confirmRevokeToken(): Promise<void> {
-  if (!revokeTarget.value) return
+  if (!revokeTarget.value || revoking.value) return
   revoking.value = true
   try {
     await deleteAdminApplicationToken(revokeTarget.value.token_id)
@@ -499,9 +528,19 @@ onMounted(() => void load())
     </section>
 
     <!-- Application drawer -->
-    <UDrawer v-model:open="drawerOpen" title="Application">
+    <UDrawer
+      v-model:open="drawerOpen"
+      :title="editing?.application_id === 0 ? 'Create application' : 'Edit application'"
+      :dismissible="!saving"
+      @update:open="handleApplicationDrawerOpen"
+    >
       <template #body>
-        <form v-if="editing" class="space-y-6" @submit.prevent="save">
+        <form
+          v-if="editing"
+          id="application-form"
+          class="space-y-6"
+          @submit.prevent="save"
+        >
           <div class="space-y-4">
             <div
               class="text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
@@ -527,7 +566,6 @@ onMounted(() => void load())
               <UCheckboxGroup
                 v-model="editing.default_scopes"
                 :items="[...AVAILABLE_SCOPES]"
-                orientation="horizontal"
               />
             </UFormField>
           </div>
@@ -739,6 +777,7 @@ onMounted(() => void load())
           <UButton
             variant="outline"
             color="neutral"
+            :disabled="saving"
             @click="
               () => {
                 drawerOpen = false
@@ -747,7 +786,12 @@ onMounted(() => void load())
           >
             Cancel
           </UButton>
-          <UButton :loading="saving" @click="save">
+          <UButton
+            type="submit"
+            form="application-form"
+            :loading="saving"
+            :disabled="saving"
+          >
             {{
               editing?.application_id === 0
                 ? 'Create application'
@@ -759,7 +803,11 @@ onMounted(() => void load())
     </UDrawer>
 
     <!-- Tokens drawer -->
-    <UDrawer v-model:open="tokenDrawerOpen" title="Application tokens">
+    <UDrawer
+      v-model:open="tokenDrawerOpen"
+      title="Application tokens"
+      @update:open="handleTokenDrawerOpen"
+    >
       <template #body>
         <div class="space-y-6">
           <div
@@ -796,7 +844,6 @@ onMounted(() => void load())
               <UCheckboxGroup
                 v-model="tokenScopes"
                 :items="[...AVAILABLE_SCOPES]"
-                orientation="horizontal"
               />
             </UFormField>
             <UFormField label="Expires at" hint="Optional">

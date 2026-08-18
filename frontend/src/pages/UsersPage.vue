@@ -42,26 +42,14 @@ const sort = ref<{ key: string; dir: 'asc' | 'desc' } | null>({
   key: 'updated_at',
   dir: 'desc',
 })
-
-const filtered = computed(() => {
-  const query = search.value.trim().toLowerCase()
-  return rows.value.filter((row) => {
-    if (roleFilter.value === 'admin' && !row.is_admin) return false
-    if (roleFilter.value === 'user' && row.is_admin) return false
-    if (statusFilter.value === 'active' && !row.is_active) return false
-    if (statusFilter.value === 'inactive' && row.is_active) return false
-    if (!query) return true
-    return [row.login_name, row.display_name, row.email].some((value) =>
-      value?.toLowerCase().includes(query),
-    )
-  })
-})
+let loadSequence = 0
 
 const pageCount = computed(() =>
   total.value > 0 ? Math.max(1, Math.ceil(total.value / PAGE_SIZE)) : 1,
 )
 
 async function load(): Promise<void> {
+  const sequence = ++loadSequence
   loading.value = true
   error.value = ''
   try {
@@ -70,13 +58,23 @@ async function load(): Promise<void> {
       offset: (page.value - 1) * PAGE_SIZE,
       sort_by: sort.value?.key,
       sort_dir: sort.value?.dir,
+      search: search.value.trim() || undefined,
+      is_admin:
+        roleFilter.value === 'all' ? undefined : roleFilter.value === 'admin',
+      is_active:
+        statusFilter.value === 'all'
+          ? undefined
+          : statusFilter.value === 'active',
     })
+    if (sequence !== loadSequence) return
     rows.value = result.items
     total.value = result.total
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Failed to load users'
+    if (sequence === loadSequence) {
+      error.value = err instanceof Error ? err.message : 'Failed to load users'
+    }
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -90,10 +88,8 @@ function onSearchEnter(): void {
 }
 
 watch([roleFilter, statusFilter], () => {
-  if (page.value !== 1) {
-    page.value = 1
-    void load()
-  }
+  page.value = 1
+  void load()
 })
 
 function changeSort(value: { key: string; dir: 'asc' | 'desc' } | null): void {
@@ -158,6 +154,13 @@ function startEdit(row: UserResponse): void {
   userDrawerOpen.value = true
 }
 
+function handleUserDrawerOpen(open: boolean): void {
+  if (!open && !savingUser.value) {
+    editing.value = null
+    userFormError.value = ''
+  }
+}
+
 function validateUser(): string | null {
   const form = editing.value
   if (!form) return null
@@ -171,7 +174,7 @@ function validateUser(): string | null {
 }
 
 async function saveUser(): Promise<void> {
-  if (!editing.value) return
+  if (!editing.value || savingUser.value) return
   userFormError.value = validateUser() ?? ''
   if (userFormError.value) return
   savingUser.value = true
@@ -220,7 +223,7 @@ const deactivateModalOpen = computed<boolean>({
 })
 
 async function confirmDeactivate(): Promise<void> {
-  if (!deactivateTarget.value) return
+  if (!deactivateTarget.value || deactivating.value) return
   deactivating.value = true
   try {
     await deactivateAdminUser(deactivateTarget.value.user_id)
@@ -276,7 +279,7 @@ function openReset(row: UserResponse): void {
 }
 
 async function confirmReset(): Promise<void> {
-  if (!resetTarget.value) return
+  if (!resetTarget.value || resetting.value) return
   if (newPassword.value.length < 8) {
     resetError.value = 'Password must be at least 8 characters'
     return
@@ -309,6 +312,7 @@ const creatingToken = ref(false)
 const revealedToken = ref<CreateMcpTokenResponse | null>(null)
 const revokeTarget = ref<McpTokenResponse | null>(null)
 const revoking = ref(false)
+let tokenLoadSequence = 0
 
 const visibleTokens = computed(() =>
   tokenOwner.value
@@ -333,9 +337,18 @@ async function openTokenDrawer(row: UserResponse): Promise<void> {
   await loadTokens()
 }
 
+function handleTokenDrawerOpen(open: boolean): void {
+  if (!open) {
+    revealedToken.value = null
+    tokenOwner.value = null
+  }
+}
+
 async function loadTokens(): Promise<void> {
+  const sequence = ++tokenLoadSequence
   try {
-    allTokens.value = await listAdminMcpTokens()
+    const result = await listAdminMcpTokens()
+    if (sequence === tokenLoadSequence) allTokens.value = result
   } catch (err) {
     notifyError(
       'Failed to load MCP tokens',
@@ -345,7 +358,7 @@ async function loadTokens(): Promise<void> {
 }
 
 async function createToken(): Promise<void> {
-  if (!tokenOwner.value || !tokenName.value.trim()) return
+  if (!tokenOwner.value || !tokenName.value.trim() || creatingToken.value) return
   creatingToken.value = true
   try {
     revealedToken.value = await createAdminMcpToken({
@@ -370,7 +383,7 @@ async function createToken(): Promise<void> {
 }
 
 async function confirmRevokeToken(): Promise<void> {
-  if (!revokeTarget.value) return
+  if (!revokeTarget.value || revoking.value) return
   revoking.value = true
   try {
     await deleteAdminMcpToken(revokeTarget.value.token_id)
@@ -443,7 +456,7 @@ onMounted(() => void load())
             class="w-36"
           />
           <span class="ml-auto text-sm text-(--ui-text-muted)">
-            {{ filtered.length }} of {{ total }} users
+            {{ rows.length }} of {{ total }} users
           </span>
         </div>
       </div>
@@ -451,7 +464,7 @@ onMounted(() => void load())
       <ErrorAlert v-if="error" :error="error" class="m-4" @retry="load" />
 
       <DataTable
-        :rows="filtered"
+        :rows="rows"
         :columns="[
           { key: 'login_name', label: 'User', sortable: true },
           { key: 'role', label: 'Role' },
@@ -590,9 +603,19 @@ onMounted(() => void load())
     </section>
 
     <!-- User create/edit drawer -->
-    <UDrawer v-model:open="userDrawerOpen" title="User">
+    <UDrawer
+      v-model:open="userDrawerOpen"
+      :title="editing?.user_id === 0 ? 'Create user' : 'Edit user'"
+      :dismissible="!savingUser"
+      @update:open="handleUserDrawerOpen"
+    >
       <template #body>
-        <form v-if="editing" class="space-y-5" @submit.prevent="saveUser">
+        <form
+          v-if="editing"
+          id="user-form"
+          class="space-y-5"
+          @submit.prevent="saveUser"
+        >
           <UFormField label="Login name">
             <UInput
               v-model="editing.login_name"
@@ -690,6 +713,7 @@ onMounted(() => void load())
           <UButton
             variant="outline"
             color="neutral"
+            :disabled="savingUser"
             @click="
               () => {
                 userDrawerOpen = false
@@ -698,7 +722,12 @@ onMounted(() => void load())
           >
             Cancel
           </UButton>
-          <UButton :loading="savingUser" @click="saveUser">
+          <UButton
+            type="submit"
+            form="user-form"
+            :loading="savingUser"
+            :disabled="savingUser"
+          >
             {{ editing?.user_id === 0 ? 'Create user' : 'Save changes' }}
           </UButton>
         </div>
@@ -750,7 +779,11 @@ onMounted(() => void load())
     />
 
     <!-- MCP tokens drawer -->
-    <UDrawer v-model:open="tokenDrawerOpen" title="MCP tokens">
+    <UDrawer
+      v-model:open="tokenDrawerOpen"
+      title="MCP tokens"
+      @update:open="handleTokenDrawerOpen"
+    >
       <template #body>
         <div class="space-y-6">
           <div
@@ -787,7 +820,6 @@ onMounted(() => void load())
               <UCheckboxGroup
                 v-model="tokenScopes"
                 :items="[...AVAILABLE_SCOPES]"
-                orientation="horizontal"
               />
             </UFormField>
             <UFormField label="Expires at" hint="Optional">

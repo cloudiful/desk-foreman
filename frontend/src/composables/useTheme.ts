@@ -6,8 +6,12 @@ const STORAGE_KEY = 'desk-foreman-theme'
 
 function resolveInitial(): ThemeMode {
   if (typeof window === 'undefined') return 'dark'
-  const stored = window.localStorage.getItem(STORAGE_KEY)
-  if (stored === 'dark' || stored === 'light') return stored
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY)
+    if (stored === 'dark' || stored === 'light') return stored
+  } catch {
+    // Storage can be unavailable in private browsing or restricted contexts.
+  }
   return 'dark'
 }
 
@@ -17,7 +21,11 @@ function apply(mode: ThemeMode): void {
   const root = document.documentElement
   root.classList.toggle('dark', mode === 'dark')
   root.classList.toggle('light', mode === 'light')
-  window.localStorage.setItem(STORAGE_KEY, mode)
+  try {
+    window.localStorage.setItem(STORAGE_KEY, mode)
+  } catch {
+    // Theme still applies for this session when persistence is unavailable.
+  }
 }
 
 function toggle(): void {

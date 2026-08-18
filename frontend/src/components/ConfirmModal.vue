@@ -3,7 +3,14 @@ const props = defineProps<{
   title: string
   description?: string
   confirmLabel?: string
-  confirmColor?: 'primary' | 'error' | 'warning' | 'success' | 'neutral'
+  confirmColor?:
+    | 'primary'
+    | 'secondary'
+    | 'success'
+    | 'info'
+    | 'warning'
+    | 'error'
+    | 'neutral'
   loading?: boolean
 }>()
 
@@ -19,6 +26,8 @@ const open = defineModel<boolean>('open', { required: true })
     v-model:open="open"
     :title="props.title"
     :description="props.description"
+    :dismissible="!props.loading"
+    :close="!props.loading"
   >
     <template #body>
       <slot />
@@ -26,6 +35,7 @@ const open = defineModel<boolean>('open', { required: true })
     <template #footer>
       <UButton
         variant="outline"
+        :disabled="props.loading"
         @click="
           () => {
             open = false
@@ -37,6 +47,8 @@ const open = defineModel<boolean>('open', { required: true })
       <UButton
         :color="props.confirmColor ?? 'primary'"
         :loading="props.loading"
+        :disabled="props.loading"
+        type="button"
         @click="emit('confirm')"
       >
         {{ props.confirmLabel ?? 'Confirm' }}

@@ -18,7 +18,17 @@ const sessions = ref<RunnerSessionResponse[]>([])
 const loading = ref(false)
 const error = ref('')
 const activeTab = ref('runners')
-const autoRefresh = ref(true)
+const AUTO_REFRESH_KEY = 'desk-foreman-operations-auto-refresh'
+
+function readAutoRefresh(): boolean {
+  try {
+    return window.localStorage.getItem(AUTO_REFRESH_KEY) !== 'false'
+  } catch {
+    return true
+  }
+}
+
+const autoRefresh = ref(readAutoRefresh())
 const runnerDetail = ref<WorkspaceRunnerResponse | null>(null)
 const sessionDetail = ref<RunnerSessionResponse | null>(null)
 
@@ -52,7 +62,8 @@ const sessionStats = computed(() => {
 
 let timer: ReturnType<typeof setInterval> | undefined
 
-async function load(): Promise<void> {
+async function load(manual = true): Promise<void> {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -65,33 +76,55 @@ async function load(): Promise<void> {
   } catch (err) {
     error.value =
       err instanceof Error ? err.message : 'Failed to load runner status'
-    notifyError(
-      'Failed to refresh operations',
-      err instanceof Error ? err.message : undefined,
-    )
+    if (manual) {
+      notifyError(
+        'Failed to refresh operations',
+        err instanceof Error ? err.message : undefined,
+      )
+    }
   } finally {
     loading.value = false
   }
 }
 
-function toggleAutoRefresh(value: boolean): void {
-  autoRefresh.value = value
+function stopAutoRefresh(): void {
   if (timer) {
     clearInterval(timer)
     timer = undefined
   }
-  if (value) {
-    timer = setInterval(() => void load(), 15000)
+}
+
+function startAutoRefresh(): void {
+  stopAutoRefresh()
+  if (autoRefresh.value && !document.hidden) {
+    timer = setInterval(() => void load(false), 15000)
   }
+}
+
+function toggleAutoRefresh(value: boolean): void {
+  autoRefresh.value = value
+  try {
+    window.localStorage.setItem(AUTO_REFRESH_KEY, String(value))
+  } catch {
+    // Persistence is optional.
+  }
+  startAutoRefresh()
+}
+
+function handleVisibilityChange(): void {
+  startAutoRefresh()
+  if (!document.hidden && !loading.value) void load(false)
 }
 
 onMounted(() => {
   void load()
-  toggleAutoRefresh(true)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  startAutoRefresh()
 })
 
 onUnmounted(() => {
-  if (timer) clearInterval(timer)
+  stopAutoRefresh()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 
@@ -125,7 +158,7 @@ onUnmounted(() => {
             variant="outline"
             color="neutral"
             :loading="loading"
-            @click="load"
+            @click="() => load()"
           />
         </div>
       </template>
@@ -311,18 +344,18 @@ onUnmounted(() => {
     </section>
 
     <!-- Runner detail drawer -->
-    <UDrawer v-model:open="runnerDetailOpen" title="Runner details">
+    <UDrawer v-model:open="runnerDetailOpen" title="Runner details" :close="true">
       <template #body>
         <dl v-if="runnerDetail" class="space-y-3 text-sm">
           <div class="flex justify-between gap-4">
             <dt class="text-(--ui-text-muted)">Container</dt>
-            <dd class="font-mono text-right">
+            <dd class="max-w-[55%] truncate font-mono text-right">
               {{ runnerDetail.container_name }}
             </dd>
           </div>
           <div class="flex justify-between gap-4">
             <dt class="text-(--ui-text-muted)">Container ID</dt>
-            <dd class="font-mono text-right">
+            <dd class="max-w-[55%] break-all font-mono text-right">
               {{ runnerDetail.container_id ?? '—' }}
             </dd>
           </div>
@@ -336,7 +369,9 @@ onUnmounted(() => {
           </div>
           <div class="flex justify-between gap-4">
             <dt class="text-(--ui-text-muted)">Image</dt>
-            <dd class="font-mono text-right">{{ runnerDetail.image_name }}</dd>
+            <dd class="max-w-[55%] truncate font-mono text-right">
+              {{ runnerDetail.image_name }}
+            </dd>
           </div>
           <div class="flex justify-between gap-4">
             <dt class="text-(--ui-text-muted)">Workspace root</dt>
@@ -368,7 +403,7 @@ onUnmounted(() => {
     </UDrawer>
 
     <!-- Session detail drawer -->
-    <UDrawer v-model:open="sessionDetailOpen" title="Session details">
+    <UDrawer v-model:open="sessionDetailOpen" title="Session details" :close="true">
       <template #body>
         <dl v-if="sessionDetail" class="space-y-3 text-sm">
           <div class="flex justify-between gap-4">

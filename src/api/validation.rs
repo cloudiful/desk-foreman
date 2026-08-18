@@ -77,6 +77,15 @@ pub fn validate_sort_dir(value: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
+pub fn validate_audit_status(value: &str) -> Result<(), ValidationError> {
+    if !matches!(value, "success" | "failure" | "unknown") {
+        return Err(validation_error(
+            "must be one of: success, failure, unknown",
+        ));
+    }
+    Ok(())
+}
+
 pub fn validate_read_file_params<T>(value: &T) -> Result<(), ValidationError>
 where
     T: ReadFileRangeValidation,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { listAdminAuditLogs } from '../api/users'
 import { formatDateTime, formatMilliseconds } from '../utils/format'
 import type { AuditLogResponse } from '../generated/openapi/types.gen'
@@ -19,42 +19,34 @@ const page = ref(1)
 const actionFilter = ref('')
 const statusFilter = ref<'all' | 'success' | 'failure' | 'unknown'>('all')
 const detail = ref<AuditLogResponse | null>(null)
-
-const filtered = computed(() => {
-  const query = actionFilter.value.trim().toLowerCase()
-  return rows.value.filter((row) => {
-    if (statusFilter.value === 'success' && row.status !== 'success')
-      return false
-    if (statusFilter.value === 'failure' && row.status === 'success')
-      return false
-    if (!query) return true
-    return (
-      row.action.toLowerCase().includes(query) ||
-      row.actor_type.toLowerCase().includes(query) ||
-      row.target_type.toLowerCase().includes(query)
-    )
-  })
-})
+let loadSequence = 0
+let filterTimer: ReturnType<typeof setTimeout> | undefined
 
 const pageCount = computed(() =>
   total.value > 0 ? Math.max(1, Math.ceil(total.value / PAGE_SIZE)) : 1,
 )
 
 async function load(): Promise<void> {
+  const sequence = ++loadSequence
   loading.value = true
   error.value = ''
   try {
     const result = await listAdminAuditLogs({
       limit: PAGE_SIZE,
       offset: (page.value - 1) * PAGE_SIZE,
+      search: actionFilter.value.trim() || undefined,
+      status: statusFilter.value === 'all' ? undefined : statusFilter.value,
     })
+    if (sequence !== loadSequence) return
     rows.value = result.items
     total.value = result.total
   } catch (err) {
-    error.value =
-      err instanceof Error ? err.message : 'Failed to load audit logs'
+    if (sequence === loadSequence) {
+      error.value =
+        err instanceof Error ? err.message : 'Failed to load audit logs'
+    }
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -63,10 +55,9 @@ function onPageChange(): void {
 }
 
 watch([actionFilter, statusFilter], () => {
-  if (page.value !== 1) {
-    page.value = 1
-    void load()
-  }
+  page.value = 1
+  if (filterTimer) clearTimeout(filterTimer)
+  filterTimer = setTimeout(() => void load(), 250)
 })
 
 function statusColor(status: string | null | undefined): string {
@@ -92,6 +83,10 @@ const detailOpen = computed<boolean>({
 })
 
 onMounted(() => void load())
+
+onUnmounted(() => {
+  if (filterTimer) clearTimeout(filterTimer)
+})
 </script>
 
 <template>
@@ -134,14 +129,14 @@ onMounted(() => void load())
           class="w-36"
         />
         <span class="ml-auto text-sm text-(--ui-text-muted)">
-          {{ filtered.length }} of {{ total }} events
+          {{ rows.length }} of {{ total }} events
         </span>
       </div>
 
       <ErrorAlert v-if="error" :error="error" class="m-4" @retry="load" />
 
       <DataTable
-        :rows="filtered"
+        :rows="rows"
         :columns="[
           { key: 'created_at', label: 'Time' },
           { key: 'action', label: 'Action' },
@@ -226,7 +221,7 @@ onMounted(() => void load())
       </div>
     </section>
 
-    <UDrawer v-model:open="detailOpen" title="Audit event">
+    <UDrawer v-model:open="detailOpen" title="Audit event" :close="true">
       <template #body>
         <dl v-if="detail" class="space-y-3 text-sm">
           <div class="flex justify-between gap-4">
@@ -266,7 +261,9 @@ onMounted(() => void load())
           </div>
           <div v-if="detail.request_id" class="flex justify-between gap-4">
             <dt class="text-(--ui-text-muted)">Request ID</dt>
-            <dd class="font-mono text-xs">{{ detail.request_id }}</dd>
+            <dd class="max-w-[55%] break-all font-mono text-right text-xs">
+              {{ detail.request_id }}
+            </dd>
           </div>
           <div
             class="rounded-lg border border-(--ui-border) bg-(--ui-bg-elevated) p-3"

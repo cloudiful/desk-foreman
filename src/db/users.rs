@@ -59,14 +59,20 @@ pub async fn list_users(
     let sort_by = params.sort_by.as_deref().unwrap_or("updated_at");
     let sort_dir = params.sort_dir.as_deref().unwrap_or("desc");
     let list_sql = format!(
-        "{} ORDER BY {sort_by} {sort_dir}, user_id DESC LIMIT $1 OFFSET $2",
+        "{} ORDER BY {sort_by} {sort_dir}, user_id DESC LIMIT $4 OFFSET $5",
         include_str!("../sql/list_users_base.sql")
     );
     let count_row = sqlx::query(include_str!("../sql/count_users.sql"))
+        .bind(&params.search)
+        .bind(params.is_admin)
+        .bind(params.is_active)
         .fetch_one(pool)
         .await?;
     let total = count_row.get("count");
     let rows = sqlx::query_as::<_, UserResponse>(AssertSqlSafe(list_sql))
+        .bind(&params.search)
+        .bind(params.is_admin)
+        .bind(params.is_active)
         .bind(limit)
         .bind(offset)
         .fetch_all(pool)

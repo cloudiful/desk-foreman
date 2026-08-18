@@ -27,6 +27,7 @@ const actionTarget = ref<{
   action: 'archive' | 'restore' | 'reset'
 } | null>(null)
 const acting = ref(false)
+let loadSequence = 0
 
 const filtered = computed(() => {
   if (lifecycleFilter.value === 'all') return rows.value
@@ -36,23 +37,25 @@ const filtered = computed(() => {
 })
 
 async function load(): Promise<void> {
+  const sequence = ++loadSequence
   loading.value = true
   error.value = ''
   try {
-    rows.value = await listAdminWorkspaceBindings({
+    const result = await listAdminWorkspaceBindings({
       limit: 200,
       offset: 0,
-      application_id: applicationId.value
-        ? Number(applicationId.value)
-        : undefined,
+      application_id: parseApplicationId(applicationId.value),
       external_user_id: externalUserId.value.trim() || undefined,
       workspace_key: workspaceKey.value.trim() || undefined,
     })
+    if (sequence === loadSequence) rows.value = result
   } catch (err) {
-    error.value =
-      err instanceof Error ? err.message : 'Failed to load workspace bindings'
+    if (sequence === loadSequence) {
+      error.value =
+        err instanceof Error ? err.message : 'Failed to load workspace bindings'
+    }
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -63,9 +66,15 @@ function confirmAction(
   actionTarget.value = { binding, action }
 }
 
+function parseApplicationId(value: string): number | undefined {
+  if (!value.trim()) return undefined
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
 async function runAction(): Promise<void> {
   const target = actionTarget.value
-  if (!target) return
+  if (!target || acting.value) return
   acting.value = true
   try {
     await transitionAdminWorkspaceBinding(
@@ -130,7 +139,7 @@ onMounted(() => void load())
       class="rounded-xl border border-(--ui-border) bg-(--ui-bg) shadow-sm"
     >
       <div
-        class="flex flex-col gap-3 border-b border-(--ui-border) p-4 md:flex-row md:items-center"
+        class="flex flex-col flex-wrap gap-3 border-b border-(--ui-border) p-4 md:flex-row md:items-center"
       >
         <UInput
           v-model="applicationId"

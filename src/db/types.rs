@@ -6,8 +6,8 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::api::validation::{
-    deserialize_optional_trimmed_nonempty, validate_non_blank, validate_sort_dir,
-    validate_user_sort_by,
+    deserialize_optional_trimmed_nonempty, validate_audit_status, validate_non_blank,
+    validate_sort_dir, validate_user_sort_by,
 };
 use crate::policy::ResourceLimits;
 
@@ -132,6 +132,9 @@ pub struct ListUsersParams {
     pub sort_by: Option<String>,
     #[validate(custom(function = "validate_sort_dir"))]
     pub sort_dir: Option<String>,
+    pub search: Option<String>,
+    pub is_admin: Option<bool>,
+    pub is_active: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, FromRow)]
@@ -496,6 +499,9 @@ pub struct ListAuditLogsParams {
     pub from: Option<DateTime<Utc>>,
     pub to: Option<DateTime<Utc>>,
     pub action: Option<String>,
+    pub search: Option<String>,
+    #[validate(custom(function = "validate_audit_status"))]
+    pub status: Option<String>,
     pub actor_user_id: Option<i64>,
     pub actor_application_id: Option<i64>,
     pub workspace_binding_id: Option<i64>,

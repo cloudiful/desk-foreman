@@ -5,7 +5,7 @@ import { authState } from '../api/auth'
 
 const router = useRouter()
 
-const loginName = ref('admin')
+const loginName = ref('')
 const password = ref('')
 const loading = ref(false)
 const error = ref('')
@@ -25,6 +25,7 @@ async function submit(): Promise<void> {
     await router.push('/')
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Login failed'
+    password.value = ''
   } finally {
     loading.value = false
   }

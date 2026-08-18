@@ -87,4 +87,27 @@ router.beforeEach(async (to) => {
   return true
 })
 
+const chunkErrorPattern =
+  /Failed to fetch dynamically imported module|Importing a module script failed|ChunkLoadError/i
+const chunkReloadKey = 'desk-foreman-chunk-reload'
+
+router.onError((error, to) => {
+  if (!chunkErrorPattern.test(String(error))) return
+  try {
+    if (sessionStorage.getItem(chunkReloadKey) === to.fullPath) return
+    sessionStorage.setItem(chunkReloadKey, to.fullPath)
+  } catch {
+    // Continue with a best-effort reload when session storage is unavailable.
+  }
+  window.location.assign(to.fullPath)
+})
+
+router.afterEach(() => {
+  try {
+    sessionStorage.removeItem(chunkReloadKey)
+  } catch {
+    // Ignore unavailable session storage.
+  }
+})
+
 export default router

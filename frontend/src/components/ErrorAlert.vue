@@ -15,7 +15,7 @@ defineEmits<{
     color="error"
     variant="subtle"
   >
-    <template v-if="$slots.retry" #actions>
+    <template #actions>
       <slot name="retry">
         <UButton color="error" variant="soft" size="xs" @click="$emit('retry')">
           Retry

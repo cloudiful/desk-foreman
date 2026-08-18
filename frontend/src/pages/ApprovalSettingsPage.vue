@@ -143,7 +143,13 @@ onMounted(() => void load())
         >
           Test reviewer
         </UButton>
-        <UButton icon="i-lucide-save" :loading="saving" @click="save">
+        <UButton
+          type="submit"
+          form="approval-settings-form"
+          icon="i-lucide-save"
+          :loading="saving"
+          :disabled="saving"
+        >
           Save settings
         </UButton>
       </template>
@@ -240,7 +246,11 @@ onMounted(() => void load())
       class="rounded-xl border border-(--ui-border) bg-(--ui-bg) p-5 shadow-sm"
     >
       <ErrorAlert v-if="error" :error="error" class="mb-4" @retry="load" />
-      <form class="grid gap-4 md:grid-cols-2" @submit.prevent="save">
+      <form
+        id="approval-settings-form"
+        class="grid gap-4 md:grid-cols-2"
+        @submit.prevent="save"
+      >
         <div
           class="flex items-center justify-between rounded-lg border border-(--ui-border) p-3 md:col-span-2"
         >
