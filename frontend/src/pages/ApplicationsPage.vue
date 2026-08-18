@@ -99,6 +99,7 @@ interface ApplicationForm {
   approval_timeout_ms: number | string
   approval_max_input_bytes: number | string
   approval_max_concurrent: number | string
+  approval_max_output_tokens: number | string
   approval_api_key: string
   approval_api_key_configured: boolean
   clear_approval_api_key: boolean
@@ -139,6 +140,7 @@ function blankForm(): ApplicationForm {
     approval_timeout_ms: '',
     approval_max_input_bytes: '',
     approval_max_concurrent: '',
+    approval_max_output_tokens: '',
     approval_api_key: '',
     approval_api_key_configured: false,
     clear_approval_api_key: false,
@@ -173,6 +175,7 @@ function startEdit(row: ApplicationResponse): void {
     approval_timeout_ms: row.approval_timeout_ms ?? '',
     approval_max_input_bytes: row.approval_max_input_bytes ?? '',
     approval_max_concurrent: row.approval_max_concurrent ?? '',
+    approval_max_output_tokens: row.approval_max_output_tokens ?? '',
     approval_api_key: '',
     approval_api_key_configured: row.approval_api_key_configured,
     clear_approval_api_key: false,
@@ -212,6 +215,9 @@ async function save(): Promise<void> {
     ),
     approval_max_concurrent: toNumberOrNull(
       editing.value.approval_max_concurrent,
+    ),
+    approval_max_output_tokens: toNumberOrNull(
+      editing.value.approval_max_output_tokens,
     ),
     approval_api_key: editing.value.approval_api_key.trim() || null,
     clear_approval_api_key: editing.value.clear_approval_api_key,
@@ -675,6 +681,15 @@ onMounted(() => void load())
                     type="number"
                     min="1"
                     max="64"
+                    placeholder="Global default"
+                  />
+                </UFormField>
+                <UFormField label="Max output tokens">
+                  <UInput
+                    v-model.number="editing.approval_max_output_tokens"
+                    type="number"
+                    min="256"
+                    max="8192"
                     placeholder="Global default"
                   />
                 </UFormField>

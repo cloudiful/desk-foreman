@@ -34,6 +34,7 @@ pub(crate) struct EffectiveConfig {
     pub(crate) timeout_ms: u64,
     pub(crate) max_input_bytes: usize,
     pub(crate) max_concurrent: usize,
+    pub(crate) max_output_tokens: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -217,12 +218,13 @@ impl ApprovalService {
             bail!("approval reviewer API key is not configured");
         }
         let key = format!(
-            "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
+            "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
             config.endpoint,
             config.model,
             config.timeout_ms,
             config.max_input_bytes,
             config.max_concurrent,
+            config.max_output_tokens,
             digest(&config.api_key),
         );
         if let Some(reviewer) = self.cache.read().await.get(&key).cloned() {
@@ -235,6 +237,7 @@ impl ApprovalService {
             timeout: Duration::from_millis(config.timeout_ms),
             max_input_bytes: config.max_input_bytes,
             max_concurrent: config.max_concurrent,
+            max_output_tokens: config.max_output_tokens,
         })?) as Reviewer;
         self.cache.write().await.insert(key, reviewer.clone());
         Ok(reviewer)
@@ -274,6 +277,7 @@ impl ApprovalService {
             global.timeout_ms,
             global.max_input_bytes,
             global.max_concurrent,
+            global.max_output_tokens,
             false,
         )
     }
@@ -313,6 +317,9 @@ impl ApprovalService {
             application
                 .approval_max_concurrent
                 .unwrap_or(global.max_concurrent),
+            application
+                .approval_max_output_tokens
+                .unwrap_or(global.max_output_tokens),
             true,
         )
     }
@@ -354,6 +361,7 @@ fn build_config(
     timeout_ms: i64,
     max_input_bytes: i64,
     max_concurrent: i64,
+    max_output_tokens: i64,
     application_override: bool,
 ) -> anyhow::Result<Option<EffectiveConfig>> {
     let endpoint = endpoint.trim().trim_end_matches('/').to_string();
@@ -376,6 +384,9 @@ fn build_config(
             .unwrap_or(128 * 1024)
             .clamp(1, 512 * 1024),
         max_concurrent: usize::try_from(max_concurrent).unwrap_or(8).clamp(1, 64),
+        max_output_tokens: u32::try_from(max_output_tokens)
+            .unwrap_or(1024)
+            .clamp(256, 8_192),
     }))
 }
 
@@ -429,9 +440,18 @@ mod tests {
     #[test]
     fn global_without_endpoint_is_disabled() {
         assert!(
-            build_config("".to_string(), "model".to_string(), None, 100, 1, 1, false)
-                .expect("config")
-                .is_none()
+            build_config(
+                "".to_string(),
+                "model".to_string(),
+                None,
+                100,
+                1,
+                1,
+                1024,
+                false,
+            )
+            .expect("config")
+            .is_none()
         );
     }
 
@@ -445,6 +465,7 @@ mod tests {
                 100,
                 1,
                 1,
+                1024,
                 true,
             )
             .is_err()
@@ -460,6 +481,7 @@ mod tests {
             1,
             999_999,
             999,
+            999_999,
             false,
         )
         .expect("config")
@@ -467,6 +489,7 @@ mod tests {
         assert_eq!(config.timeout_ms, 100);
         assert_eq!(config.max_input_bytes, 512 * 1024);
         assert_eq!(config.max_concurrent, 64);
+        assert_eq!(config.max_output_tokens, 8_192);
     }
 
     #[test]

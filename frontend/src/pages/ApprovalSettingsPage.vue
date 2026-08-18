@@ -23,6 +23,7 @@ const clearApiKey = ref(false)
 const timeoutMs = ref<number | string>(10000)
 const maxInputBytes = ref<number | string>(131072)
 const maxConcurrent = ref<number | string>(8)
+const maxOutputTokens = ref<number | string>(1024)
 const loading = ref(false)
 const saving = ref(false)
 const testing = ref(false)
@@ -43,6 +44,7 @@ async function load(): Promise<void> {
     timeoutMs.value = settings.value.timeout_ms
     maxInputBytes.value = settings.value.max_input_bytes
     maxConcurrent.value = settings.value.max_concurrent
+    maxOutputTokens.value = settings.value.max_output_tokens
   } catch (err) {
     error.value =
       err instanceof Error ? err.message : 'Failed to load approval settings'
@@ -74,11 +76,13 @@ async function save(): Promise<void> {
       timeout_ms: toNumber(timeoutMs.value, 10000),
       max_input_bytes: toNumber(maxInputBytes.value, 131072),
       max_concurrent: toNumber(maxConcurrent.value, 8),
+      max_output_tokens: toNumber(maxOutputTokens.value, 1024),
     })
     enabled.value = settings.value.enabled
     timeoutMs.value = settings.value.timeout_ms
     maxInputBytes.value = settings.value.max_input_bytes
     maxConcurrent.value = settings.value.max_concurrent
+    maxOutputTokens.value = settings.value.max_output_tokens
     apiKey.value = ''
     clearApiKey.value = false
     success('Approval settings saved')
@@ -307,6 +311,14 @@ onMounted(() => void load())
             type="number"
             min="1"
             max="64"
+          />
+        </UFormField>
+        <UFormField label="Max output tokens">
+          <UInput
+            v-model.number="maxOutputTokens"
+            type="number"
+            min="256"
+            max="8192"
           />
         </UFormField>
       </form>

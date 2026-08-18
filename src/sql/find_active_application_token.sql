@@ -19,6 +19,7 @@ SELECT
     a.approval_timeout_ms AS app_approval_timeout_ms,
     a.approval_max_input_bytes AS app_approval_max_input_bytes,
     a.approval_max_concurrent AS app_approval_max_concurrent,
+    a.approval_max_output_tokens AS app_approval_max_output_tokens,
     a.approval_api_key_ciphertext IS NOT NULL AS app_approval_api_key_configured,
     t.expires_at,
     t.scopes,

@@ -35,6 +35,7 @@ pub struct OpenAiReviewerConfig {
     pub timeout: Duration,
     pub max_input_bytes: usize,
     pub max_concurrent: usize,
+    pub max_output_tokens: u32,
 }
 
 pub struct OpenAiReviewer {
@@ -43,6 +44,7 @@ pub struct OpenAiReviewer {
     model: String,
     timeout: Duration,
     max_input_bytes: usize,
+    max_output_tokens: u32,
     permits: Arc<Semaphore>,
 }
 
@@ -53,6 +55,7 @@ impl OpenAiReviewer {
             || config.timeout.is_zero()
             || config.max_input_bytes == 0
             || config.max_concurrent == 0
+            || config.max_output_tokens == 0
         {
             return Err(ApprovalError::Unavailable);
         }
@@ -70,6 +73,7 @@ impl OpenAiReviewer {
             model,
             timeout: config.timeout,
             max_input_bytes: config.max_input_bytes,
+            max_output_tokens: config.max_output_tokens,
             permits: Arc::new(Semaphore::new(config.max_concurrent)),
         })
     }
@@ -94,7 +98,7 @@ impl OpenAiReviewer {
                 format: TextResponseFormatConfiguration::JsonSchema(schema),
                 verbosity: None,
             })
-            .max_output_tokens(256_u32)
+            .max_output_tokens(self.max_output_tokens)
             .store(false)
             .build()
             .map_err(|_| ApprovalError::InvalidResponse)?;

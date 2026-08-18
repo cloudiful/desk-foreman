@@ -211,6 +211,7 @@ pub struct ApplicationResponse {
     pub approval_timeout_ms: Option<i64>,
     pub approval_max_input_bytes: Option<i64>,
     pub approval_max_concurrent: Option<i64>,
+    pub approval_max_output_tokens: Option<i64>,
     pub approval_api_key_configured: bool,
 }
 
@@ -244,6 +245,8 @@ pub struct CreateApplicationRequest {
     pub approval_max_input_bytes: Option<i64>,
     #[serde(default)]
     pub approval_max_concurrent: Option<i64>,
+    #[serde(default)]
+    pub approval_max_output_tokens: Option<i64>,
     #[serde(default)]
     pub approval_api_key: Option<String>,
     #[serde(default)]
@@ -282,6 +285,8 @@ pub struct UpdateApplicationRequest {
     #[serde(default)]
     pub approval_max_concurrent: Option<i64>,
     #[serde(default)]
+    pub approval_max_output_tokens: Option<i64>,
+    #[serde(default)]
     pub approval_api_key: Option<String>,
     #[serde(default)]
     pub clear_approval_api_key: bool,
@@ -296,6 +301,7 @@ pub struct ApprovalSettingsRecord {
     pub timeout_ms: i64,
     pub max_input_bytes: i64,
     pub max_concurrent: i64,
+    pub max_output_tokens: i64,
     pub api_key_ciphertext: Option<Vec<u8>>,
     pub api_key_nonce: Option<Vec<u8>>,
     pub api_key_key_version: Option<i16>,
@@ -317,6 +323,7 @@ pub struct ApprovalSettingsResponse {
     pub timeout_ms: i64,
     pub max_input_bytes: i64,
     pub max_concurrent: i64,
+    pub max_output_tokens: i64,
     pub configured: bool,
     pub api_key_configured: bool,
     pub api_key_source: String,
@@ -336,6 +343,9 @@ pub struct UpdateApprovalSettingsRequest {
     pub max_input_bytes: i64,
     #[validate(range(min = 1, max = 64))]
     pub max_concurrent: i64,
+    #[serde(default = "default_approval_output_tokens")]
+    #[validate(range(min = 256, max = 8_192))]
+    pub max_output_tokens: i64,
     #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default)]
@@ -344,6 +354,10 @@ pub struct UpdateApprovalSettingsRequest {
 
 fn default_approval_enabled() -> bool {
     true
+}
+
+fn default_approval_output_tokens() -> i64 {
+    1024
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -538,6 +552,7 @@ pub struct ApplicationTokenRecord {
     pub app_approval_timeout_ms: Option<i64>,
     pub app_approval_max_input_bytes: Option<i64>,
     pub app_approval_max_concurrent: Option<i64>,
+    pub app_approval_max_output_tokens: Option<i64>,
     pub app_approval_api_key_configured: bool,
     pub expires_at: Option<DateTime<Utc>>,
     pub scopes: Vec<String>,

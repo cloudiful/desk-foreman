@@ -79,6 +79,7 @@ async fn reviewer_sends_strict_schema_and_accepts_compatible_response_fields() {
         timeout: Duration::from_secs(2),
         max_input_bytes: 32 * 1024,
         max_concurrent: 1,
+        max_output_tokens: 1024,
     })
     .expect("reviewer");
     let decision = reviewer
@@ -92,6 +93,7 @@ async fn reviewer_sends_strict_schema_and_accepts_compatible_response_fields() {
     assert!(decision.permits_execution());
     let body = received.lock().await.clone().expect("request body");
     assert_eq!(body["model"], "reviewer");
+    assert_eq!(body["max_output_tokens"], 1024);
     assert_eq!(body["text"]["format"]["type"], "json_schema");
     assert_eq!(body["text"]["format"]["strict"], true);
     server.abort();
@@ -106,6 +108,7 @@ async fn reviewer_rejects_input_before_network_request() {
         timeout: Duration::from_secs(1),
         max_input_bytes: 1,
         max_concurrent: 1,
+        max_output_tokens: 1024,
     })
     .expect("reviewer");
 
@@ -140,6 +143,7 @@ async fn reviewer_timeout_covers_the_http_request() {
         timeout: Duration::from_millis(20),
         max_input_bytes: 32 * 1024,
         max_concurrent: 1,
+        max_output_tokens: 1024,
     })
     .expect("reviewer");
     let error = reviewer
@@ -182,6 +186,7 @@ async fn reviewer_does_not_retry_http_errors() {
         timeout: Duration::from_secs(1),
         max_input_bytes: 32 * 1024,
         max_concurrent: 1,
+        max_output_tokens: 1024,
     })
     .expect("reviewer");
     let error = reviewer
@@ -214,6 +219,7 @@ async fn reviewer_rejects_invalid_json_response() {
         timeout: Duration::from_secs(1),
         max_input_bytes: 32 * 1024,
         max_concurrent: 1,
+        max_output_tokens: 1024,
     })
     .expect("reviewer");
     let error = reviewer

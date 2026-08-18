@@ -78,6 +78,7 @@ pub async fn create_application(
         request.approval_timeout_ms,
         request.approval_max_input_bytes,
         request.approval_max_concurrent,
+        request.approval_max_output_tokens,
         has_api_key,
     )?;
     let secret = resolve_application_secret(
@@ -152,6 +153,7 @@ pub async fn update_application(
         request.approval_timeout_ms,
         request.approval_max_input_bytes,
         request.approval_max_concurrent,
+        request.approval_max_output_tokens,
         has_api_key,
     )?;
     let secret = resolve_application_secret(

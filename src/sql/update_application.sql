@@ -16,9 +16,10 @@ SET
     approval_timeout_ms = $15,
     approval_max_input_bytes = $16,
     approval_max_concurrent = $17,
-    approval_api_key_ciphertext = $18,
-    approval_api_key_nonce = $19,
-    approval_api_key_key_version = $20,
+    approval_max_output_tokens = $18,
+    approval_api_key_ciphertext = $19,
+    approval_api_key_nonce = $20,
+    approval_api_key_key_version = $21,
     updated_at = NOW()
 WHERE application_id = $1
 RETURNING
@@ -41,4 +42,5 @@ RETURNING
     approval_timeout_ms,
     approval_max_input_bytes,
     approval_max_concurrent,
+    approval_max_output_tokens,
     approval_api_key_ciphertext IS NOT NULL AS approval_api_key_configured;

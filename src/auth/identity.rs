@@ -283,6 +283,7 @@ fn application_response(application: &ApplicationTokenRecord) -> ApplicationResp
         approval_timeout_ms: application.app_approval_timeout_ms,
         approval_max_input_bytes: application.app_approval_max_input_bytes,
         approval_max_concurrent: application.app_approval_max_concurrent,
+        approval_max_output_tokens: application.app_approval_max_output_tokens,
         approval_api_key_configured: application.app_approval_api_key_configured,
     }
 }

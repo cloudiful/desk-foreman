@@ -6,6 +6,7 @@ SELECT
     timeout_ms,
     max_input_bytes,
     max_concurrent,
+    max_output_tokens,
     api_key_ciphertext,
     api_key_nonce,
     api_key_key_version,

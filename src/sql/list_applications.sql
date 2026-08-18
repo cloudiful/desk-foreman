@@ -18,6 +18,7 @@ SELECT
     approval_timeout_ms,
     approval_max_input_bytes,
     approval_max_concurrent,
+    approval_max_output_tokens,
     approval_api_key_ciphertext IS NOT NULL AS approval_api_key_configured
 FROM applications
 ORDER BY created_at DESC, application_id DESC;

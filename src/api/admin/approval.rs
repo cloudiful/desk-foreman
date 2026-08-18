@@ -80,6 +80,7 @@ pub async fn update_approval_settings(
             "timeout_ms": settings.timeout_ms,
             "max_input_bytes": settings.max_input_bytes,
             "max_concurrent": settings.max_concurrent,
+            "max_output_tokens": settings.max_output_tokens,
         }),
     )
     .await?;
@@ -160,6 +161,7 @@ fn settings_response(
         timeout_ms: settings.timeout_ms,
         max_input_bytes: settings.max_input_bytes,
         max_concurrent: settings.max_concurrent,
+        max_output_tokens: settings.max_output_tokens,
         updated_at: settings.updated_at,
     }
 }

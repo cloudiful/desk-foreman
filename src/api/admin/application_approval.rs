@@ -18,6 +18,7 @@ pub(super) fn validate_approval_override(
     timeout_ms: Option<i64>,
     max_input_bytes: Option<i64>,
     max_concurrent: Option<i64>,
+    max_output_tokens: Option<i64>,
     has_api_key: bool,
 ) -> Result<(), AppError> {
     let mode = mode.unwrap_or("inherit");
@@ -51,6 +52,11 @@ pub(super) fn validate_approval_override(
         if max_concurrent.is_some_and(|value| !(1..=64).contains(&value)) {
             return Err(AppError::bad_request(
                 "approval_max_concurrent must be between 1 and 64",
+            ));
+        }
+        if max_output_tokens.is_some_and(|value| !(256..=8_192).contains(&value)) {
+            return Err(AppError::bad_request(
+                "approval_max_output_tokens must be between 256 and 8192",
             ));
         }
     }
@@ -141,6 +147,7 @@ mod tests {
             Some(0),
             Some(0),
             Some(0),
+            Some(0),
             false,
         )
         .expect("inherit should use global limits");
@@ -156,6 +163,7 @@ mod tests {
                 Some(10_000),
                 Some(131_072),
                 Some(8),
+                Some(1024),
                 false,
             )
             .is_err()
@@ -168,6 +176,7 @@ mod tests {
                 Some(0),
                 Some(131_072),
                 Some(8),
+                Some(1024),
                 true,
             )
             .is_err()

@@ -24,6 +24,7 @@ pub async fn update_approval_settings(
         .bind(request.timeout_ms)
         .bind(request.max_input_bytes)
         .bind(request.max_concurrent)
+        .bind(request.max_output_tokens)
         .bind(secret.map(|value| value.ciphertext.clone()))
         .bind(secret.map(|value| value.nonce.clone()))
         .bind(secret.map(|value| value.key_version))
