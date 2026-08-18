@@ -53,7 +53,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     let state = AppState {
         config: Arc::clone(&config),
-        approval: Arc::new(approval::ApprovalService::from_env()?),
+        approval: Arc::new(approval::ApprovalService::from_env_or_database(&db).await?),
         runner,
         runner_broker,
         db,

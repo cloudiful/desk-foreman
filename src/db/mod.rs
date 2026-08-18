@@ -3,6 +3,7 @@ pub mod approval;
 pub mod audit;
 pub mod queries;
 pub mod runner_managers;
+pub mod secrets;
 pub mod sessions;
 pub mod types;
 pub mod users;

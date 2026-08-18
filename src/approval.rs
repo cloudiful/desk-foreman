@@ -60,12 +60,16 @@ pub enum ApprovalTestError {
 }
 
 impl ApprovalService {
-    pub fn from_env() -> anyhow::Result<Self> {
+    pub async fn from_env_or_database(pool: &sqlx::PgPool) -> anyhow::Result<Self> {
+        let seed = std::env::var(crate::secrets::MASTER_KEY_ENV).ok();
+        let master_secret =
+            crate::db::secrets::get_or_create_master_secret(pool, seed.as_deref()).await?;
+        let secret_manager = SecretManager::from_master_secret(&master_secret)?;
         Ok(Self {
             env_api_key: std::env::var("APPROVAL_API_KEY")
                 .ok()
                 .or_else(|| std::env::var("OPENAI_API_KEY").ok()),
-            secret_manager: SecretManager::from_env()?,
+            secret_manager: Some(secret_manager),
             cache: Arc::new(RwLock::new(HashMap::new())),
             database_backed: true,
         })

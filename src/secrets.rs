@@ -21,24 +21,17 @@ pub struct SecretManager {
 }
 
 impl SecretManager {
-    pub fn from_env() -> anyhow::Result<Option<Self>> {
-        let Some(value) = std::env::var(MASTER_KEY_ENV).ok() else {
-            return Ok(None);
-        };
-        let value = value.trim();
-        if value.is_empty() {
-            return Ok(None);
-        }
+    pub fn from_master_secret(value: &str) -> anyhow::Result<Self> {
         let bytes = STANDARD
-            .decode(value.as_bytes())
-            .context("DESK_FOREMAN_SECRET_MASTER_KEY must be valid base64")?;
+            .decode(value.trim().as_bytes())
+            .context("application master secret must be valid base64")?;
         let key = bytes.try_into().map_err(|bytes: Vec<u8>| {
             anyhow!(
-                "DESK_FOREMAN_SECRET_MASTER_KEY must decode to {KEY_BYTES} bytes, got {}",
+                "application master secret must decode to {KEY_BYTES} bytes, got {}",
                 bytes.len()
             )
         })?;
-        Ok(Some(Self { key }))
+        Ok(Self { key })
     }
 
     pub fn encrypt(&self, plaintext: &str) -> anyhow::Result<EncryptedSecret> {
