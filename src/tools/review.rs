@@ -1,6 +1,8 @@
 use std::{sync::Arc, time::Instant};
 
-use desk_foreman_approval::{ApprovalFuture, ApprovalReviewer, ReviewDecision, ReviewRequest};
+use desk_foreman_approval::{
+    ApprovalError, ApprovalFuture, ApprovalReviewer, ReviewDecision, ReviewRequest,
+};
 use serde_json::json;
 
 use crate::{
@@ -30,9 +32,7 @@ pub(super) async fn reviewer_for_request(
                 }),
             );
             tracing::warn!(%error, "approval reviewer configuration unavailable");
-            Err(ToolError::Forbidden(
-                "approval reviewer unavailable".to_string(),
-            ))
+            Err(ToolError::Forbidden(configuration_error_message(&error)))
         }
     }
 }
@@ -68,9 +68,7 @@ pub(super) async fn ensure_review(
                     "duration_ms": started.elapsed().as_millis(),
                 }),
             );
-            return Err(ToolError::Forbidden(
-                "approval reviewer unavailable".to_string(),
-            ));
+            return Err(ToolError::Forbidden(reviewer_error_message(&error)));
         }
     };
     let allowed = decision.permits_execution();
@@ -100,6 +98,31 @@ pub(super) async fn ensure_review(
         )));
     }
     Ok(Some(decision))
+}
+
+fn configuration_error_message(error: &anyhow::Error) -> String {
+    let message = error.to_string();
+    if message.contains("API key") {
+        return "approval reviewer API key is not configured".to_string();
+    }
+    if message.contains("master key") {
+        return "approval reviewer secret storage is unavailable".to_string();
+    }
+    if message.contains("endpoint") {
+        return "approval reviewer endpoint is invalid".to_string();
+    }
+    "approval reviewer configuration is unavailable".to_string()
+}
+
+fn reviewer_error_message(error: &ApprovalError) -> String {
+    match error {
+        ApprovalError::InputTooLarge => "approval reviewer input exceeds its limit".to_string(),
+        ApprovalError::TimedOut => "approval reviewer request timed out".to_string(),
+        ApprovalError::Unavailable => "approval reviewer endpoint is unavailable".to_string(),
+        ApprovalError::InvalidResponse => {
+            "approval reviewer returned an invalid response".to_string()
+        }
+    }
 }
 
 pub(super) struct AuditedReviewer {

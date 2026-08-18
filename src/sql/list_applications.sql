@@ -14,6 +14,10 @@ SELECT
     network_enabled,
     approval_mode,
     approval_endpoint,
-    approval_model
+    approval_model,
+    approval_timeout_ms,
+    approval_max_input_bytes,
+    approval_max_concurrent,
+    approval_api_key_ciphertext IS NOT NULL AS approval_api_key_configured
 FROM applications
 ORDER BY created_at DESC, application_id DESC;

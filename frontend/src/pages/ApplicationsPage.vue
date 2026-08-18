@@ -6,6 +6,7 @@ import {
   deleteAdminApplicationToken,
   listAdminApplicationTokens,
   listAdminApplications,
+  testAdminApplicationApproval,
   updateAdminApplication,
 } from '../api/users'
 import { useNotify } from '../composables/useNotify'
@@ -19,6 +20,7 @@ import type {
   ApplicationResponse,
   ApplicationTokenResponse,
   CreateApplicationTokenResponse,
+  ApprovalTestResponse,
 } from '../generated/openapi/types.gen'
 
 const AVAILABLE_SCOPES = [
@@ -94,6 +96,12 @@ interface ApplicationForm {
   approval_mode: string
   approval_endpoint: string
   approval_model: string
+  approval_timeout_ms: number | string
+  approval_max_input_bytes: number | string
+  approval_max_concurrent: number | string
+  approval_api_key: string
+  approval_api_key_configured: boolean
+  clear_approval_api_key: boolean
 }
 
 const editing = ref<ApplicationForm | null>(null)
@@ -101,6 +109,8 @@ const editingUnknownScopes = ref<string[]>([])
 const drawerOpen = ref(false)
 const saving = ref(false)
 const formError = ref('')
+const approvalTesting = ref(false)
+const approvalTestResult = ref<ApprovalTestResponse | null>(null)
 
 function toNumberOrNull(
   value: number | string | null | undefined,
@@ -126,11 +136,18 @@ function blankForm(): ApplicationForm {
     approval_mode: 'inherit',
     approval_endpoint: '',
     approval_model: '',
+    approval_timeout_ms: '',
+    approval_max_input_bytes: '',
+    approval_max_concurrent: '',
+    approval_api_key: '',
+    approval_api_key_configured: false,
+    clear_approval_api_key: false,
   }
 }
 
 function startCreate(): void {
   formError.value = ''
+  approvalTestResult.value = null
   editingUnknownScopes.value = []
   editing.value = blankForm()
   drawerOpen.value = true
@@ -153,8 +170,15 @@ function startEdit(row: ApplicationResponse): void {
     approval_mode: row.approval_mode,
     approval_endpoint: row.approval_endpoint ?? '',
     approval_model: row.approval_model ?? '',
+    approval_timeout_ms: row.approval_timeout_ms ?? '',
+    approval_max_input_bytes: row.approval_max_input_bytes ?? '',
+    approval_max_concurrent: row.approval_max_concurrent ?? '',
+    approval_api_key: '',
+    approval_api_key_configured: row.approval_api_key_configured,
+    clear_approval_api_key: false,
   }
   editingUnknownScopes.value = unknownScopes(row.default_scopes)
+  approvalTestResult.value = null
   drawerOpen.value = true
 }
 
@@ -182,6 +206,15 @@ async function save(): Promise<void> {
     approval_mode: editing.value.approval_mode,
     approval_endpoint: editing.value.approval_endpoint.trim() || null,
     approval_model: editing.value.approval_model.trim() || null,
+    approval_timeout_ms: toNumberOrNull(editing.value.approval_timeout_ms),
+    approval_max_input_bytes: toNumberOrNull(
+      editing.value.approval_max_input_bytes,
+    ),
+    approval_max_concurrent: toNumberOrNull(
+      editing.value.approval_max_concurrent,
+    ),
+    approval_api_key: editing.value.approval_api_key.trim() || null,
+    clear_approval_api_key: editing.value.clear_approval_api_key,
   }
   try {
     if (editing.value.application_id === 0) {
@@ -203,6 +236,28 @@ async function save(): Promise<void> {
   } finally {
     saving.value = false
   }
+}
+
+async function testApplicationApproval(): Promise<void> {
+  if (!editing.value || editing.value.application_id === 0) return
+  approvalTesting.value = true
+  formError.value = ''
+  try {
+    approvalTestResult.value = await testAdminApplicationApproval(
+      editing.value.application_id,
+    )
+  } catch (err) {
+    formError.value =
+      err instanceof Error ? err.message : 'Failed to test application reviewer'
+  } finally {
+    approvalTesting.value = false
+  }
+}
+
+function clearApplicationKey(): void {
+  if (!editing.value) return
+  editing.value.approval_api_key = ''
+  editing.value.clear_approval_api_key = true
 }
 
 // ----- tokens -----
@@ -571,6 +626,88 @@ onMounted(() => void load())
                   placeholder="Reviewer model"
                 />
               </UFormField>
+              <UFormField
+                label="API key"
+                hint="Leave blank to keep the stored key"
+              >
+                <div class="flex gap-2">
+                  <UInput
+                    v-model="editing.approval_api_key"
+                    type="password"
+                    autocomplete="new-password"
+                    placeholder="Enter an application reviewer key"
+                    class="min-w-0 flex-1"
+                    @input="editing.clear_approval_api_key = false"
+                  />
+                  <UButton
+                    v-if="editing.approval_api_key_configured"
+                    type="button"
+                    icon="i-lucide-trash-2"
+                    variant="outline"
+                    color="error"
+                    aria-label="Clear application reviewer API key"
+                    @click="clearApplicationKey"
+                  />
+                </div>
+              </UFormField>
+              <div class="grid gap-4 sm:grid-cols-3">
+                <UFormField label="Timeout (ms)">
+                  <UInput
+                    v-model.number="editing.approval_timeout_ms"
+                    type="number"
+                    min="100"
+                    max="30000"
+                    placeholder="Global default"
+                  />
+                </UFormField>
+                <UFormField label="Max input (bytes)">
+                  <UInput
+                    v-model.number="editing.approval_max_input_bytes"
+                    type="number"
+                    min="1"
+                    max="524288"
+                    placeholder="Global default"
+                  />
+                </UFormField>
+                <UFormField label="Concurrent reviews">
+                  <UInput
+                    v-model.number="editing.approval_max_concurrent"
+                    type="number"
+                    min="1"
+                    max="64"
+                    placeholder="Global default"
+                  />
+                </UFormField>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <UButton
+                  v-if="editing.application_id !== 0"
+                  type="button"
+                  icon="i-lucide-plug-zap"
+                  variant="outline"
+                  color="neutral"
+                  :loading="approvalTesting"
+                  @click="testApplicationApproval"
+                >
+                  Test application reviewer
+                </UButton>
+                <span class="text-xs text-(--ui-text-muted)">
+                  Tests the saved application configuration without executing a tool.
+                </span>
+              </div>
+              <UAlert
+                v-if="approvalTestResult"
+                :title="
+                  approvalTestResult.ok
+                    ? 'Reviewer test passed'
+                    : 'Reviewer test failed'
+                "
+                :description="
+                  `${approvalTestResult.message} (${approvalTestResult.latency_ms} ms)`
+                "
+                :color="approvalTestResult.ok ? 'success' : 'error'"
+                variant="subtle"
+              />
             </template>
           </div>
 

@@ -4,6 +4,8 @@ import {
   createMcpToken,
   createUser,
   getApprovalSettings,
+  testApprovalSettings,
+  testApplicationApproval,
   deleteApplicationToken,
   deleteMcpToken,
   deleteUser,
@@ -46,6 +48,7 @@ import {
   type WorkspaceBindingResponse,
   type AuditLogPageResponse,
   type ApprovalSettingsResponse,
+  type ApprovalTestResponse,
   type ListAuditLogsData,
   type OperationsSummary,
   type RunnerSessionResponse,
@@ -196,6 +199,24 @@ export async function updateAdminApprovalSettings(
   const { data, response } = await updateApprovalSettings({ body })
   await requireOk(response, 'Failed to update approval settings')
   if (!data) throw new Error('Failed to update approval settings')
+  return data
+}
+
+export async function testAdminApprovalSettings(): Promise<ApprovalTestResponse> {
+  const { data, response } = await testApprovalSettings()
+  await requireOk(response, 'Failed to test approval reviewer')
+  if (!data) throw new Error('Failed to test approval reviewer')
+  return data
+}
+
+export async function testAdminApplicationApproval(
+  application_id: number,
+): Promise<ApprovalTestResponse> {
+  const { data, response } = await testApplicationApproval({
+    path: { application_id },
+  })
+  await requireOk(response, 'Failed to test application reviewer')
+  if (!data) throw new Error('Failed to test application reviewer')
   return data
 }
 

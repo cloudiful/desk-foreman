@@ -8,6 +8,7 @@ use crate::db::types::{
     UpdateApplicationRequest, UpdateApplicationTokenRequest, UpdateMcpTokenRequest,
 };
 use crate::policy::ALL_SCOPES;
+use crate::secrets::EncryptedSecret;
 
 pub async fn list_mcp_tokens(pool: &PgPool) -> anyhow::Result<Vec<McpTokenResponse>> {
     sqlx::query_as::<_, McpTokenResponse>(include_str!("../sql/list_mcp_tokens.sql"))
@@ -98,6 +99,7 @@ pub async fn find_application_by_id(
 pub async fn create_application(
     pool: &PgPool,
     request: &CreateApplicationRequest,
+    secret: Option<&EncryptedSecret>,
 ) -> anyhow::Result<ApplicationResponse> {
     sqlx::query_as::<_, ApplicationResponse>(include_str!("../sql/create_application.sql"))
         .bind(&request.name)
@@ -112,6 +114,12 @@ pub async fn create_application(
         .bind(request.approval_mode.as_deref())
         .bind(&request.approval_endpoint)
         .bind(&request.approval_model)
+        .bind(request.approval_timeout_ms)
+        .bind(request.approval_max_input_bytes)
+        .bind(request.approval_max_concurrent)
+        .bind(secret.map(|value| value.ciphertext.clone()))
+        .bind(secret.map(|value| value.nonce.clone()))
+        .bind(secret.map(|value| value.key_version))
         .fetch_one(pool)
         .await
         .map_err(Into::into)
@@ -121,6 +129,7 @@ pub async fn update_application(
     pool: &PgPool,
     application_id: i64,
     request: &UpdateApplicationRequest,
+    secret: Option<&EncryptedSecret>,
 ) -> anyhow::Result<Option<ApplicationResponse>> {
     sqlx::query_as::<_, ApplicationResponse>(include_str!("../sql/update_application.sql"))
         .bind(application_id)
@@ -137,6 +146,12 @@ pub async fn update_application(
         .bind(&request.approval_mode)
         .bind(&request.approval_endpoint)
         .bind(&request.approval_model)
+        .bind(request.approval_timeout_ms)
+        .bind(request.approval_max_input_bytes)
+        .bind(request.approval_max_concurrent)
+        .bind(secret.map(|value| value.ciphertext.clone()))
+        .bind(secret.map(|value| value.nonce.clone()))
+        .bind(secret.map(|value| value.key_version))
         .fetch_optional(pool)
         .await
         .map_err(Into::into)

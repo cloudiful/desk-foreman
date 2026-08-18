@@ -1,3 +1,4 @@
+pub(super) mod application_approval;
 pub(super) mod applications;
 pub(super) mod approval;
 pub(super) mod operations;
@@ -7,11 +8,12 @@ pub(super) mod tokens;
 pub(super) mod users;
 pub(super) mod workspace_bindings;
 
+pub use application_approval::test_application_approval;
 pub use applications::{
     create_application, create_application_token, delete_application_token,
     list_application_tokens, list_applications, update_application, update_application_token,
 };
-pub use approval::{get_approval_settings, update_approval_settings};
+pub use approval::{get_approval_settings, test_approval_settings, update_approval_settings};
 pub use operations::{
     list_audit_logs, list_runner_sessions, list_workspace_runners, operations_summary,
 };

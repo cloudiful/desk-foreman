@@ -18,33 +18,10 @@ use crate::{
 };
 
 use super::{
+    application_approval::{resolve_application_secret, validate_approval_override},
     shared::{map_db_conflict, record_admin_audit},
     users::require_admin,
 };
-
-fn validate_approval_override(
-    mode: Option<&str>,
-    endpoint: Option<&str>,
-    model: Option<&str>,
-) -> Result<(), AppError> {
-    let mode = mode.unwrap_or("inherit");
-    if desk_foreman_approval::ApprovalMode::parse(mode).is_none() {
-        return Err(AppError::bad_request(
-            "approval_mode must be inherit, disabled, or enabled",
-        ));
-    }
-    if mode == "enabled" {
-        let endpoint = endpoint
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| AppError::bad_request("enabled approval requires endpoint"))?;
-        if model.is_none_or(|value| value.trim().is_empty()) {
-            return Err(AppError::bad_request("enabled approval requires model"));
-        }
-        crate::approval::validate_endpoint(endpoint)
-            .map_err(|error| AppError::bad_request(error.to_string()))?;
-    }
-    Ok(())
-}
 
 #[utoipa::path(
     get,
@@ -89,12 +66,27 @@ pub async fn create_application(
         &mut request.approval_endpoint,
         &mut request.approval_model,
     );
+    let has_api_key = !request.clear_approval_api_key
+        && request
+            .approval_api_key
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
     validate_approval_override(
         request.approval_mode.as_deref(),
         request.approval_endpoint.as_deref(),
         request.approval_model.as_deref(),
+        request.approval_timeout_ms,
+        request.approval_max_input_bytes,
+        request.approval_max_concurrent,
+        has_api_key,
     )?;
-    let application = crate::db::queries::create_application(&state.db, &request)
+    let secret = resolve_application_secret(
+        &state,
+        request.approval_api_key.take(),
+        request.clear_approval_api_key,
+        None,
+    )?;
+    let application = crate::db::queries::create_application(&state.db, &request, secret.as_ref())
         .await
         .map_err(map_db_conflict)?;
     record_admin_audit(
@@ -135,15 +127,47 @@ pub async fn update_application(
         &mut request.approval_endpoint,
         &mut request.approval_model,
     );
+    let existing_secret =
+        crate::db::queries::get_application_approval_secret(&state.db, application_id).await?;
+    let existing_secret = existing_secret
+        .map(|secret| {
+            crate::approval::encrypted_secret_from_database(
+                secret.api_key_ciphertext,
+                secret.api_key_nonce,
+                secret.api_key_key_version,
+            )
+        })
+        .transpose()?
+        .flatten();
+    let has_api_key = !request.clear_approval_api_key
+        && (request
+            .approval_api_key
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+            || existing_secret.is_some());
     validate_approval_override(
         request.approval_mode.as_deref(),
         request.approval_endpoint.as_deref(),
         request.approval_model.as_deref(),
+        request.approval_timeout_ms,
+        request.approval_max_input_bytes,
+        request.approval_max_concurrent,
+        has_api_key,
     )?;
-    let Some(application) =
-        crate::db::queries::update_application(&state.db, application_id, &request)
-            .await
-            .map_err(map_db_conflict)?
+    let secret = resolve_application_secret(
+        &state,
+        request.approval_api_key.take(),
+        request.clear_approval_api_key,
+        existing_secret,
+    )?;
+    let Some(application) = crate::db::queries::update_application(
+        &state.db,
+        application_id,
+        &request,
+        secret.as_ref(),
+    )
+    .await
+    .map_err(map_db_conflict)?
     else {
         return Err(AppError::not_found("application not found"));
     };

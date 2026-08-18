@@ -14,8 +14,8 @@ use crate::{
     tools::{
         DeskForemanService,
         common::{
-            mcp_error, parse_and_validate_tool_params, schema_for_input, shell_call_result,
-            structured_text_result, write_annotations,
+            parse_and_validate_tool_params, schema_for_input, shell_call_result,
+            structured_text_result, tool_error_result, write_annotations,
         },
         params::{
             ApplyPatchParams, CancelSessionParams, EditParams, ShellParams, WriteStdinParams,
@@ -120,9 +120,10 @@ async fn exec_command_handler(
     let actor = actor_from_mcp_context(&context.service.state, &context.request_context)?;
     let params: crate::tools::params::ShellParams =
         parse_and_validate_tool_params(context.arguments.unwrap_or_default())?;
-    let output = shared::shell(&context.service.state, &actor, &params)
-        .await
-        .map_err(mcp_error)?;
+    let output = match shared::shell(&context.service.state, &actor, &params).await {
+        Ok(output) => output,
+        Err(error) => return tool_error_result(error),
+    };
     Ok(shell_call_result(output))
 }
 
@@ -132,9 +133,10 @@ async fn write_stdin_handler(
     let actor = actor_from_mcp_context(&context.service.state, &context.request_context)?;
     let params: WriteStdinParams =
         parse_and_validate_tool_params(context.arguments.unwrap_or_default())?;
-    let output = shared::write_stdin(&context.service.state, &actor, &params)
-        .await
-        .map_err(mcp_error)?;
+    let output = match shared::write_stdin(&context.service.state, &actor, &params).await {
+        Ok(output) => output,
+        Err(error) => return tool_error_result(error),
+    };
     Ok(shell_call_result(output))
 }
 
@@ -144,9 +146,10 @@ async fn cancel_session_handler(
     let actor = actor_from_mcp_context(&context.service.state, &context.request_context)?;
     let params: CancelSessionParams =
         parse_and_validate_tool_params(context.arguments.unwrap_or_default())?;
-    let output = shared::cancel_session(&context.service.state, &actor, &params)
-        .await
-        .map_err(mcp_error)?;
+    let output = match shared::cancel_session(&context.service.state, &actor, &params).await {
+        Ok(output) => output,
+        Err(error) => return tool_error_result(error),
+    };
     structured_text_result(output.state.clone(), &output)
 }
 
@@ -156,9 +159,10 @@ async fn apply_patch_handler(
     let actor = actor_from_mcp_context(&context.service.state, &context.request_context)?;
     let params: ApplyPatchParams =
         parse_and_validate_tool_params(context.arguments.unwrap_or_default())?;
-    let output = shared::apply_patch(&context.service.state, &actor, &params)
-        .await
-        .map_err(mcp_error)?;
+    let output = match shared::apply_patch(&context.service.state, &actor, &params).await {
+        Ok(output) => output,
+        Err(error) => return tool_error_result(error),
+    };
     structured_text_result(output.summary.clone(), &output)
 }
 
@@ -167,8 +171,9 @@ async fn edit_handler(
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let actor = actor_from_mcp_context(&context.service.state, &context.request_context)?;
     let params: EditParams = parse_and_validate_tool_params(context.arguments.unwrap_or_default())?;
-    let output = shared::edit(&context.service.state, &actor, &params)
-        .await
-        .map_err(mcp_error)?;
+    let output = match shared::edit(&context.service.state, &actor, &params).await {
+        Ok(output) => output,
+        Err(error) => return tool_error_result(error),
+    };
     structured_text_result(format!("Edited {}", output.path), &output)
 }

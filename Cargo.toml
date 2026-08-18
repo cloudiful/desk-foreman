@@ -16,8 +16,10 @@ edition = "2024"
 anyhow = "1.0.102"
 async-openai = { version = "0.41.3", default-features = false, features = ["byot", "middleware", "responses", "rustls"] }
 argon2 = "0.5.3"
+base64 = "0.22.1"
 axum = { version = "0.8.9", features = ["http1", "json", "tokio", "tracing"] }
 axum-extra = { version = "0.12.6", features = ["cookie"] }
+chacha20poly1305 = "0.11.0"
 chrono = { version = "0.4.45", features = ["serde"] }
 pty-process = { version = "0.5.3", features = ["async"] }
 rand = "0.10.1"
@@ -54,9 +56,11 @@ description = "Workspace-scoped MCP coding service with isolated runners"
 anyhow.workspace = true
 desk-foreman-approval.workspace = true
 argon2.workspace = true
+base64.workspace = true
 axum.workspace = true
 axum-extra.workspace = true
 chrono.workspace = true
+chacha20poly1305.workspace = true
 pty-process.workspace = true
 rand.workspace = true
 reqwest.workspace = true

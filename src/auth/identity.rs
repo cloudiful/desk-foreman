@@ -280,6 +280,10 @@ fn application_response(application: &ApplicationTokenRecord) -> ApplicationResp
         approval_mode: application.app_approval_mode.clone(),
         approval_endpoint: application.app_approval_endpoint.clone(),
         approval_model: application.app_approval_model.clone(),
+        approval_timeout_ms: application.app_approval_timeout_ms,
+        approval_max_input_bytes: application.app_approval_max_input_bytes,
+        approval_max_concurrent: application.app_approval_max_concurrent,
+        approval_api_key_configured: application.app_approval_api_key_configured,
     }
 }
 

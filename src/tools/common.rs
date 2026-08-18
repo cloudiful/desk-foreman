@@ -263,49 +263,32 @@ pub(super) fn spawn_tool_audit(
     });
 }
 
-pub(super) fn mcp_error(error: ToolError) -> rmcp::ErrorData {
-    match error {
-        ToolError::InvalidInput(message) => rmcp::ErrorData::invalid_params(
-            message.clone(),
-            Some(json!({
-                "code": "invalid_input",
-                "message": message,
-                "retryable": false,
-            })),
-        ),
-        ToolError::NotFound(message) => rmcp::ErrorData::resource_not_found(
-            message.clone(),
-            Some(json!({
-                "code": "not_found",
-                "message": message,
-                "retryable": true,
-            })),
-        ),
-        ToolError::Forbidden(message) => rmcp::ErrorData::invalid_request(
-            message.clone(),
-            Some(json!({
-                "code": "forbidden",
-                "message": message,
-                "retryable": false,
-            })),
-        ),
-        ToolError::Internal(error) => internal_error(error),
-    }
-}
-
 pub(super) fn tool_error_result(error: ToolError) -> Result<CallToolResult, rmcp::ErrorData> {
-    let (code, message, suggested_action) = match error {
-        ToolError::InvalidInput(message) => ("invalid_input", message, "fix_arguments_and_retry"),
-        ToolError::NotFound(message) => ("not_found", message, "inspect_workspace_and_retry"),
-        other => return Err(mcp_error(other)),
+    let (code, category, message, repairable, suggested_action) = match error {
+        ToolError::InvalidInput(message) => (
+            "invalid_input",
+            "tool_input",
+            message,
+            true,
+            "fix_arguments_and_retry",
+        ),
+        ToolError::NotFound(message) => (
+            "not_found",
+            "tool_input",
+            message,
+            true,
+            "inspect_workspace_and_retry",
+        ),
+        ToolError::Forbidden(message) => ("forbidden", "policy", message, false, "do_not_retry"),
+        ToolError::Internal(error) => return Err(internal_error(error)),
     };
     Ok(CallToolResult::structured_error(json!({
         "ok": false,
         "error": {
             "code": code,
-            "category": "tool_input",
+            "category": category,
             "message": message,
-            "repairable": true,
+            "repairable": repairable,
             "retryable": false,
             "suggested_action": suggested_action,
             "task_id": null,

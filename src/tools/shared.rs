@@ -512,6 +512,7 @@ pub fn stat_path(
 
 fn classify_shell_error(error: anyhow::Error) -> ToolError {
     let message = error.to_string();
+    let normalized = message.to_ascii_lowercase();
     match message.as_str() {
         "session does not belong to current user" => {
             ToolError::NotFound("session not found".to_string())
@@ -520,27 +521,25 @@ fn classify_shell_error(error: anyhow::Error) -> ToolError {
             ToolError::NotFound("session not found".to_string())
         }
         _ if is_invalid_input_message(&message) => ToolError::InvalidInput(message),
+        _ if normalized.contains("no such file or directory")
+            && (normalized.contains("working directory")
+                || normalized.contains("workdir")
+                || normalized.contains("failed to resolve")) =>
+        {
+            ToolError::NotFound(message)
+        }
         _ => ToolError::Internal(error),
     }
 }
 
 fn map_apply_patch_error(error: WorkspaceSdkError) -> ToolError {
-    match error {
-        WorkspaceSdkError::InvalidInput(message) => ToolError::InvalidInput(message),
-        WorkspaceSdkError::Io { .. } => ToolError::InvalidInput(error.to_string()),
-        WorkspaceSdkError::ApprovalDenied(message) => ToolError::Forbidden(message),
-        WorkspaceSdkError::ApprovalReviewer(_) => {
-            ToolError::Forbidden("approval reviewer unavailable".to_string())
-        }
-    }
+    map_workspace_sdk_error(error)
 }
 
 fn map_exact_edit_error(error: ExactEditError) -> ToolError {
     let message = error.to_string();
     match error {
-        ExactEditError::Workspace(WorkspaceSdkError::InvalidInput(message)) => {
-            ToolError::InvalidInput(message)
-        }
+        ExactEditError::Workspace(other) => map_workspace_sdk_error(other),
         ExactEditError::OldTextEmpty
         | ExactEditError::NoOp
         | ExactEditError::FileTooLarge { .. }
@@ -548,11 +547,25 @@ fn map_exact_edit_error(error: ExactEditError) -> ToolError {
         | ExactEditError::NotUtf8 { .. }
         | ExactEditError::ContextNotFound { .. }
         | ExactEditError::Ambiguous { .. } => ToolError::InvalidInput(error.to_string()),
-        ExactEditError::Workspace(other) => ToolError::Internal(other.into()),
         ExactEditError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
             ToolError::NotFound(message)
         }
         ExactEditError::Io { .. } => ToolError::Internal(error.into()),
+    }
+}
+
+fn map_workspace_sdk_error(error: WorkspaceSdkError) -> ToolError {
+    let message = error.to_string();
+    match error {
+        WorkspaceSdkError::InvalidInput(message) => ToolError::InvalidInput(message),
+        WorkspaceSdkError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+            ToolError::NotFound(message)
+        }
+        WorkspaceSdkError::Io { .. } => ToolError::Internal(error.into()),
+        WorkspaceSdkError::ApprovalDenied(message) => ToolError::Forbidden(message),
+        WorkspaceSdkError::ApprovalReviewer(_) => {
+            ToolError::Forbidden("approval reviewer unavailable".to_string())
+        }
     }
 }
 

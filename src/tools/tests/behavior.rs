@@ -3,7 +3,7 @@ use tempfile::tempdir;
 
 use crate::tools::{
     ToolError, common,
-    params::{ApplyPatchParams, GrepParams, ReadParams, ShellParams, WriteStdinParams},
+    params::{ApplyPatchParams, EditParams, GrepParams, ReadParams, ShellParams, WriteStdinParams},
     readonly, shared,
 };
 
@@ -230,7 +230,14 @@ async fn shared_write_stdin_rejects_foreign_session() {
     .await
     .expect_err("foreign session should fail");
 
-    assert!(matches!(error, ToolError::NotFound(message) if message == "session not found"));
+    assert!(matches!(&error, ToolError::NotFound(message) if message == "session not found"));
+
+    let result = common::tool_error_result(error).expect("tool-level error result");
+    let payload = result.structured_content.expect("structured error");
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(payload["error"]["code"], "not_found");
+    assert_eq!(payload["error"]["repairable"], true);
+    assert_eq!(payload["error"]["retryable"], false);
 }
 
 #[tokio::test]
@@ -264,13 +271,50 @@ async fn missing_read_path_is_a_repairable_tool_error() {
 
     let error = shared::read(&app_state(temp.path().to_path_buf()), &actor, &params)
         .expect_err("missing path should fail");
-    assert!(matches!(error, ToolError::NotFound(_)));
+    assert!(matches!(&error, ToolError::NotFound(_)));
 
     let result = common::tool_error_result(error).expect("tool-level error result");
     let payload = result.structured_content.expect("structured error");
     assert_eq!(result.is_error, Some(true));
     assert_eq!(payload["error"]["code"], "not_found");
     assert_eq!(payload["error"]["repairable"], true);
+    assert_eq!(payload["error"]["retryable"], false);
+}
+
+#[tokio::test]
+async fn edit_missing_path_is_a_repairable_tool_error() {
+    let temp = tempdir().expect("tempdir");
+    let actor = test_actor(temp.path(), 10);
+    let params: EditParams = parse_params(json!({
+        "path": "missing.rs",
+        "old_text": "old",
+        "new_text": "new"
+    }))
+    .expect("params");
+
+    let error = shared::edit(&app_state(temp.path().to_path_buf()), &actor, &params)
+        .await
+        .expect_err("missing path should fail");
+    assert!(matches!(&error, ToolError::NotFound(_)));
+
+    let result = common::tool_error_result(error).expect("tool-level error result");
+    let payload = result.structured_content.expect("structured error");
+    assert_eq!(payload["error"]["code"], "not_found");
+    assert_eq!(payload["error"]["repairable"], true);
+    assert_eq!(payload["error"]["retryable"], false);
+}
+
+#[test]
+fn forbidden_tool_errors_are_visible_without_being_retriable() {
+    let result = common::tool_error_result(ToolError::Forbidden(
+        "path is protected by workspace policy".to_string(),
+    ))
+    .expect("tool-level error result");
+    let payload = result.structured_content.expect("structured error");
+
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(payload["error"]["category"], "policy");
+    assert_eq!(payload["error"]["repairable"], false);
     assert_eq!(payload["error"]["retryable"], false);
 }
 

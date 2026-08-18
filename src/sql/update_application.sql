@@ -13,6 +13,12 @@ SET
     approval_mode = COALESCE($12, approval_mode),
     approval_endpoint = $13,
     approval_model = $14,
+    approval_timeout_ms = $15,
+    approval_max_input_bytes = $16,
+    approval_max_concurrent = $17,
+    approval_api_key_ciphertext = $18,
+    approval_api_key_nonce = $19,
+    approval_api_key_key_version = $20,
     updated_at = NOW()
 WHERE application_id = $1
 RETURNING
@@ -31,4 +37,8 @@ RETURNING
     network_enabled,
     approval_mode,
     approval_endpoint,
-    approval_model;
+    approval_model,
+    approval_timeout_ms,
+    approval_max_input_bytes,
+    approval_max_concurrent,
+    approval_api_key_ciphertext IS NOT NULL AS approval_api_key_configured;

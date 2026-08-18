@@ -47,6 +47,10 @@ pub fn router() -> Router<AppState> {
             patch(admin::update_application),
         )
         .route(
+            "/api/admin/applications/{application_id}/approval-test",
+            post(admin::test_application_approval),
+        )
+        .route(
             "/api/admin/mcp-tokens/{token_id}",
             axum::routing::delete(admin::delete_mcp_token).patch(admin::update_mcp_token),
         )
@@ -96,6 +100,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/api/admin/approval-settings",
             get(admin::get_approval_settings).patch(admin::update_approval_settings),
+        )
+        .route(
+            "/api/admin/approval-settings/test",
+            post(admin::test_approval_settings),
         )
         .route(
             "/api/admin/runner-managers",

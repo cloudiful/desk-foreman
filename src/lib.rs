@@ -9,6 +9,7 @@ pub mod lifecycle;
 pub mod pathing;
 pub mod policy;
 pub mod runner;
+pub mod secrets;
 pub mod shell;
 pub mod tools;
 pub mod workspace;
@@ -52,7 +53,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     let state = AppState {
         config: Arc::clone(&config),
-        approval: Arc::new(approval::ApprovalService::from_env()),
+        approval: Arc::new(approval::ApprovalService::from_env()?),
         runner,
         runner_broker,
         db,

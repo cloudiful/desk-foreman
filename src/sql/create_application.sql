@@ -10,9 +10,15 @@ INSERT INTO applications (
     network_enabled,
     approval_mode,
     approval_endpoint,
-    approval_model
+    approval_model,
+    approval_timeout_ms,
+    approval_max_input_bytes,
+    approval_max_concurrent,
+    approval_api_key_ciphertext,
+    approval_api_key_nonce,
+    approval_api_key_key_version
 )
-VALUES ($1, $2, $3, COALESCE($4, ARRAY['workspace.read', 'workspace.search', 'workspace.shell', 'workspace.patch']::TEXT[]), $5, $6, $7, $8, $9, COALESCE($10, 'inherit'), $11, $12)
+VALUES ($1, $2, $3, COALESCE($4, ARRAY['workspace.read', 'workspace.search', 'workspace.shell', 'workspace.patch']::TEXT[]), $5, $6, $7, $8, $9, COALESCE($10, 'inherit'), $11, $12, $13, $14, $15, $16, $17, $18)
 RETURNING
     application_id,
     name,
@@ -29,4 +35,8 @@ RETURNING
     network_enabled,
     approval_mode,
     approval_endpoint,
-    approval_model;
+    approval_model,
+    approval_timeout_ms,
+    approval_max_input_bytes,
+    approval_max_concurrent,
+    approval_api_key_ciphertext IS NOT NULL AS approval_api_key_configured;
