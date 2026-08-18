@@ -122,6 +122,15 @@ fn reviewer_error_message(error: &ApprovalError) -> String {
         ApprovalError::InvalidResponse => {
             "approval reviewer returned an invalid response".to_string()
         }
+        ApprovalError::ToolCallMissing => {
+            "approval reviewer returned no approval tool call".to_string()
+        }
+        ApprovalError::ToolCallMultiple => {
+            "approval reviewer returned multiple approval tool calls".to_string()
+        }
+        ApprovalError::ToolCallInvalid => {
+            "approval reviewer returned an invalid approval tool call".to_string()
+        }
     }
 }
 

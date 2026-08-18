@@ -219,6 +219,17 @@ pub(crate) fn probe_error(
             desk_foreman_approval::ApprovalError::InvalidResponse => {
                 ("response", "Reviewer returned an invalid response")
             }
+            desk_foreman_approval::ApprovalError::ToolCallMissing => {
+                ("tool_call", "Reviewer returned no approval tool call")
+            }
+            desk_foreman_approval::ApprovalError::ToolCallMultiple => (
+                "tool_call",
+                "Reviewer returned multiple approval tool calls",
+            ),
+            desk_foreman_approval::ApprovalError::ToolCallInvalid => (
+                "tool_call",
+                "Reviewer returned an invalid approval tool call",
+            ),
         },
         crate::approval::ApprovalTestError::Database(_) => {
             ("configuration", "Reviewer configuration lookup failed")

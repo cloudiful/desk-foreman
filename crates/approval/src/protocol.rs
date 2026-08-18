@@ -141,6 +141,12 @@ pub enum ApprovalError {
     Unavailable,
     #[error("approval reviewer returned an invalid response")]
     InvalidResponse,
+    #[error("approval reviewer returned no approval tool call")]
+    ToolCallMissing,
+    #[error("approval reviewer returned multiple approval tool calls")]
+    ToolCallMultiple,
+    #[error("approval reviewer returned an invalid approval tool call")]
+    ToolCallInvalid,
 }
 
 pub type ApprovalFuture<'a> =
