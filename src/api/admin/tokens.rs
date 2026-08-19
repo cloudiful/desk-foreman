@@ -8,9 +8,10 @@ use serde_json::json;
 
 use crate::{
     AppState,
-    api::validation::ValidatedJson,
+    api::validation::{ValidatedJson, ValidatedQuery},
     db::types::{
-        CreateMcpTokenRequest, CreateMcpTokenResponse, McpTokenResponse, UpdateMcpTokenRequest,
+        CreateMcpTokenRequest, CreateMcpTokenResponse, ListMcpTokensParams, McpTokenResponse, Page,
+        UpdateMcpTokenRequest,
     },
     error::AppError,
 };
@@ -22,8 +23,9 @@ use super::users::require_admin;
     get,
     path = "/api/admin/mcp-tokens",
     tag = "admin-users",
+    params(ListMcpTokensParams),
     responses(
-        (status = 200, body = [McpTokenResponse]),
+        (status = 200, body = Page<McpTokenResponse>),
         (status = 401, body = crate::error::ErrorResponse),
         (status = 403, body = crate::error::ErrorResponse)
     )
@@ -31,9 +33,12 @@ use super::users::require_admin;
 pub async fn list_mcp_tokens(
     State(state): State<AppState>,
     jar: CookieJar,
-) -> Result<Json<Vec<McpTokenResponse>>, AppError> {
+    ValidatedQuery(params): ValidatedQuery<ListMcpTokensParams>,
+) -> Result<Json<Page<McpTokenResponse>>, AppError> {
     require_admin(&state, &jar).await?;
-    Ok(Json(crate::db::queries::list_mcp_tokens(&state.db).await?))
+    Ok(Json(
+        crate::db::queries::list_mcp_tokens(&state.db, &params).await?,
+    ))
 }
 
 #[utoipa::path(

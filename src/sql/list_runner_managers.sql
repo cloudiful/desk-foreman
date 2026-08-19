@@ -23,4 +23,7 @@ SELECT
     created_at,
     updated_at
 FROM runner_managers
-ORDER BY runner_manager_id ASC;
+WHERE ($2::TEXT IS NULL OR name ILIKE '%' || $2 || '%')
+  AND ($3::BOOLEAN IS NULL OR enabled = $3)
+ORDER BY runner_manager_id ASC
+LIMIT $4 OFFSET $5;

@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 
-use crate::db::types::{ListWorkspaceBindingsParams, WorkspaceBindingResponse};
+use crate::db::types::{ListWorkspaceBindingsParams, Page, WorkspaceBindingResponse};
 
 pub async fn find_workspace_binding(
     pool: &PgPool,
@@ -183,14 +183,15 @@ pub async fn find_workspace_binding_by_id(
 pub async fn list_workspace_bindings(
     pool: &PgPool,
     params: &ListWorkspaceBindingsParams,
-) -> anyhow::Result<(Vec<WorkspaceBindingResponse>, i64)> {
-    let limit = params.limit.unwrap_or(20).clamp(1, 100);
+) -> anyhow::Result<Page<WorkspaceBindingResponse>> {
+    let limit = params.limit.unwrap_or(20).clamp(1, 200);
     let offset = params.offset.unwrap_or(0).max(0);
     let total_row = sqlx::query(include_str!("../sql/count_workspace_bindings.sql"))
         .bind(params.application_id)
         .bind(&params.external_user_id)
         .bind(&params.workspace_key)
         .bind(params.is_active)
+        .bind(&params.lifecycle_state)
         .fetch_one(pool)
         .await?;
     let total = total_row.get("count");
@@ -201,11 +202,17 @@ pub async fn list_workspace_bindings(
     .bind(&params.external_user_id)
     .bind(&params.workspace_key)
     .bind(params.is_active)
+    .bind(&params.lifecycle_state)
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)
     .await?;
-    Ok((rows, total))
+    Ok(Page {
+        items: rows,
+        total,
+        limit,
+        offset,
+    })
 }
 
 pub fn external_user_hash(external_user_id: &str) -> String {

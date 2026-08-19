@@ -304,6 +304,8 @@ async function confirmReset(): Promise<void> {
 // ----- MCP tokens -----
 const tokenOwner = ref<UserResponse | null>(null)
 const allTokens = ref<McpTokenResponse[]>([])
+const tokenTotal = ref(0)
+const tokenPage = ref(1)
 const tokenDrawerOpen = ref(false)
 const tokenName = ref('')
 const tokenScopes = ref<AvailableScope[]>([...AVAILABLE_SCOPES])
@@ -313,6 +315,10 @@ const revealedToken = ref<CreateMcpTokenResponse | null>(null)
 const revokeTarget = ref<McpTokenResponse | null>(null)
 const revoking = ref(false)
 let tokenLoadSequence = 0
+
+const tokenTotalPages = computed(() =>
+  tokenTotal.value > 0 ? Math.ceil(tokenTotal.value / PAGE_SIZE) : 1,
+)
 
 const visibleTokens = computed(() =>
   tokenOwner.value
@@ -333,6 +339,7 @@ async function openTokenDrawer(row: UserResponse): Promise<void> {
   tokenScopes.value = [...AVAILABLE_SCOPES]
   tokenExpiresAt.value = ''
   revealedToken.value = null
+  tokenPage.value = 1
   tokenDrawerOpen.value = true
   await loadTokens()
 }
@@ -345,10 +352,18 @@ function handleTokenDrawerOpen(open: boolean): void {
 }
 
 async function loadTokens(): Promise<void> {
+  if (!tokenOwner.value) return
   const sequence = ++tokenLoadSequence
   try {
-    const result = await listAdminMcpTokens()
-    if (sequence === tokenLoadSequence) allTokens.value = result
+    const result = await listAdminMcpTokens({
+      user_id: tokenOwner.value.user_id,
+      limit: PAGE_SIZE,
+      offset: (tokenPage.value - 1) * PAGE_SIZE,
+    })
+    if (sequence === tokenLoadSequence) {
+      allTokens.value = result.items
+      tokenTotal.value = result.total
+    }
   } catch (err) {
     notifyError(
       'Failed to load MCP tokens',
@@ -357,8 +372,13 @@ async function loadTokens(): Promise<void> {
   }
 }
 
+function onTokenPageChange(): void {
+  void loadTokens()
+}
+
 async function createToken(): Promise<void> {
-  if (!tokenOwner.value || !tokenName.value.trim() || creatingToken.value) return
+  if (!tokenOwner.value || !tokenName.value.trim() || creatingToken.value)
+    return
   creatingToken.value = true
   try {
     revealedToken.value = await createAdminMcpToken({
@@ -893,6 +913,20 @@ onMounted(() => void load())
             <p v-else class="text-sm text-(--ui-text-muted)">
               No tokens for this user yet.
             </p>
+            <div
+              v-if="tokenTotalPages > 1"
+              class="mt-3 flex items-center justify-between border-t border-(--ui-border) pt-3"
+            >
+              <span class="text-xs text-(--ui-text-muted)">
+                Page {{ tokenPage }} of {{ tokenTotalPages }}
+              </span>
+              <UPagination
+                v-model:page="tokenPage"
+                :total="tokenTotal"
+                :items-per-page="PAGE_SIZE"
+                @update:page="onTokenPageChange"
+              />
+            </div>
           </div>
         </div>
       </template>

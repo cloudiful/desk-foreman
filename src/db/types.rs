@@ -6,8 +6,8 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::api::validation::{
-    deserialize_optional_trimmed_nonempty, validate_audit_status, validate_non_blank,
-    validate_sort_dir, validate_user_sort_by,
+    deserialize_optional_trimmed_nonempty, validate_audit_status, validate_lifecycle_state,
+    validate_non_blank, validate_sort_dir, validate_user_sort_by,
 };
 use crate::policy::ResourceLimits;
 
@@ -83,15 +83,7 @@ pub struct AuthMeResponse {
     pub user: UserResponse,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
-pub struct UserPageResponse {
-    pub items: Vec<UserResponse>,
-    pub total: i64,
-    pub limit: i64,
-    pub offset: i64,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, FromRow)]
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, FromRow)]
 pub struct UserRecord {
     pub user_id: i64,
     pub login_name: String,
@@ -122,8 +114,8 @@ pub struct WebSessionRecord {
 #[derive(Clone, Debug, Deserialize, Serialize, IntoParams, Validate)]
 #[into_params(parameter_in = Query)]
 pub struct ListUsersParams {
-    #[param(minimum = 1, maximum = 100)]
-    #[validate(range(min = 1, max = 100))]
+    #[param(minimum = 1, maximum = 200)]
+    #[validate(range(min = 1, max = 200))]
     pub limit: Option<i64>,
     #[param(minimum = 0)]
     #[validate(range(min = 0))]
@@ -474,8 +466,8 @@ fn default_lease_ttl_seconds() -> u64 {
 #[derive(Clone, Debug, Deserialize, Serialize, IntoParams, Validate)]
 #[into_params(parameter_in = Query)]
 pub struct ListWorkspaceBindingsParams {
-    #[param(minimum = 1, maximum = 100)]
-    #[validate(range(min = 1, max = 100))]
+    #[param(minimum = 1, maximum = 200)]
+    #[validate(range(min = 1, max = 200))]
     pub limit: Option<i64>,
     #[param(minimum = 0)]
     #[validate(range(min = 0))]
@@ -485,6 +477,91 @@ pub struct ListWorkspaceBindingsParams {
     pub external_user_id: Option<String>,
     pub workspace_key: Option<String>,
     pub is_active: Option<bool>,
+    #[validate(custom(function = "validate_lifecycle_state"))]
+    pub lifecycle_state: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, IntoParams, Validate)]
+#[into_params(parameter_in = Query)]
+pub struct ListApplicationsParams {
+    #[param(minimum = 1, maximum = 200)]
+    #[validate(range(min = 1, max = 200))]
+    pub limit: Option<i64>,
+    #[param(minimum = 0)]
+    #[validate(range(min = 0))]
+    pub offset: Option<i64>,
+    #[serde(deserialize_with = "deserialize_optional_trimmed_nonempty")]
+    pub search: Option<String>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, IntoParams, Validate)]
+#[into_params(parameter_in = Query)]
+pub struct ListApplicationTokensParams {
+    #[param(minimum = 1, maximum = 200)]
+    #[validate(range(min = 1, max = 200))]
+    pub limit: Option<i64>,
+    #[param(minimum = 0)]
+    #[validate(range(min = 0))]
+    pub offset: Option<i64>,
+    #[validate(range(min = 1))]
+    pub application_id: Option<i64>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, IntoParams, Validate)]
+#[into_params(parameter_in = Query)]
+pub struct ListMcpTokensParams {
+    #[param(minimum = 1, maximum = 200)]
+    #[validate(range(min = 1, max = 200))]
+    pub limit: Option<i64>,
+    #[param(minimum = 0)]
+    #[validate(range(min = 0))]
+    pub offset: Option<i64>,
+    #[serde(deserialize_with = "deserialize_optional_trimmed_nonempty")]
+    pub search: Option<String>,
+    pub user_id: Option<i64>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, IntoParams, Validate)]
+#[into_params(parameter_in = Query)]
+pub struct ListRunnerManagersParams {
+    #[param(minimum = 1, maximum = 200)]
+    #[validate(range(min = 1, max = 200))]
+    pub limit: Option<i64>,
+    #[param(minimum = 0)]
+    #[validate(range(min = 0))]
+    pub offset: Option<i64>,
+    #[serde(deserialize_with = "deserialize_optional_trimmed_nonempty")]
+    pub search: Option<String>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, IntoParams, Validate)]
+#[into_params(parameter_in = Query)]
+pub struct ListWorkspaceRunnersParams {
+    #[param(minimum = 1, maximum = 200)]
+    #[validate(range(min = 1, max = 200))]
+    pub limit: Option<i64>,
+    #[param(minimum = 0)]
+    #[validate(range(min = 0))]
+    pub offset: Option<i64>,
+    pub status: Option<String>,
+    pub owner_kind: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, IntoParams, Validate)]
+#[into_params(parameter_in = Query)]
+pub struct ListRunnerSessionsParams {
+    #[param(minimum = 1, maximum = 200)]
+    #[validate(range(min = 1, max = 200))]
+    pub limit: Option<i64>,
+    #[param(minimum = 0)]
+    #[validate(range(min = 0))]
+    pub offset: Option<i64>,
+    pub owner_kind: Option<String>,
+    pub state: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, IntoParams, Validate)]
@@ -529,8 +606,8 @@ pub struct AuditLogResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
-pub struct AuditLogPageResponse {
-    pub items: Vec<AuditLogResponse>,
+pub struct Page<T: ToSchema> {
+    pub items: Vec<T>,
     pub total: i64,
     pub limit: i64,
     pub offset: i64,
@@ -826,4 +903,8 @@ pub struct OperationsSummary {
     pub active_sessions: i64,
     pub failed_operations: i64,
     pub archived_workspaces: i64,
+    pub runner_managers_total: i64,
+    pub runner_managers_online: i64,
+    pub runner_managers_offline: i64,
+    pub runner_managers_disabled: i64,
 }

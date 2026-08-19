@@ -1,16 +1,16 @@
 use axum::{Json, extract::State};
 use axum_extra::extract::cookie::CookieJar;
+use runner_protocol::{RunnerOwner, RunnerSessionStatus};
 
 use crate::{
     AppState,
     api::validation::ValidatedQuery,
     db::types::{
-        AuditLogPageResponse, ListAuditLogsParams, OperationsSummary, RunnerSessionResponse,
-        WorkspaceRunnerResponse,
+        AuditLogResponse, ListAuditLogsParams, ListRunnerSessionsParams, ListWorkspaceRunnersParams,
+        OperationsSummary, Page, RunnerSessionResponse, WorkspaceRunnerResponse,
     },
     error::AppError,
 };
-use runner_protocol::RunnerOwner;
 
 use super::users::require_admin;
 
@@ -19,13 +19,13 @@ use super::users::require_admin;
     path = "/api/admin/audit-logs",
     tag = "admin-operations",
     params(ListAuditLogsParams),
-    responses((status = 200, body = AuditLogPageResponse))
+    responses((status = 200, body = Page<AuditLogResponse>))
 )]
 pub async fn list_audit_logs(
     State(state): State<AppState>,
     jar: CookieJar,
     ValidatedQuery(params): ValidatedQuery<ListAuditLogsParams>,
-) -> Result<Json<AuditLogPageResponse>, AppError> {
+) -> Result<Json<Page<AuditLogResponse>>, AppError> {
     require_admin(&state, &jar).await?;
     Ok(Json(
         crate::db::queries::list_audit_logs(&state.db, &params).await?,
@@ -36,32 +36,71 @@ pub async fn list_audit_logs(
     get,
     path = "/api/admin/workspace-runners",
     tag = "admin-operations",
-    responses((status = 200, body = [WorkspaceRunnerResponse]))
+    params(ListWorkspaceRunnersParams),
+    responses((status = 200, body = Page<WorkspaceRunnerResponse>))
 )]
 pub async fn list_workspace_runners(
     State(state): State<AppState>,
     jar: CookieJar,
-) -> Result<Json<Vec<WorkspaceRunnerResponse>>, AppError> {
+    ValidatedQuery(params): ValidatedQuery<ListWorkspaceRunnersParams>,
+) -> Result<Json<Page<WorkspaceRunnerResponse>>, AppError> {
     require_admin(&state, &jar).await?;
-    let rows = crate::db::queries::list_workspace_runners(&state.db).await?;
-    Ok(Json(
-        rows.into_iter().map(workspace_runner_response).collect(),
-    ))
+    let page = crate::db::queries::list_workspace_runners(&state.db, &params).await?;
+    Ok(Json(Page {
+        items: page
+            .items
+            .into_iter()
+            .map(workspace_runner_response)
+            .collect(),
+        total: page.total,
+        limit: page.limit,
+        offset: page.offset,
+    }))
 }
 
 #[utoipa::path(
     get,
     path = "/api/admin/runner-sessions",
     tag = "admin-operations",
-    responses((status = 200, body = [RunnerSessionResponse]))
+    params(ListRunnerSessionsParams),
+    responses((status = 200, body = Page<RunnerSessionResponse>))
 )]
 pub async fn list_runner_sessions(
     State(state): State<AppState>,
     jar: CookieJar,
-) -> Result<Json<Vec<RunnerSessionResponse>>, AppError> {
+    ValidatedQuery(params): ValidatedQuery<ListRunnerSessionsParams>,
+) -> Result<Json<Page<RunnerSessionResponse>>, AppError> {
     require_admin(&state, &jar).await?;
-    let sessions = state.runner.list_sessions().await?;
-    Ok(Json(sessions.into_iter().map(session_response).collect()))
+    let limit = params.limit.unwrap_or(100);
+    let offset = params.offset.unwrap_or(0);
+    let all = state.runner.list_sessions().await?;
+    let filtered: Vec<RunnerSessionStatus> = all
+        .into_iter()
+        .filter(|session| match &params.owner_kind {
+            Some(kind) => matches!(
+                (&session.owner, kind.as_str()),
+                (RunnerOwner::InternalUser { .. }, "user")
+                    | (RunnerOwner::WorkspaceBinding { .. }, "workspace_binding")
+            ),
+            None => true,
+        })
+        .filter(|session| match &params.state {
+            Some(state_filter) => session.state == *state_filter,
+            None => true,
+        })
+        .collect();
+    let total = filtered.len() as i64;
+    let items: Vec<RunnerSessionStatus> = filtered
+        .into_iter()
+        .skip(offset as usize)
+        .take(limit as usize)
+        .collect();
+    Ok(Json(Page {
+        items: items.into_iter().map(session_response).collect(),
+        total,
+        limit,
+        offset,
+    }))
 }
 
 #[utoipa::path(
@@ -75,14 +114,32 @@ pub async fn operations_summary(
     jar: CookieJar,
 ) -> Result<Json<OperationsSummary>, AppError> {
     require_admin(&state, &jar).await?;
-    let (active_runners, failed_operations, archived_workspaces) =
+    let (
+        active_runners,
+        failed_operations,
+        archived_workspaces,
+        runner_managers_total,
+        runner_managers_online,
+        runner_managers_offline,
+        runner_managers_disabled,
+    ) =
         crate::db::queries::operations_summary(&state.db).await?;
-    let active_sessions = state.runner.list_sessions().await?.len() as i64;
+    let active_sessions = state
+        .runner
+        .list_sessions()
+        .await?
+        .into_iter()
+        .filter(|session| matches!(session.state.as_str(), "running" | "pending"))
+        .count() as i64;
     Ok(Json(OperationsSummary {
         active_runners,
         active_sessions,
         failed_operations,
         archived_workspaces,
+        runner_managers_total,
+        runner_managers_online,
+        runner_managers_offline,
+        runner_managers_disabled,
     }))
 }
 
@@ -109,7 +166,7 @@ fn workspace_runner_response(
     }
 }
 
-fn session_response(row: runner_protocol::RunnerSessionStatus) -> RunnerSessionResponse {
+fn session_response(row: RunnerSessionStatus) -> RunnerSessionResponse {
     let (owner_kind, owner_id) = match row.owner {
         RunnerOwner::InternalUser { user_id } => ("user".to_string(), user_id),
         RunnerOwner::WorkspaceBinding {

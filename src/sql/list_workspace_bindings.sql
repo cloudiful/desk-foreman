@@ -21,5 +21,6 @@ WHERE ($1::BIGINT IS NULL OR application_id = $1)
   AND ($2::TEXT IS NULL OR external_user_id = $2)
   AND ($3::TEXT IS NULL OR workspace_key = $3)
   AND ($4::BOOLEAN IS NULL OR is_active = $4)
+  AND ($5::TEXT IS NULL OR lifecycle_state = $5)
 ORDER BY last_used_at DESC, workspace_binding_id DESC
-LIMIT $5 OFFSET $6;
+LIMIT $6 OFFSET $7;

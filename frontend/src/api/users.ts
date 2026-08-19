@@ -38,21 +38,36 @@ import {
   type CreateMcpTokenRequest,
   type CreateMcpTokenResponse,
   type CreateUserRequest,
+  type ListUsersData,
+  type ListApplicationsData,
+  type ListApplicationTokensData,
+  type ListMcpTokensData,
+  type ListRunnerManagersData,
+  type ListRunnerSessionsData,
   type ListWorkspaceBindingsData,
+  type ListWorkspaceRunnersData,
   type McpTokenResponse,
+  type PageApplicationResponse,
+  type PageApplicationTokenResponse,
+  type PageAuditLogResponse,
+  type PageMcpTokenResponse,
+  type PageRunnerManagerResponse,
+  type PageRunnerSessionResponse,
+  type PageUserResponse,
+  type PageWorkspaceBindingResponse,
+  type PageWorkspaceRunnerResponse,
   type ResetPasswordRequest,
+  type AuditLogResponse,
+  type RunnerSessionResponse,
+  type WorkspaceRunnerResponse,
   type UpdateUserRequest,
   type UpdateApplicationRequest,
-  type UserPageResponse,
   type UserResponse,
   type WorkspaceBindingResponse,
-  type AuditLogPageResponse,
   type ApprovalSettingsResponse,
   type ApprovalTestResponse,
   type ListAuditLogsData,
   type OperationsSummary,
-  type RunnerSessionResponse,
-  type WorkspaceRunnerResponse,
   type UpdateApplicationTokenRequest,
   type UpdateMcpTokenRequest,
   type UpdateApprovalSettingsRequest,
@@ -62,29 +77,25 @@ import {
   type UpdateRunnerManagerRequest,
 } from './generated'
 import { requireOk } from './http'
+import { emptyPage } from '../utils/pagination'
 
-export async function listAdminUsers(query: {
-  limit: number
-  offset: number
-  sort_by?: string
-  sort_dir?: 'asc' | 'desc'
-  search?: string
-  is_admin?: boolean
-  is_active?: boolean
-}): Promise<UserPageResponse> {
+export async function listAdminUsers(
+  query: NonNullable<ListUsersData['query']>,
+): Promise<PageUserResponse> {
   const { data, response } = await listUsers({ query })
   await requireOk(response, 'Failed to load users')
-  return (
-    data ?? { items: [], total: 0, limit: query.limit, offset: query.offset }
-  )
+  return data ?? emptyPage<UserResponse>(query.limit ?? 100, query.offset ?? 0)
 }
 
-export async function listAdminRunnerManagers(): Promise<
-  RunnerManagerResponse[]
-> {
-  const { data, response } = await listRunnerManagers()
+export async function listAdminRunnerManagers(
+  query: ListRunnerManagersData['query'] = {},
+): Promise<PageRunnerManagerResponse> {
+  const { data, response } = await listRunnerManagers({ query })
   await requireOk(response, 'Failed to load runner managers')
-  return data ?? []
+  return (
+    data ??
+    emptyPage<RunnerManagerResponse>(query.limit ?? 100, query.offset ?? 0)
+  )
 }
 
 export async function createAdminRunnerManager(
@@ -141,10 +152,15 @@ export async function deactivateAdminUser(user_id: number): Promise<void> {
   await requireOk(response, 'Failed to deactivate user')
 }
 
-export async function listAdminMcpTokens(): Promise<McpTokenResponse[]> {
-  const { data, response } = await listMcpTokens()
+export async function listAdminMcpTokens(
+  query: ListMcpTokensData['query'] = {},
+): Promise<PageMcpTokenResponse> {
+  const effectiveQuery = { ...query, is_active: query.is_active ?? true }
+  const { data, response } = await listMcpTokens({ query: effectiveQuery })
   await requireOk(response, 'Failed to load MCP tokens')
-  return data ?? []
+  return (
+    data ?? emptyPage<McpTokenResponse>(query.limit ?? 100, query.offset ?? 0)
+  )
 }
 
 export async function createAdminMcpToken(
@@ -161,10 +177,15 @@ export async function deleteAdminMcpToken(token_id: number): Promise<void> {
   await requireOk(response, 'Failed to revoke MCP token')
 }
 
-export async function listAdminApplications(): Promise<ApplicationResponse[]> {
-  const { data, response } = await listApplications()
+export async function listAdminApplications(
+  query: ListApplicationsData['query'] = {},
+): Promise<PageApplicationResponse> {
+  const { data, response } = await listApplications({ query })
   await requireOk(response, 'Failed to load applications')
-  return data ?? []
+  return (
+    data ??
+    emptyPage<ApplicationResponse>(query.limit ?? 100, query.offset ?? 0)
+  )
 }
 
 export async function createAdminApplication(
@@ -223,12 +244,18 @@ export async function testAdminApplicationApproval(
   return data
 }
 
-export async function listAdminApplicationTokens(): Promise<
-  ApplicationTokenResponse[]
-> {
-  const { data, response } = await listApplicationTokens()
+export async function listAdminApplicationTokens(
+  query: ListApplicationTokensData['query'] = {},
+): Promise<PageApplicationTokenResponse> {
+  const effectiveQuery = { ...query, is_active: query.is_active ?? true }
+  const { data, response } = await listApplicationTokens({
+    query: effectiveQuery,
+  })
   await requireOk(response, 'Failed to load application tokens')
-  return data ?? []
+  return (
+    data ??
+    emptyPage<ApplicationTokenResponse>(query.limit ?? 100, query.offset ?? 0)
+  )
 }
 
 export async function createAdminApplicationToken(
@@ -271,11 +298,14 @@ export async function updateAdminMcpToken(
 }
 
 export async function listAdminWorkspaceBindings(
-  query: ListWorkspaceBindingsData['query'],
-): Promise<WorkspaceBindingResponse[]> {
+  query: ListWorkspaceBindingsData['query'] = {},
+): Promise<PageWorkspaceBindingResponse> {
   const { data, response } = await listWorkspaceBindings({ query })
   await requireOk(response, 'Failed to load workspace bindings')
-  return data ?? []
+  return (
+    data ??
+    emptyPage<WorkspaceBindingResponse>(query.limit ?? 100, query.offset ?? 0)
+  )
 }
 
 export async function transitionAdminWorkspaceBinding(
@@ -296,33 +326,34 @@ export async function transitionAdminWorkspaceBinding(
 
 export async function listAdminAuditLogs(
   query: ListAuditLogsData['query'] = {},
-): Promise<AuditLogPageResponse> {
+): Promise<PageAuditLogResponse> {
   const { data, response } = await listAuditLogs({ query })
   await requireOk(response, 'Failed to load audit logs')
   return (
-    data ?? {
-      items: [],
-      total: 0,
-      limit: query.limit ?? 50,
-      offset: query.offset ?? 0,
-    }
+    data ?? emptyPage<AuditLogResponse>(query.limit ?? 50, query.offset ?? 0)
   )
 }
 
-export async function listAdminRunnerSessions(): Promise<
-  RunnerSessionResponse[]
-> {
-  const { data, response } = await listRunnerSessions()
+export async function listAdminRunnerSessions(
+  query: ListRunnerSessionsData['query'] = {},
+): Promise<PageRunnerSessionResponse> {
+  const { data, response } = await listRunnerSessions({ query })
   await requireOk(response, 'Failed to load runner sessions')
-  return data ?? []
+  return (
+    data ??
+    emptyPage<RunnerSessionResponse>(query.limit ?? 100, query.offset ?? 0)
+  )
 }
 
-export async function listAdminWorkspaceRunners(): Promise<
-  WorkspaceRunnerResponse[]
-> {
-  const { data, response } = await listWorkspaceRunners()
+export async function listAdminWorkspaceRunners(
+  query: ListWorkspaceRunnersData['query'] = {},
+): Promise<PageWorkspaceRunnerResponse> {
+  const { data, response } = await listWorkspaceRunners({ query })
   await requireOk(response, 'Failed to load workspace runners')
-  return data ?? []
+  return (
+    data ??
+    emptyPage<WorkspaceRunnerResponse>(query.limit ?? 100, query.offset ?? 0)
+  )
 }
 
 export async function getAdminOperationsSummary(): Promise<OperationsSummary> {

@@ -86,6 +86,15 @@ pub fn validate_audit_status(value: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
+pub fn validate_lifecycle_state(value: &str) -> Result<(), ValidationError> {
+    if !matches!(value, "active" | "archived" | "resetting") {
+        return Err(validation_error(
+            "must be one of: active, archived, resetting",
+        ));
+    }
+    Ok(())
+}
+
 pub fn validate_read_file_params<T>(value: &T) -> Result<(), ValidationError>
 where
     T: ReadFileRangeValidation,

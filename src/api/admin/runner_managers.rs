@@ -6,10 +6,10 @@ use axum_extra::extract::cookie::CookieJar;
 
 use crate::{
     AppState,
-    api::validation::ValidatedJson,
+    api::validation::{ValidatedJson, ValidatedQuery},
     db::types::{
-        CreateRunnerManagerRequest, CreateRunnerManagerResponse, RunnerManagerResponse,
-        UpdateRunnerManagerRequest,
+        CreateRunnerManagerRequest, CreateRunnerManagerResponse, ListRunnerManagersParams, Page,
+        RunnerManagerResponse, UpdateRunnerManagerRequest,
     },
     error::AppError,
 };
@@ -20,15 +20,17 @@ use super::{shared::record_admin_audit, users::require_admin};
     get,
     path = "/api/admin/runner-managers",
     tag = "admin-operations",
-    responses((status = 200, body = [RunnerManagerResponse]))
+    params(ListRunnerManagersParams),
+    responses((status = 200, body = Page<RunnerManagerResponse>))
 )]
 pub async fn list_runner_managers(
     State(state): State<AppState>,
     jar: CookieJar,
-) -> Result<Json<Vec<RunnerManagerResponse>>, AppError> {
+    ValidatedQuery(params): ValidatedQuery<ListRunnerManagersParams>,
+) -> Result<Json<Page<RunnerManagerResponse>>, AppError> {
     require_admin(&state, &jar).await?;
     Ok(Json(
-        crate::db::queries::list_runner_managers(&state.db).await?,
+        crate::db::queries::list_runner_managers(&state.db, &params).await?,
     ))
 }
 

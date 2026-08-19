@@ -8,11 +8,11 @@ use serde_json::json;
 
 use crate::{
     AppState,
-    api::validation::ValidatedJson,
+    api::validation::{ValidatedJson, ValidatedQuery},
     db::types::{
         ApplicationResponse, ApplicationTokenResponse, CreateApplicationRequest,
-        CreateApplicationTokenRequest, CreateApplicationTokenResponse, UpdateApplicationRequest,
-        UpdateApplicationTokenRequest,
+        CreateApplicationTokenRequest, CreateApplicationTokenResponse, ListApplicationsParams,
+        ListApplicationTokensParams, Page, UpdateApplicationRequest, UpdateApplicationTokenRequest,
     },
     error::AppError,
 };
@@ -27,8 +27,9 @@ use super::{
     get,
     path = "/api/admin/applications",
     tag = "admin-users",
+    params(ListApplicationsParams),
     responses(
-        (status = 200, body = [ApplicationResponse]),
+        (status = 200, body = Page<ApplicationResponse>),
         (status = 401, body = crate::error::ErrorResponse),
         (status = 403, body = crate::error::ErrorResponse)
     )
@@ -36,10 +37,11 @@ use super::{
 pub async fn list_applications(
     State(state): State<AppState>,
     jar: CookieJar,
-) -> Result<Json<Vec<ApplicationResponse>>, AppError> {
+    ValidatedQuery(params): ValidatedQuery<ListApplicationsParams>,
+) -> Result<Json<Page<ApplicationResponse>>, AppError> {
     require_admin(&state, &jar).await?;
     Ok(Json(
-        crate::db::queries::list_applications(&state.db).await?,
+        crate::db::queries::list_applications(&state.db, &params).await?,
     ))
 }
 
@@ -202,8 +204,9 @@ fn normalize_approval_override(
     get,
     path = "/api/admin/application-tokens",
     tag = "admin-users",
+    params(ListApplicationTokensParams),
     responses(
-        (status = 200, body = [ApplicationTokenResponse]),
+        (status = 200, body = Page<ApplicationTokenResponse>),
         (status = 401, body = crate::error::ErrorResponse),
         (status = 403, body = crate::error::ErrorResponse)
     )
@@ -211,10 +214,11 @@ fn normalize_approval_override(
 pub async fn list_application_tokens(
     State(state): State<AppState>,
     jar: CookieJar,
-) -> Result<Json<Vec<ApplicationTokenResponse>>, AppError> {
+    ValidatedQuery(params): ValidatedQuery<ListApplicationTokensParams>,
+) -> Result<Json<Page<ApplicationTokenResponse>>, AppError> {
     require_admin(&state, &jar).await?;
     Ok(Json(
-        crate::db::queries::list_application_tokens(&state.db).await?,
+        crate::db::queries::list_application_tokens(&state.db, &params).await?,
     ))
 }
 

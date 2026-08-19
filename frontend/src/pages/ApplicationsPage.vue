@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   createAdminApplication,
   createAdminApplicationToken,
@@ -16,11 +16,13 @@ import {
   formatMilliseconds,
   formatRelative,
 } from '../utils/format'
+import { PAGE_SIZE, pageCount, pageOffset } from '../utils/pagination'
 import type {
   ApplicationResponse,
   ApplicationTokenResponse,
   CreateApplicationTokenResponse,
   ApprovalTestResponse,
+  ListApplicationsData,
 } from '../generated/openapi/types.gen'
 
 const AVAILABLE_SCOPES = [
@@ -52,28 +54,33 @@ const APPROVAL_MODES = [
 const { success, error: notifyError } = useNotify()
 
 const rows = ref<ApplicationResponse[]>([])
+const total = ref(0)
 const loading = ref(false)
 const error = ref('')
 const search = ref('')
 const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
+const page = ref(1)
 
-const filtered = computed(() => {
-  const query = search.value.trim().toLowerCase()
-  return rows.value.filter((row) => {
-    if (statusFilter.value === 'active' && !row.is_active) return false
-    if (statusFilter.value === 'inactive' && row.is_active) return false
-    if (!query) return true
-    return row.name.toLowerCase().includes(query)
-  })
-})
+const totalPages = computed(() => pageCount(total.value, PAGE_SIZE))
 
 async function load(): Promise<void> {
   const sequence = ++loadSequence
   loading.value = true
   error.value = ''
   try {
-    const result = await listAdminApplications()
-    if (sequence === loadSequence) rows.value = result
+    const query: NonNullable<ListApplicationsData['query']> = {
+      limit: PAGE_SIZE,
+      offset: pageOffset(page.value, PAGE_SIZE),
+      search: search.value.trim() || undefined,
+      is_active:
+        statusFilter.value === 'all'
+          ? undefined
+          : statusFilter.value === 'active',
+    }
+    const result = await listAdminApplications(query)
+    if (sequence !== loadSequence) return
+    rows.value = result.items
+    total.value = result.total
   } catch (err) {
     if (sequence === loadSequence) {
       error.value =
@@ -83,6 +90,21 @@ async function load(): Promise<void> {
     if (sequence === loadSequence) loading.value = false
   }
 }
+
+function onPageChange(): void {
+  void load()
+}
+
+let filterTimer: ReturnType<typeof setTimeout> | undefined
+watch([search, statusFilter], () => {
+  page.value = 1
+  if (filterTimer) clearTimeout(filterTimer)
+  filterTimer = setTimeout(() => void load(), 250)
+})
+
+onUnmounted(() => {
+  if (filterTimer) clearTimeout(filterTimer)
+})
 
 // ----- create/edit -----
 interface ApplicationForm {
@@ -288,6 +310,8 @@ function clearApplicationKey(): void {
 // ----- tokens -----
 const tokenOwner = ref<ApplicationResponse | null>(null)
 const allTokens = ref<ApplicationTokenResponse[]>([])
+const tokenTotal = ref(0)
+const tokenPage = ref(1)
 const tokenDrawerOpen = ref(false)
 const tokenName = ref('')
 const tokenScopes = ref<AvailableScope[]>([...AVAILABLE_SCOPES])
@@ -297,6 +321,8 @@ const revealedToken = ref<CreateApplicationTokenResponse | null>(null)
 const revokeTarget = ref<ApplicationTokenResponse | null>(null)
 const revoking = ref(false)
 let tokenLoadSequence = 0
+
+const tokenTotalPages = computed(() => pageCount(tokenTotal.value, PAGE_SIZE))
 
 const visibleTokens = computed(() =>
   tokenOwner.value
@@ -319,6 +345,7 @@ async function openTokenDrawer(row: ApplicationResponse): Promise<void> {
   tokenScopes.value = [...AVAILABLE_SCOPES]
   tokenExpiresAt.value = ''
   revealedToken.value = null
+  tokenPage.value = 1
   tokenDrawerOpen.value = true
   await loadTokens()
 }
@@ -331,10 +358,18 @@ function handleTokenDrawerOpen(open: boolean): void {
 }
 
 async function loadTokens(): Promise<void> {
+  if (!tokenOwner.value) return
   const sequence = ++tokenLoadSequence
   try {
-    const result = await listAdminApplicationTokens()
-    if (sequence === tokenLoadSequence) allTokens.value = result
+    const result = await listAdminApplicationTokens({
+      application_id: tokenOwner.value.application_id,
+      limit: PAGE_SIZE,
+      offset: pageOffset(tokenPage.value, PAGE_SIZE),
+    })
+    if (sequence === tokenLoadSequence) {
+      allTokens.value = result.items
+      tokenTotal.value = result.total
+    }
   } catch (err) {
     notifyError(
       'Failed to load application tokens',
@@ -343,8 +378,13 @@ async function loadTokens(): Promise<void> {
   }
 }
 
+function onTokenPageChange(): void {
+  void loadTokens()
+}
+
 async function createToken(): Promise<void> {
-  if (!tokenOwner.value || !tokenName.value.trim() || creatingToken.value) return
+  if (!tokenOwner.value || !tokenName.value.trim() || creatingToken.value)
+    return
   creatingToken.value = true
   try {
     revealedToken.value = await createAdminApplicationToken({
@@ -431,14 +471,14 @@ onMounted(() => void load())
           class="w-36"
         />
         <span class="ml-auto text-sm text-(--ui-text-muted)">
-          {{ filtered.length }} applications
+          {{ total }} applications
         </span>
       </div>
 
       <ErrorAlert v-if="error" :error="error" class="m-4" @retry="load" />
 
       <DataTable
-        :rows="filtered"
+        :rows="rows"
         :columns="[
           { key: 'name', label: 'Application' },
           { key: 'limits', label: 'Limits' },
@@ -525,12 +565,31 @@ onMounted(() => void load())
           </div>
         </template>
       </DataTable>
+
+      <div
+        v-if="totalPages > 1"
+        class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
+      >
+        <span class="text-sm text-(--ui-text-muted)">
+          Page {{ page }} of {{ totalPages }}
+        </span>
+        <UPagination
+          v-model:page="page"
+          :total="total"
+          :items-per-page="PAGE_SIZE"
+          @update:page="onPageChange"
+        />
+      </div>
     </section>
 
     <!-- Application drawer -->
     <UDrawer
       v-model:open="drawerOpen"
-      :title="editing?.application_id === 0 ? 'Create application' : 'Edit application'"
+      :title="
+        editing?.application_id === 0
+          ? 'Create application'
+          : 'Edit application'
+      "
       :dismissible="!saving"
       @update:open="handleApplicationDrawerOpen"
     >
@@ -745,7 +804,8 @@ onMounted(() => void load())
                   Test application reviewer
                 </UButton>
                 <span class="text-xs text-(--ui-text-muted)">
-                  Tests the saved application configuration without executing a tool.
+                  Tests the saved application configuration without executing a
+                  tool.
                 </span>
               </div>
               <UAlert
@@ -755,9 +815,7 @@ onMounted(() => void load())
                     ? 'Reviewer test passed'
                     : 'Reviewer test failed'
                 "
-                :description="
-                  `${approvalTestResult.message} (${approvalTestResult.latency_ms} ms)`
-                "
+                :description="`${approvalTestResult.message} (${approvalTestResult.latency_ms} ms)`"
                 :color="approvalTestResult.ok ? 'success' : 'error'"
                 variant="subtle"
               />
@@ -917,6 +975,20 @@ onMounted(() => void load())
             <p v-else class="text-sm text-(--ui-text-muted)">
               No tokens for this application yet.
             </p>
+            <div
+              v-if="tokenTotalPages > 1"
+              class="mt-3 flex items-center justify-between border-t border-(--ui-border) pt-3"
+            >
+              <span class="text-xs text-(--ui-text-muted)">
+                Page {{ tokenPage }} of {{ tokenTotalPages }}
+              </span>
+              <UPagination
+                v-model:page="tokenPage"
+                :total="tokenTotal"
+                :items-per-page="PAGE_SIZE"
+                @update:page="onTokenPageChange"
+              />
+            </div>
           </div>
         </div>
       </template>

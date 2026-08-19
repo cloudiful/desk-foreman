@@ -10,7 +10,7 @@ use crate::{
     AppState,
     api::validation::{ValidatedJson, ValidatedQuery},
     db::types::{
-        ListWorkspaceBindingsParams, WorkspaceBindingResponse, WorkspaceLeaseReleaseRequest,
+        ListWorkspaceBindingsParams, Page, WorkspaceBindingResponse, WorkspaceLeaseReleaseRequest,
         WorkspaceLeaseRequest,
     },
     error::AppError,
@@ -27,7 +27,7 @@ use super::{shared::record_admin_audit, users::require_admin};
     tag = "admin-users",
     params(ListWorkspaceBindingsParams),
     responses(
-        (status = 200, body = [WorkspaceBindingResponse]),
+        (status = 200, body = Page<WorkspaceBindingResponse>),
         (status = 401, body = crate::error::ErrorResponse),
         (status = 403, body = crate::error::ErrorResponse)
     )
@@ -36,12 +36,9 @@ pub async fn list_workspace_bindings(
     State(state): State<AppState>,
     jar: CookieJar,
     ValidatedQuery(params): ValidatedQuery<ListWorkspaceBindingsParams>,
-) -> Result<Json<Vec<WorkspaceBindingResponse>>, AppError> {
+) -> Result<Json<Page<WorkspaceBindingResponse>>, AppError> {
     require_admin(&state, &jar).await?;
-    let (items, _) = crate::db::queries::list_workspace_bindings(&state.db, &params)
-        .await
-        .map_err(|error| AppError::bad_request(error.to_string()))?;
-    Ok(Json(items))
+    Ok(Json(crate::db::queries::list_workspace_bindings(&state.db, &params).await?))
 }
 
 #[utoipa::path(

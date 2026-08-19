@@ -11,8 +11,8 @@ use crate::{
     api::validation::{ValidatedJson, ValidatedQuery},
     auth,
     db::types::{
-        CreateUserRequest, ListUsersParams, ResetPasswordRequest, UpdateUserRequest,
-        UserPageResponse, UserResponse,
+        CreateUserRequest, ListUsersParams, Page, ResetPasswordRequest, UpdateUserRequest,
+        UserResponse,
     },
     error::AppError,
     workspace::default_user_workspace,
@@ -28,7 +28,7 @@ pub use super::shared::require_admin;
     tag = "admin-users",
     params(ListUsersParams),
     responses(
-        (status = 200, body = UserPageResponse),
+        (status = 200, body = Page<UserResponse>),
         (status = 401, body = crate::error::ErrorResponse),
         (status = 403, body = crate::error::ErrorResponse)
     )
@@ -37,15 +37,13 @@ pub async fn list_users(
     State(state): State<AppState>,
     jar: CookieJar,
     ValidatedQuery(params): ValidatedQuery<ListUsersParams>,
-) -> Result<Json<UserPageResponse>, AppError> {
+) -> Result<Json<Page<UserResponse>>, AppError> {
     require_admin(&state, &jar).await?;
-    let (items, total) = crate::db::queries::list_users(&state.db, &params)
-        .await
-        .map_err(|error| AppError::bad_request(error.to_string()))?;
-    Ok(Json(UserPageResponse {
+    let (items, total) = crate::db::queries::list_users(&state.db, &params).await?;
+    Ok(Json(Page {
         items,
         total,
-        limit: params.limit.unwrap_or(20).clamp(1, 100),
+        limit: params.limit.unwrap_or(20).clamp(1, 200),
         offset: params.offset.unwrap_or(0).max(0),
     }))
 }

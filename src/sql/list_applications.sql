@@ -21,4 +21,7 @@ SELECT
     approval_max_output_tokens,
     approval_api_key_ciphertext IS NOT NULL AS approval_api_key_configured
 FROM applications
-ORDER BY created_at DESC, application_id DESC;
+WHERE ($1::TEXT IS NULL OR name ILIKE '%' || $1 || '%')
+  AND ($2::BOOLEAN IS NULL OR is_active = $2)
+ORDER BY created_at DESC, application_id DESC
+LIMIT $3 OFFSET $4;

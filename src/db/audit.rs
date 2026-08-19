@@ -1,6 +1,6 @@
 use sqlx::PgPool;
 
-use super::types::{AuditLogPageResponse, AuditLogResponse, ListAuditLogsParams};
+use super::types::{AuditLogResponse, ListAuditLogsParams, Page};
 
 pub struct AuditLogEntry<'a> {
     pub actor_user_id: Option<i64>,
@@ -41,7 +41,7 @@ pub async fn record_audit(pool: &PgPool, entry: AuditLogEntry<'_>) -> anyhow::Re
 pub async fn list_audit_logs(
     pool: &PgPool,
     params: &ListAuditLogsParams,
-) -> anyhow::Result<AuditLogPageResponse> {
+) -> anyhow::Result<Page<AuditLogResponse>> {
     let limit = params.limit.unwrap_or(50).clamp(1, 200);
     let offset = params.offset.unwrap_or(0).max(0);
     let total: i64 = sqlx::query_scalar(include_str!("../sql/count_audit_logs.sql"))
@@ -72,7 +72,7 @@ pub async fn list_audit_logs(
         .bind(offset)
         .fetch_all(pool)
         .await?;
-    Ok(AuditLogPageResponse {
+    Ok(Page {
         items,
         total,
         limit,

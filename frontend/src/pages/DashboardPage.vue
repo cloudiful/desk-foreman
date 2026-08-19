@@ -12,15 +12,15 @@ import type { RunnerManagerResponse } from '../generated/openapi/types.gen'
 const router = useRouter()
 
 const summary = useAsyncData(() => getAdminOperationsSummary())
-const managers = useAsyncData(() => listAdminRunnerManagers())
+const managers = useAsyncData(() => listAdminRunnerManagers({ limit: 5 }))
 
 const managerStats = computed(() => {
-  const all = managers.data.value ?? []
+  const data = summary.data.value
   return {
-    total: all.length,
-    online: all.filter((m) => m.status === 'online').length,
-    offline: all.filter((m) => m.status === 'offline').length,
-    disabled: all.filter((m) => !m.enabled).length,
+    total: data?.runner_managers_total ?? 0,
+    online: data?.runner_managers_online ?? 0,
+    offline: data?.runner_managers_offline ?? 0,
+    disabled: data?.runner_managers_disabled ?? 0,
   }
 })
 
@@ -139,11 +139,11 @@ onMounted(refresh)
           @retry="managers.load"
         />
         <ul
-          v-else-if="(managers.data.value ?? []).length"
+          v-else-if="(managers.data.value?.items ?? []).length"
           class="divide-y divide-(--ui-border-muted)"
         >
           <li
-            v-for="manager in managers.data.value ?? []"
+            v-for="manager in managers.data.value?.items ?? []"
             :key="manager.runner_manager_id"
             class="flex items-center justify-between gap-3 px-5 py-3.5"
           >

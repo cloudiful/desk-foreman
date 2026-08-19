@@ -1,8 +1,11 @@
 use chrono::{DateTime, Utc};
 use runner_protocol::RunnerOwner;
 use sqlx::PgPool;
+use utoipa::ToSchema;
 
-#[derive(Clone, Debug, sqlx::FromRow)]
+use crate::db::types::{ListWorkspaceRunnersParams, Page};
+
+#[derive(Clone, Debug, sqlx::FromRow, ToSchema)]
 pub struct WorkspaceRunnerRecord {
     pub runner_id: i64,
     pub owner_kind: String,
@@ -68,33 +71,59 @@ pub async fn find_workspace_runner_by_owner(
     }
 }
 
-pub async fn list_workspace_runners(pool: &PgPool) -> anyhow::Result<Vec<WorkspaceRunnerRecord>> {
-    sqlx::query_as::<_, WorkspaceRunnerRecord>(
-        r#"
-        SELECT *
-        FROM workspace_runners
-        ORDER BY runner_id ASC
-        "#,
-    )
+pub async fn list_workspace_runners(
+    pool: &PgPool,
+    params: &ListWorkspaceRunnersParams,
+) -> anyhow::Result<Page<WorkspaceRunnerRecord>> {
+    let limit = params.limit.unwrap_or(100).clamp(1, 200);
+    let offset = params.offset.unwrap_or(0).max(0);
+    let total: i64 = sqlx::query_scalar(include_str!("../sql/count_workspace_runners.sql"))
+        .bind(&params.status)
+        .bind(&params.owner_kind)
+        .fetch_one(pool)
+        .await?;
+    let items = sqlx::query_as::<_, WorkspaceRunnerRecord>(include_str!(
+        "../sql/list_workspace_runners.sql"
+    ))
+    .bind(&params.status)
+    .bind(&params.owner_kind)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
-    .await
-    .map_err(Into::into)
+    .await?;
+    Ok(Page {
+        items,
+        total,
+        limit,
+        offset,
+    })
 }
 
-pub async fn operations_summary(pool: &PgPool) -> anyhow::Result<(i64, i64, i64)> {
+pub async fn operations_summary(
+    pool: &PgPool,
+) -> anyhow::Result<(i64, i64, i64, i64, i64, i64, i64)> {
     #[derive(sqlx::FromRow)]
     struct Row {
         active_runners: i64,
         failed_operations: i64,
         archived_workspaces: i64,
+        runner_managers_total: i64,
+        runner_managers_online: i64,
+        runner_managers_offline: i64,
+        runner_managers_disabled: i64,
     }
     let row = sqlx::query_as::<_, Row>(include_str!("../sql/operations_summary.sql"))
+        .bind(runner_protocol::RUNNER_MANAGER_HEARTBEAT_TTL_SECS as i64)
         .fetch_one(pool)
         .await?;
     Ok((
         row.active_runners,
         row.failed_operations,
         row.archived_workspaces,
+        row.runner_managers_total,
+        row.runner_managers_online,
+        row.runner_managers_offline,
+        row.runner_managers_disabled,
     ))
 }
 

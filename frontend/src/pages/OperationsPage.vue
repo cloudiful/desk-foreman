@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
+  getAdminOperationsSummary,
   listAdminRunnerSessions,
   listAdminWorkspaceRunners,
 } from '../api/users'
 import { useNotify } from '../composables/useNotify'
 import { formatDateTime, formatDuration } from '../utils/format'
+import { PAGE_SIZE, pageCount, pageOffset } from '../utils/pagination'
 import type {
+  ListRunnerSessionsData,
+  ListWorkspaceRunnersData,
+  OperationsSummary,
   RunnerSessionResponse,
   WorkspaceRunnerResponse,
 } from '../generated/openapi/types.gen'
@@ -14,10 +19,15 @@ import type {
 const { error: notifyError } = useNotify()
 
 const runners = ref<WorkspaceRunnerResponse[]>([])
+const runnerTotal = ref(0)
 const sessions = ref<RunnerSessionResponse[]>([])
+const sessionTotal = ref(0)
+const summary = ref<OperationsSummary | null>(null)
 const loading = ref(false)
 const error = ref('')
-const activeTab = ref('runners')
+const activeTab = ref<'runners' | 'sessions'>('runners')
+const runnersPage = ref(1)
+const sessionsPage = ref(1)
 const AUTO_REFRESH_KEY = 'desk-foreman-operations-auto-refresh'
 
 function readAutoRefresh(): boolean {
@@ -32,12 +42,12 @@ const autoRefresh = ref(readAutoRefresh())
 const runnerDetail = ref<WorkspaceRunnerResponse | null>(null)
 const sessionDetail = ref<RunnerSessionResponse | null>(null)
 
-const runnerStats = computed(() => ({
-  running: runners.value.filter((r) => r.status === 'running').length,
-  idle: runners.value.filter((r) => r.status === 'idle').length,
-  failed: runners.value.filter((r) => r.status === 'failed').length,
-  total: runners.value.length,
-}))
+const runnersTotalPages = computed(() =>
+  pageCount(runnerTotal.value, PAGE_SIZE),
+)
+const sessionsTotalPages = computed(() =>
+  pageCount(sessionTotal.value, PAGE_SIZE),
+)
 
 const runnerDetailOpen = computed<boolean>({
   get: () => Boolean(runnerDetail.value),
@@ -53,13 +63,6 @@ const sessionDetailOpen = computed<boolean>({
   },
 })
 
-const sessionStats = computed(() => {
-  const active = sessions.value.filter(
-    (s) => s.state === 'running' || s.state === 'pending',
-  ).length
-  return { active, total: sessions.value.length }
-})
-
 let timer: ReturnType<typeof setInterval> | undefined
 
 async function load(manual = true): Promise<void> {
@@ -67,12 +70,24 @@ async function load(manual = true): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const [runnerList, sessionList] = await Promise.all([
-      listAdminWorkspaceRunners(),
-      listAdminRunnerSessions(),
+    const runnerQuery: NonNullable<ListWorkspaceRunnersData['query']> = {
+      limit: PAGE_SIZE,
+      offset: pageOffset(runnersPage.value, PAGE_SIZE),
+    }
+    const sessionQuery: NonNullable<ListRunnerSessionsData['query']> = {
+      limit: PAGE_SIZE,
+      offset: pageOffset(sessionsPage.value, PAGE_SIZE),
+    }
+    const [runnerPage, sessionPage, summaryData] = await Promise.all([
+      listAdminWorkspaceRunners(runnerQuery),
+      listAdminRunnerSessions(sessionQuery),
+      getAdminOperationsSummary(),
     ])
-    runners.value = runnerList
-    sessions.value = sessionList
+    runners.value = runnerPage.items
+    runnerTotal.value = runnerPage.total
+    sessions.value = sessionPage.items
+    sessionTotal.value = sessionPage.total
+    summary.value = summaryData
   } catch (err) {
     error.value =
       err instanceof Error ? err.message : 'Failed to load runner status'
@@ -85,6 +100,14 @@ async function load(manual = true): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+function onRunnersPageChange(): void {
+  void load(true)
+}
+
+function onSessionsPageChange(): void {
+  void load(true)
 }
 
 function stopAutoRefresh(): void {
@@ -167,17 +190,17 @@ onUnmounted(() => {
     <div class="grid gap-4 sm:grid-cols-3">
       <StatCard
         title="Active sessions"
-        :value="sessionStats.active"
+        :value="summary?.active_sessions ?? 0"
         icon="i-lucide-terminal-square"
       />
       <StatCard
         title="Running runners"
-        :value="runnerStats.running"
+        :value="summary?.active_runners ?? 0"
         icon="i-lucide-play-circle"
       />
       <StatCard
-        title="Failed runners"
-        :value="runnerStats.failed"
+        title="Failed operations"
+        :value="summary?.failed_operations ?? 0"
         icon="i-lucide-triangle-alert"
       />
     </div>
@@ -189,12 +212,12 @@ onUnmounted(() => {
         v-model="activeTab"
         :items="[
           {
-            label: `Runners (${runnerStats.total})`,
+            label: `Runners (${runnerTotal})`,
             value: 'runners',
             slot: 'runners',
           },
           {
-            label: `Sessions (${sessionStats.total})`,
+            label: `Sessions (${sessionTotal})`,
             value: 'sessions',
             slot: 'sessions',
           },
@@ -261,6 +284,21 @@ onUnmounted(() => {
               </div>
             </template>
           </DataTable>
+
+          <div
+            v-if="runnersTotalPages > 1"
+            class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
+          >
+            <span class="text-sm text-(--ui-text-muted)">
+              Page {{ runnersPage }} of {{ runnersTotalPages }}
+            </span>
+            <UPagination
+              v-model:page="runnersPage"
+              :total="runnerTotal"
+              :items-per-page="PAGE_SIZE"
+              @update:page="onRunnersPageChange"
+            />
+          </div>
         </template>
 
         <template #sessions>
@@ -339,12 +377,31 @@ onUnmounted(() => {
               </div>
             </template>
           </DataTable>
+
+          <div
+            v-if="sessionsTotalPages > 1"
+            class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
+          >
+            <span class="text-sm text-(--ui-text-muted)">
+              Page {{ sessionsPage }} of {{ sessionsTotalPages }}
+            </span>
+            <UPagination
+              v-model:page="sessionsPage"
+              :total="sessionTotal"
+              :items-per-page="PAGE_SIZE"
+              @update:page="onSessionsPageChange"
+            />
+          </div>
         </template>
       </UTabs>
     </section>
 
     <!-- Runner detail drawer -->
-    <UDrawer v-model:open="runnerDetailOpen" title="Runner details" :close="true">
+    <UDrawer
+      v-model:open="runnerDetailOpen"
+      title="Runner details"
+      :close="true"
+    >
       <template #body>
         <dl v-if="runnerDetail" class="space-y-3 text-sm">
           <div class="flex justify-between gap-4">
@@ -403,7 +460,11 @@ onUnmounted(() => {
     </UDrawer>
 
     <!-- Session detail drawer -->
-    <UDrawer v-model:open="sessionDetailOpen" title="Session details" :close="true">
+    <UDrawer
+      v-model:open="sessionDetailOpen"
+      title="Session details"
+      :close="true"
+    >
       <template #body>
         <dl v-if="sessionDetail" class="space-y-3 text-sm">
           <div class="flex justify-between gap-4">

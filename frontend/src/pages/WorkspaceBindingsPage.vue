@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   listAdminWorkspaceBindings,
   transitionAdminWorkspaceBinding,
 } from '../api/users'
 import { useNotify } from '../composables/useNotify'
 import { formatDateTime } from '../utils/format'
-import type { WorkspaceBindingResponse } from '../generated/openapi/types.gen'
+import { PAGE_SIZE, pageCount, pageOffset } from '../utils/pagination'
+import type {
+  ListWorkspaceBindingsData,
+  WorkspaceBindingResponse,
+} from '../generated/openapi/types.gen'
+
+type LifecycleFilter = 'all' | 'active' | 'archived' | 'resetting'
 
 const { success, error: notifyError } = useNotify()
 
@@ -16,12 +22,14 @@ function truncateId(id: string | null | undefined): string {
 }
 
 const rows = ref<WorkspaceBindingResponse[]>([])
+const total = ref(0)
 const loading = ref(false)
 const error = ref('')
 const applicationId = ref('')
 const externalUserId = ref('')
 const workspaceKey = ref('')
-const lifecycleFilter = ref<'all' | 'active' | 'archived' | 'resetting'>('all')
+const lifecycleFilter = ref<LifecycleFilter>('all')
+const page = ref(1)
 const actionTarget = ref<{
   binding: WorkspaceBindingResponse
   action: 'archive' | 'restore' | 'reset'
@@ -29,26 +37,26 @@ const actionTarget = ref<{
 const acting = ref(false)
 let loadSequence = 0
 
-const filtered = computed(() => {
-  if (lifecycleFilter.value === 'all') return rows.value
-  return rows.value.filter(
-    (row) => row.lifecycle_state === lifecycleFilter.value,
-  )
-})
+const totalPages = computed(() => pageCount(total.value, PAGE_SIZE))
 
 async function load(): Promise<void> {
   const sequence = ++loadSequence
   loading.value = true
   error.value = ''
   try {
-    const result = await listAdminWorkspaceBindings({
-      limit: 200,
-      offset: 0,
+    const query: NonNullable<ListWorkspaceBindingsData['query']> = {
+      limit: PAGE_SIZE,
+      offset: pageOffset(page.value, PAGE_SIZE),
       application_id: parseApplicationId(applicationId.value),
       external_user_id: externalUserId.value.trim() || undefined,
       workspace_key: workspaceKey.value.trim() || undefined,
-    })
-    if (sequence === loadSequence) rows.value = result
+      lifecycle_state:
+        lifecycleFilter.value === 'all' ? undefined : lifecycleFilter.value,
+    }
+    const result = await listAdminWorkspaceBindings(query)
+    if (sequence !== loadSequence) return
+    rows.value = result.items
+    total.value = result.total
   } catch (err) {
     if (sequence === loadSequence) {
       error.value =
@@ -58,6 +66,20 @@ async function load(): Promise<void> {
     if (sequence === loadSequence) loading.value = false
   }
 }
+
+function onPageChange(): void {
+  void load()
+}
+
+function onSearchEnter(): void {
+  page.value = 1
+  void load()
+}
+
+watch(lifecycleFilter, () => {
+  page.value = 1
+  void load()
+})
 
 function confirmAction(
   binding: WorkspaceBindingResponse,
@@ -146,19 +168,19 @@ onMounted(() => void load())
           placeholder="Application ID"
           type="number"
           class="w-32"
-          @keyup.enter="load"
+          @keyup.enter="onSearchEnter"
         />
         <UInput
           v-model="externalUserId"
           placeholder="External user ID"
           class="md:max-w-xs"
-          @keyup.enter="load"
+          @keyup.enter="onSearchEnter"
         />
         <UInput
           v-model="workspaceKey"
           placeholder="Workspace key"
           class="md:max-w-xs"
-          @keyup.enter="load"
+          @keyup.enter="onSearchEnter"
         />
         <USelect
           v-model="lifecycleFilter"
@@ -174,7 +196,7 @@ onMounted(() => void load())
           icon="i-lucide-filter"
           variant="soft"
           :loading="loading"
-          @click="load"
+          @click="onSearchEnter"
         >
           Apply
         </UButton>
@@ -183,7 +205,7 @@ onMounted(() => void load())
       <ErrorAlert v-if="error" :error="error" class="m-4" @retry="load" />
 
       <DataTable
-        :rows="filtered"
+        :rows="rows"
         :columns="[
           { key: 'id', label: 'Binding' },
           { key: 'identity', label: 'Identity' },
@@ -281,6 +303,21 @@ onMounted(() => void load())
           </div>
         </template>
       </DataTable>
+
+      <div
+        v-if="totalPages > 1"
+        class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
+      >
+        <span class="text-sm text-(--ui-text-muted)">
+          Page {{ page }} of {{ totalPages }}
+        </span>
+        <UPagination
+          v-model:page="page"
+          :total="total"
+          :items-per-page="PAGE_SIZE"
+          @update:page="onPageChange"
+        />
+      </div>
     </section>
 
     <ConfirmModal

@@ -4,17 +4,40 @@ use sqlx::PgPool;
 
 use crate::db::types::{
     ApplicationResponse, ApplicationTokenResponse, CreateApplicationRequest,
-    CreateApplicationTokenRequest, CreateMcpTokenRequest, McpTokenResponse,
+    CreateApplicationTokenRequest, CreateMcpTokenRequest, ListApplicationsParams,
+    ListApplicationTokensParams, ListMcpTokensParams, McpTokenResponse, Page,
     UpdateApplicationRequest, UpdateApplicationTokenRequest, UpdateMcpTokenRequest,
 };
 use crate::policy::ALL_SCOPES;
 use crate::secrets::EncryptedSecret;
 
-pub async fn list_mcp_tokens(pool: &PgPool) -> anyhow::Result<Vec<McpTokenResponse>> {
-    sqlx::query_as::<_, McpTokenResponse>(include_str!("../sql/list_mcp_tokens.sql"))
+pub async fn list_mcp_tokens(
+    pool: &PgPool,
+    params: &ListMcpTokensParams,
+) -> anyhow::Result<Page<McpTokenResponse>> {
+    let limit = params.limit.unwrap_or(100).clamp(1, 200);
+    let offset = params.offset.unwrap_or(0).max(0);
+    let is_active = params.is_active.or(Some(true));
+    let total: i64 = sqlx::query_scalar(include_str!("../sql/count_mcp_tokens.sql"))
+        .bind(&params.search)
+        .bind(params.user_id)
+        .bind(is_active)
+        .fetch_one(pool)
+        .await?;
+    let items = sqlx::query_as::<_, McpTokenResponse>(include_str!("../sql/list_mcp_tokens.sql"))
+        .bind(&params.search)
+        .bind(params.user_id)
+        .bind(is_active)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(pool)
-        .await
-        .map_err(Into::into)
+        .await?;
+    Ok(Page {
+        items,
+        total,
+        limit,
+        offset,
+    })
 }
 
 pub async fn find_mcp_token_by_id(
@@ -78,11 +101,31 @@ pub async fn update_mcp_token(
         .map_err(Into::into)
 }
 
-pub async fn list_applications(pool: &PgPool) -> anyhow::Result<Vec<ApplicationResponse>> {
-    sqlx::query_as::<_, ApplicationResponse>(include_str!("../sql/list_applications.sql"))
+pub async fn list_applications(
+    pool: &PgPool,
+    params: &ListApplicationsParams,
+) -> anyhow::Result<Page<ApplicationResponse>> {
+    let limit = params.limit.unwrap_or(100).clamp(1, 200);
+    let offset = params.offset.unwrap_or(0).max(0);
+    let total: i64 = sqlx::query_scalar(include_str!("../sql/count_applications.sql"))
+        .bind(&params.search)
+        .bind(params.is_active)
+        .fetch_one(pool)
+        .await?;
+    let items = sqlx::query_as::<_, ApplicationResponse>(include_str!("../sql/list_applications.sql"))
+        .bind(&params.search)
+        .bind(params.is_active)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(pool)
         .await
-        .context("failed to list applications")
+        .context("failed to list applications")?;
+    Ok(Page {
+        items,
+        total,
+        limit,
+        offset,
+    })
 }
 
 pub async fn find_application_by_id(
@@ -161,13 +204,31 @@ pub async fn update_application(
 
 pub async fn list_application_tokens(
     pool: &PgPool,
-) -> anyhow::Result<Vec<ApplicationTokenResponse>> {
-    sqlx::query_as::<_, ApplicationTokenResponse>(include_str!(
+    params: &ListApplicationTokensParams,
+) -> anyhow::Result<Page<ApplicationTokenResponse>> {
+    let limit = params.limit.unwrap_or(100).clamp(1, 200);
+    let offset = params.offset.unwrap_or(0).max(0);
+    let is_active = params.is_active.or(Some(true));
+    let total: i64 = sqlx::query_scalar(include_str!("../sql/count_application_tokens.sql"))
+        .bind(params.application_id)
+        .bind(is_active)
+        .fetch_one(pool)
+        .await?;
+    let items = sqlx::query_as::<_, ApplicationTokenResponse>(include_str!(
         "../sql/list_application_tokens.sql"
     ))
+    .bind(params.application_id)
+    .bind(is_active)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
-    .await
-    .map_err(Into::into)
+    .await?;
+    Ok(Page {
+        items,
+        total,
+        limit,
+        offset,
+    })
 }
 
 pub async fn find_application_token_by_id(

@@ -2,9 +2,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { listAdminAuditLogs } from '../api/users'
 import { formatDateTime, formatMilliseconds } from '../utils/format'
+import { AUDIT_PAGE_SIZE, pageCount, pageOffset } from '../utils/pagination'
 import type { AuditLogResponse } from '../generated/openapi/types.gen'
-
-const PAGE_SIZE = 50
 
 function truncateId(id: string): string {
   if (!id) return ''
@@ -22,9 +21,7 @@ const detail = ref<AuditLogResponse | null>(null)
 let loadSequence = 0
 let filterTimer: ReturnType<typeof setTimeout> | undefined
 
-const pageCount = computed(() =>
-  total.value > 0 ? Math.max(1, Math.ceil(total.value / PAGE_SIZE)) : 1,
-)
+const totalPages = computed(() => pageCount(total.value, AUDIT_PAGE_SIZE))
 
 async function load(): Promise<void> {
   const sequence = ++loadSequence
@@ -32,8 +29,8 @@ async function load(): Promise<void> {
   error.value = ''
   try {
     const result = await listAdminAuditLogs({
-      limit: PAGE_SIZE,
-      offset: (page.value - 1) * PAGE_SIZE,
+      limit: AUDIT_PAGE_SIZE,
+      offset: pageOffset(page.value, AUDIT_PAGE_SIZE),
       search: actionFilter.value.trim() || undefined,
       status: statusFilter.value === 'all' ? undefined : statusFilter.value,
     })
@@ -206,16 +203,16 @@ onUnmounted(() => {
       </DataTable>
 
       <div
-        v-if="pageCount > 1"
+        v-if="totalPages > 1"
         class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
       >
         <span class="text-sm text-(--ui-text-muted)">
-          Page {{ page }} of {{ pageCount }}
+          Page {{ page }} of {{ totalPages }}
         </span>
         <UPagination
           v-model:page="page"
           :total="total"
-          :items-per-page="PAGE_SIZE"
+          :items-per-page="AUDIT_PAGE_SIZE"
           @update:page="onPageChange"
         />
       </div>

@@ -5,18 +5,38 @@ use uuid::Uuid;
 use crate::{
     auth::hash_bearer_token,
     db::types::{
-        CreateRunnerManagerRequest, RunnerManagerRecord, RunnerManagerResponse,
-        UpdateRunnerManagerRequest,
+        CreateRunnerManagerRequest, ListRunnerManagersParams, Page, RunnerManagerRecord,
+        RunnerManagerResponse, UpdateRunnerManagerRequest,
     },
 };
 
-pub async fn list_runner_managers(pool: &PgPool) -> anyhow::Result<Vec<RunnerManagerResponse>> {
-    Ok(
-        sqlx::query_as(include_str!("../sql/list_runner_managers.sql"))
-            .bind(RUNNER_MANAGER_HEARTBEAT_TTL_SECS as i64)
-            .fetch_all(pool)
-            .await?,
-    )
+pub async fn list_runner_managers(
+    pool: &PgPool,
+    params: &ListRunnerManagersParams,
+) -> anyhow::Result<Page<RunnerManagerResponse>> {
+    let limit = params.limit.unwrap_or(100).clamp(1, 200);
+    let offset = params.offset.unwrap_or(0).max(0);
+    let total: i64 = sqlx::query_scalar(include_str!("../sql/count_runner_managers.sql"))
+        .bind(&params.search)
+        .bind(params.enabled)
+        .fetch_one(pool)
+        .await?;
+    let items = sqlx::query_as::<_, RunnerManagerResponse>(include_str!(
+        "../sql/list_runner_managers.sql"
+    ))
+    .bind(RUNNER_MANAGER_HEARTBEAT_TTL_SECS as i64)
+    .bind(&params.search)
+    .bind(params.enabled)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+    Ok(Page {
+        items,
+        total,
+        limit,
+        offset,
+    })
 }
 
 pub async fn create_runner_manager(

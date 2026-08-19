@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   createAdminRunnerManager,
   listAdminRunnerManagers,
@@ -11,28 +11,24 @@ import {
   formatMilliseconds,
   formatRelative,
 } from '../utils/format'
+import { PAGE_SIZE, pageCount, pageOffset } from '../utils/pagination'
 import type {
   CreateRunnerManagerResponse,
+  ListRunnerManagersData,
   RunnerManagerResponse,
 } from '../generated/openapi/types.gen'
 
 const { success } = useNotify()
 
 const rows = ref<RunnerManagerResponse[]>([])
+const total = ref(0)
 const loading = ref(false)
 const error = ref('')
 const search = ref('')
+const page = ref(1)
 let loadSequence = 0
 
-const filtered = computed(() => {
-  const query = search.value.trim().toLowerCase()
-  if (!query) return rows.value
-  return rows.value.filter(
-    (row) =>
-      row.name.toLowerCase().includes(query) ||
-      row.endpoint.toLowerCase().includes(query),
-  )
-})
+const totalPages = computed(() => pageCount(total.value, PAGE_SIZE))
 
 const stats = computed(() => {
   const all = rows.value
@@ -48,8 +44,15 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const result = await listAdminRunnerManagers()
-    if (sequence === loadSequence) rows.value = result
+    const query: NonNullable<ListRunnerManagersData['query']> = {
+      limit: PAGE_SIZE,
+      offset: pageOffset(page.value, PAGE_SIZE),
+      search: search.value.trim() || undefined,
+    }
+    const result = await listAdminRunnerManagers(query)
+    if (sequence !== loadSequence) return
+    rows.value = result.items
+    total.value = result.total
   } catch (err) {
     if (sequence === loadSequence) {
       error.value =
@@ -59,6 +62,21 @@ async function load(): Promise<void> {
     if (sequence === loadSequence) loading.value = false
   }
 }
+
+function onPageChange(): void {
+  void load()
+}
+
+let filterTimer: ReturnType<typeof setTimeout> | undefined
+watch(search, () => {
+  page.value = 1
+  if (filterTimer) clearTimeout(filterTimer)
+  filterTimer = setTimeout(() => void load(), 250)
+})
+
+onUnmounted(() => {
+  if (filterTimer) clearTimeout(filterTimer)
+})
 
 interface RunnerForm {
   name: string
@@ -269,7 +287,7 @@ onMounted(() => void load())
       <ErrorAlert v-if="error" :error="error" class="m-4" @retry="load" />
 
       <DataTable
-        :rows="filtered"
+        :rows="rows"
         :columns="[
           { key: 'name', label: 'Manager' },
           { key: 'status', label: 'Status' },
@@ -343,12 +361,29 @@ onMounted(() => void load())
           </div>
         </template>
       </DataTable>
+
+      <div
+        v-if="totalPages > 1"
+        class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
+      >
+        <span class="text-sm text-(--ui-text-muted)">
+          Page {{ page }} of {{ totalPages }}
+        </span>
+        <UPagination
+          v-model:page="page"
+          :total="total"
+          :items-per-page="PAGE_SIZE"
+          @update:page="onPageChange"
+        />
+      </div>
     </section>
 
     <!-- Create/edit drawer -->
     <UDrawer
       v-model:open="drawerOpen"
-      :title="editingId === null ? 'Create runner manager' : 'Edit runner manager'"
+      :title="
+        editingId === null ? 'Create runner manager' : 'Edit runner manager'
+      "
       :dismissible="!saving"
       @update:open="handleRunnerDrawerOpen"
     >
@@ -548,7 +583,11 @@ onMounted(() => void load())
       v-model:open="tokenModalOpen"
       title="Runner token"
       description="The runner manager needs this token to authenticate with the control plane."
-      @update:open="(open) => { if (!open) createdToken = null }"
+      @update:open="
+        (open) => {
+          if (!open) createdToken = null
+        }
+      "
     >
       <template #body>
         <div class="space-y-4">

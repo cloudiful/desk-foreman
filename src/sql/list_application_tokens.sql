@@ -13,5 +13,7 @@ SELECT
     max_sessions,
     network_enabled
 FROM application_tokens
-WHERE is_active = TRUE
-ORDER BY created_at DESC, token_id DESC;
+WHERE ($1::BIGINT IS NULL OR application_id = $1)
+  AND ($2::BOOLEAN IS NULL OR is_active = $2)
+ORDER BY created_at DESC, token_id DESC
+LIMIT $3 OFFSET $4;
