@@ -73,6 +73,8 @@ ARG TARGETARCH
 RUN apt-get update \
     && apt-get install -y --no-install-recommends bash ca-certificates curl fd-find git python3 python3-venv ripgrep unzip \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
+    && git config --system user.name "Desk Foreman" \
+    && git config --system user.email "desk-foreman@cloud1ful.com" \
     && rm -rf /var/lib/apt/lists/*
 
 RUN case "${TARGETARCH:-amd64}" in \

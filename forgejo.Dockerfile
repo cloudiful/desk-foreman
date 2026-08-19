@@ -82,6 +82,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends bash ca-certificates curl fd-find git python3 python3-venv ripgrep unzip \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
+    && git config --system user.name "Desk Foreman" \
+    && git config --system user.email "desk-foreman@cloud1ful.com" \
     && rm -rf /var/lib/apt/lists/*
 
 ENV RUSTUP_DIST_SERVER=https://rustup.cloud1ful.com
