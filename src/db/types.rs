@@ -459,6 +459,177 @@ pub struct WorkspaceLeaseReleaseRequest {
     pub owner: String,
 }
 
+/// Request body for the atomic, stale-guarded write-lease takeover endpoint.
+///
+/// `expected_owner` is the lease owner the caller believes currently holds
+/// the binding's write lease; the server uses it as the optimistic
+/// compare-and-swap guard. `new_owner` is the value that will be assigned if
+/// the takeover (or same-owner idempotent renew) succeeds. The granted TTL
+/// is a server constant and is not client-controlled.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
+pub struct WorkspaceLeaseTakeoverRequest {
+    #[validate(custom(function = "validate_non_blank"))]
+    pub expected_owner: String,
+    #[validate(custom(function = "validate_non_blank"))]
+    pub new_owner: String,
+}
+
+/// Row produced by `SELECT ... FOR UPDATE` on the workspace binding during
+/// the takeover transaction. Captures the pre-update lease state plus the
+/// database clock at lock time (`db_now`) so the caller can classify the
+/// request without any application-clock dependency.
+#[derive(Clone, Debug, FromRow)]
+pub struct WorkspaceLeaseTakeoverLockRow {
+    pub workspace_binding_id: i64,
+    pub application_id: i64,
+    pub workspace_key: String,
+    pub is_active: bool,
+    pub lifecycle_state: String,
+    pub resource_kind: Option<String>,
+    pub resource_id: Option<String>,
+    pub write_lease_owner: Option<String>,
+    pub write_lease_acquired_at: Option<DateTime<Utc>>,
+    pub write_lease_expires_at: Option<DateTime<Utc>>,
+    /// Database NOW() captured at lock time, in the database's UTC clock.
+    pub db_now: DateTime<Utc>,
+}
+
+/// Machine-readable conflict reasons for the takeover endpoint.
+///
+/// `SameOwner` is intentionally unreachable: when `new_owner` already holds
+/// the lease the SQL classifies the request as an idempotent same-owner
+/// renew and returns success with `took_over_foreign = false`. Only the
+/// remaining four reasons can surface through the 409 conflict path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TakeoverConflictReason {
+    /// No lease is currently held on the binding; the caller should use
+    /// the ordinary acquire endpoint instead.
+    NoLease,
+    /// A foreign lease matches `expected_owner` but its last refresh is
+    /// inside the stale window; the caller should wait or retry.
+    LiveLease,
+    /// The current lease owner does not match the caller-supplied
+    /// `expected_owner`; another writer displaced or refreshed it.
+    ExpectedOwnerMismatch,
+    /// The binding is not active (archived, resetting, or deactivated).
+    NotActive,
+}
+
+impl TakeoverConflictReason {
+    /// Stable wire-format identifier used in the `reason` field of the
+    /// 409 conflict body. Callers dispatch on this value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NoLease => "no_lease",
+            Self::LiveLease => "live_lease",
+            Self::ExpectedOwnerMismatch => "expected_owner_mismatch",
+            Self::NotActive => "not_active",
+        }
+    }
+}
+
+/// Successful takeover response.
+///
+/// `previous_owner`/`previous_acquired_at`/`previous_expires_at` describe the
+/// lease immediately before the takeover. `took_over_foreign` is true when the
+/// previous owner differs from `new_owner` (so the caller displaced a stale
+/// foreign lease); false means the call was an idempotent same-owner renew.
+/// `cancellation` reports the best-effort outcome of cancelling every runner
+/// session that was scoped to the binding (not just to the displaced owner:
+/// the cancel helper cancels by `RunnerOwner::WorkspaceBinding`).
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct WorkspaceLeaseTakeoverResponse {
+    #[serde(flatten)]
+    pub binding: WorkspaceBindingResponse,
+    pub previous_owner: Option<String>,
+    pub previous_acquired_at: Option<DateTime<Utc>>,
+    pub previous_expires_at: Option<DateTime<Utc>>,
+    pub took_over_foreign: bool,
+    pub granted_ttl_seconds: u64,
+    pub stale_threshold_seconds: u64,
+    pub cancellation: WorkspaceLeaseCancellationOutcome,
+}
+
+/// Best-effort outcome of cancelling runner sessions scoped to the binding.
+/// Cancellation errors never roll back the lease transfer; they are recorded
+/// here and in the audit log.
+#[derive(Clone, Debug, Serialize, ToSchema, Default)]
+pub struct WorkspaceLeaseCancellationOutcome {
+    pub attempted: bool,
+    pub succeeded: bool,
+    pub sessions_cancelled: u64,
+    pub error: Option<String>,
+}
+
+/// Structured conflict body for takeover failures.
+///
+/// Stock callers (or other applications) can inspect `current.lease_owner`
+/// and `current.lease_acquired_at` to determine whether to wait or to use
+/// the value as the next `expected_owner`, and use `reason` for dispatch.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct WorkspaceLeaseTakeoverConflict {
+    pub error: String,
+    /// Machine-readable reason. See [`TakeoverConflictReason::as_str`].
+    pub reason: String,
+    pub current: WorkspaceLeaseStatusResponse,
+    pub stale_threshold_seconds: u64,
+}
+
+/// SQL row shape for the resource workspace lease-status read. Kept separate
+/// from the API response so the `stale_threshold_seconds` constant (which
+/// lives in the API layer) is not entangled with database decoding.
+#[derive(Clone, Debug, FromRow)]
+pub struct WorkspaceLeaseStatusRow {
+    pub workspace_binding_id: i64,
+    pub application_id: i64,
+    pub workspace_key: String,
+    pub is_active: bool,
+    pub lifecycle_state: String,
+    pub resource_kind: Option<String>,
+    pub resource_id: Option<String>,
+    pub write_lease_owner: Option<String>,
+    pub write_lease_acquired_at: Option<DateTime<Utc>>,
+    pub write_lease_expires_at: Option<DateTime<Utc>>,
+}
+
+/// Authenticated lease-status response exposed via the lease-status read
+/// endpoint. Scoped to the caller's application and resource binding so no
+/// unrelated bindings are leaked. The `stale_threshold_seconds` field is
+/// filled in by the handler after the SQL fetch because the constant lives
+/// in the API layer and is not stored in the database row.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct WorkspaceLeaseStatusResponse {
+    pub workspace_binding_id: i64,
+    pub application_id: i64,
+    pub workspace_key: String,
+    pub is_active: bool,
+    pub lifecycle_state: String,
+    pub resource_kind: Option<String>,
+    pub resource_id: Option<String>,
+    pub write_lease_owner: Option<String>,
+    pub write_lease_acquired_at: Option<DateTime<Utc>>,
+    pub write_lease_expires_at: Option<DateTime<Utc>>,
+    pub stale_threshold_seconds: u64,
+}
+
+impl From<WorkspaceLeaseStatusRow> for WorkspaceLeaseStatusResponse {
+    fn from(row: WorkspaceLeaseStatusRow) -> Self {
+        Self {
+            workspace_binding_id: row.workspace_binding_id,
+            application_id: row.application_id,
+            workspace_key: row.workspace_key,
+            is_active: row.is_active,
+            lifecycle_state: row.lifecycle_state,
+            resource_kind: row.resource_kind,
+            resource_id: row.resource_id,
+            write_lease_owner: row.write_lease_owner,
+            write_lease_acquired_at: row.write_lease_acquired_at,
+            write_lease_expires_at: row.write_lease_expires_at,
+            stale_threshold_seconds: 0,
+        }
+    }
+}
+
 fn default_lease_ttl_seconds() -> u64 {
     3_600
 }
@@ -895,11 +1066,12 @@ pub struct OperationsSummary {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
     use serde_json::json;
 
     use super::{
         ListApplicationsParams, ListMcpTokensParams, ListRunnerManagersParams,
-        deserialize_optional_trimmed_nonempty,
+        WorkspaceBindingResponse, deserialize_optional_trimmed_nonempty,
     };
 
     #[test]
@@ -956,5 +1128,127 @@ mod tests {
 
         let input: Input = serde_json::from_value(json!({})).expect("parse");
         assert!(input.value.is_none());
+    }
+
+    #[test]
+    fn takeover_request_rejects_blank_owners() {
+        use validator::Validate;
+
+        let valid: super::WorkspaceLeaseTakeoverRequest =
+            serde_json::from_value(json!({ "expected_owner": "a", "new_owner": "b" }))
+                .expect("parse");
+        assert!(valid.validate().is_ok());
+
+        let blank_expected: super::WorkspaceLeaseTakeoverRequest =
+            serde_json::from_value(json!({ "expected_owner": "  ", "new_owner": "b" }))
+                .expect("parse");
+        assert!(
+            blank_expected.validate().is_err(),
+            "blank expected_owner should fail validation"
+        );
+
+        let blank_new: super::WorkspaceLeaseTakeoverRequest =
+            serde_json::from_value(json!({ "expected_owner": "a", "new_owner": "" }))
+                .expect("parse");
+        assert!(
+            blank_new.validate().is_err(),
+            "blank new_owner should fail validation"
+        );
+    }
+
+    #[test]
+    fn takeover_response_includes_previous_owner_and_cancellation_outcome() {
+        let response = super::WorkspaceLeaseTakeoverResponse {
+            binding: WorkspaceBindingResponse {
+                workspace_binding_id: 7,
+                application_id: 1,
+                external_user_id: "__resource__".to_string(),
+                workspace_key: "code_project:abc".to_string(),
+                external_user_hash: "hash".to_string(),
+                workspace_root: "/tmp/ws".to_string(),
+                is_active: true,
+                last_used_at: Utc::now(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                lifecycle_state: "active".to_string(),
+                archived_at: None,
+                resource_kind: Some("code_project".to_string()),
+                resource_id: Some("abc".to_string()),
+                write_lease_owner: Some("conversation:b".to_string()),
+                write_lease_acquired_at: Some(Utc::now()),
+                write_lease_expires_at: Some(Utc::now()),
+            },
+            previous_owner: Some("conversation:a".to_string()),
+            previous_acquired_at: Some(Utc::now()),
+            previous_expires_at: Some(Utc::now()),
+            took_over_foreign: true,
+            granted_ttl_seconds: 600,
+            stale_threshold_seconds: 180,
+            cancellation: super::WorkspaceLeaseCancellationOutcome {
+                attempted: true,
+                succeeded: true,
+                sessions_cancelled: 1,
+                error: None,
+            },
+        };
+        let value = serde_json::to_value(&response).expect("serialize");
+        assert_eq!(value["took_over_foreign"], json!(true));
+        assert_eq!(value["granted_ttl_seconds"], json!(600));
+        assert_eq!(value["stale_threshold_seconds"], json!(180));
+        assert_eq!(value["cancellation"]["sessions_cancelled"], json!(1));
+        assert_eq!(value["write_lease_owner"], json!("conversation:b"));
+        assert_eq!(value["previous_owner"], json!("conversation:a"));
+    }
+
+    #[test]
+    fn takeover_conflict_reports_machine_readable_reason_and_current_state() {
+        let conflict = super::WorkspaceLeaseTakeoverConflict {
+            error: "lease is still within the stale window".to_string(),
+            reason: "live_lease".to_string(),
+            stale_threshold_seconds: 180,
+            current: super::WorkspaceLeaseStatusResponse {
+                workspace_binding_id: 9,
+                application_id: 1,
+                workspace_key: "code_project:xyz".to_string(),
+                is_active: true,
+                lifecycle_state: "active".to_string(),
+                resource_kind: Some("code_project".to_string()),
+                resource_id: Some("xyz".to_string()),
+                write_lease_owner: Some("conversation:a".to_string()),
+                write_lease_acquired_at: Some(Utc::now()),
+                write_lease_expires_at: Some(Utc::now()),
+                stale_threshold_seconds: 180,
+            },
+        };
+        let value = serde_json::to_value(&conflict).expect("serialize");
+        assert_eq!(value["reason"], json!("live_lease"));
+        assert_eq!(value["stale_threshold_seconds"], json!(180));
+        assert_eq!(
+            value["current"]["write_lease_owner"],
+            json!("conversation:a")
+        );
+    }
+
+    #[test]
+    fn lease_status_row_converts_to_response_with_zero_threshold() {
+        let row = super::WorkspaceLeaseStatusRow {
+            workspace_binding_id: 1,
+            application_id: 1,
+            workspace_key: "code_project:abc".to_string(),
+            is_active: true,
+            lifecycle_state: "active".to_string(),
+            resource_kind: Some("code_project".to_string()),
+            resource_id: Some("abc".to_string()),
+            write_lease_owner: None,
+            write_lease_acquired_at: None,
+            write_lease_expires_at: None,
+        };
+        let response: super::WorkspaceLeaseStatusResponse = row.into();
+        // The handler always overwrites stale_threshold_seconds with the
+        // server constant; the conversion leaves it at zero so the omission
+        // is visible.
+        assert_eq!(response.stale_threshold_seconds, 0);
+        assert_eq!(response.write_lease_owner, None);
+        assert_eq!(response.lifecycle_state, "active");
     }
 }

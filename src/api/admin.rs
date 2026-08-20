@@ -1,6 +1,7 @@
 pub(super) mod application_approval;
 pub(super) mod applications;
 pub(super) mod approval;
+pub(super) mod lease_helpers;
 pub(super) mod operations;
 pub(super) mod runner_managers;
 pub(super) mod shared;

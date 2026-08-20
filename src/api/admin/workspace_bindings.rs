@@ -195,7 +195,8 @@ pub async fn acquire_workspace_binding_lease(
     ValidatedJson(request): ValidatedJson<WorkspaceLeaseRequest>,
 ) -> Result<Json<WorkspaceBindingResponse>, AppError> {
     let admin = require_admin(&state, &jar).await?;
-    acquire_binding_lease(&state, binding_id, &request.owner, request.ttl_seconds).await?;
+    let binding =
+        acquire_binding_lease(&state, binding_id, &request.owner, request.ttl_seconds).await?;
     record_admin_audit(
         &state,
         &admin,
@@ -205,9 +206,6 @@ pub async fn acquire_workspace_binding_lease(
         json!({ "owner": request.owner, "ttl_seconds": request.ttl_seconds }),
     )
     .await?;
-    let binding = crate::db::queries::find_workspace_binding_by_id(&state.db, binding_id)
-        .await?
-        .ok_or_else(|| AppError::not_found("workspace binding not found"))?;
     Ok(Json(binding))
 }
 
@@ -226,7 +224,7 @@ pub async fn release_workspace_binding_lease(
     ValidatedJson(request): ValidatedJson<WorkspaceLeaseReleaseRequest>,
 ) -> Result<Json<WorkspaceBindingResponse>, AppError> {
     let admin = require_admin(&state, &jar).await?;
-    release_binding_lease(&state, binding_id, &request.owner).await?;
+    let binding = release_binding_lease(&state, binding_id, &request.owner).await?;
     record_admin_audit(
         &state,
         &admin,
@@ -236,9 +234,6 @@ pub async fn release_workspace_binding_lease(
         json!({ "owner": request.owner }),
     )
     .await?;
-    let binding = crate::db::queries::find_workspace_binding_by_id(&state.db, binding_id)
-        .await?
-        .ok_or_else(|| AppError::not_found("workspace binding not found"))?;
     Ok(Json(binding))
 }
 
@@ -247,7 +242,7 @@ pub async fn acquire_binding_lease(
     binding_id: i64,
     owner: &str,
     ttl_seconds: u64,
-) -> Result<(), AppError> {
+) -> Result<WorkspaceBindingResponse, AppError> {
     let Some(binding) =
         crate::db::queries::find_workspace_binding_by_id(&state.db, binding_id).await?
     else {
@@ -256,22 +251,27 @@ pub async fn acquire_binding_lease(
     if binding.lifecycle_state != "active" || !binding.is_active {
         return Err(AppError::conflict("workspace binding is not active"));
     }
-    if crate::db::queries::acquire_workspace_write_lease(&state.db, binding_id, owner, ttl_seconds)
+    crate::db::queries::acquire_workspace_write_lease(&state.db, binding_id, owner, ttl_seconds)
         .await?
-        .is_none()
-    {
-        return Err(AppError::conflict(
-            "workspace write lease is held by another owner",
-        ));
-    }
-    Ok(())
+        .map(|updated| {
+            // Defensive read in case the SQL UPDATE didn't return a row
+            // (shouldn't happen because the binding is locked, but we
+            // want the post-update state without an extra round-trip
+            // when the CAS succeeds).
+            updated
+        })
+        .or_else(|| {
+            // CAS failure: the lease is held by someone else.
+            None
+        })
+        .ok_or_else(|| AppError::conflict("workspace write lease is held by another owner"))
 }
 
 pub async fn release_binding_lease(
     state: &AppState,
     binding_id: i64,
     owner: &str,
-) -> Result<(), AppError> {
+) -> Result<WorkspaceBindingResponse, AppError> {
     let Some(binding) =
         crate::db::queries::find_workspace_binding_by_id(&state.db, binding_id).await?
     else {
@@ -280,15 +280,9 @@ pub async fn release_binding_lease(
     if binding.lifecycle_state != "active" || !binding.is_active {
         return Err(AppError::conflict("workspace binding is not active"));
     }
-    if crate::db::queries::release_workspace_write_lease(&state.db, binding_id, owner)
+    crate::db::queries::release_workspace_write_lease(&state.db, binding_id, owner)
         .await?
-        .is_none()
-    {
-        return Err(AppError::conflict(
-            "workspace write lease is held by a different owner",
-        ));
-    }
-    Ok(())
+        .ok_or_else(|| AppError::conflict("workspace write lease is held by a different owner"))
 }
 
 async fn cancel_binding_sessions(state: &AppState, binding_id: i64) -> Result<(), AppError> {

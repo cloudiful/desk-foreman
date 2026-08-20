@@ -5,6 +5,8 @@ use axum::{
 };
 use serde::Serialize;
 
+use crate::db::types::WorkspaceLeaseTakeoverConflict;
+
 #[derive(Debug)]
 pub enum AppError {
     Unauthorized(String),
@@ -13,6 +15,11 @@ pub enum AppError {
     Conflict(String),
     BadRequest(String),
     ServiceUnavailable(String),
+    /// Structured 409 conflict with a typed body for the lease takeover
+    /// endpoint. Carries enough state for callers (e.g. stock) to determine
+    /// the current lease owner and last refresh time without parsing
+    /// human-readable strings.
+    TakeoverConflict(WorkspaceLeaseTakeoverConflict),
     Internal(anyhow::Error),
 }
 
@@ -53,23 +60,31 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, message) = match self {
-            Self::Unauthorized(message) => (StatusCode::UNAUTHORIZED, message),
-            Self::Forbidden(message) => (StatusCode::FORBIDDEN, message),
-            Self::NotFound(message) => (StatusCode::NOT_FOUND, message),
-            Self::Conflict(message) => (StatusCode::CONFLICT, message),
-            Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
-            Self::ServiceUnavailable(message) => (StatusCode::SERVICE_UNAVAILABLE, message),
+        match self {
+            Self::Unauthorized(message) => error_response(StatusCode::UNAUTHORIZED, message),
+            Self::Forbidden(message) => error_response(StatusCode::FORBIDDEN, message),
+            Self::NotFound(message) => error_response(StatusCode::NOT_FOUND, message),
+            Self::Conflict(message) => error_response(StatusCode::CONFLICT, message),
+            Self::BadRequest(message) => error_response(StatusCode::BAD_REQUEST, message),
+            Self::ServiceUnavailable(message) => {
+                error_response(StatusCode::SERVICE_UNAVAILABLE, message)
+            }
+            Self::TakeoverConflict(conflict) => {
+                (StatusCode::CONFLICT, Json(conflict)).into_response()
+            }
             Self::Internal(error) => {
                 tracing::error!(error = %error, "request failed");
-                (
+                error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal server error".to_string(),
                 )
             }
-        };
-        (status, Json(ErrorResponse { error: message })).into_response()
+        }
     }
+}
+
+fn error_response(status: StatusCode, message: String) -> Response {
+    (status, Json(ErrorResponse { error: message })).into_response()
 }
 
 impl<E> From<E> for AppError
