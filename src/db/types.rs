@@ -490,7 +490,7 @@ pub struct ListApplicationsParams {
     #[param(minimum = 0)]
     #[validate(range(min = 0))]
     pub offset: Option<i64>,
-    #[serde(deserialize_with = "deserialize_optional_trimmed_nonempty")]
+    #[serde(default, deserialize_with = "deserialize_optional_trimmed_nonempty")]
     pub search: Option<String>,
     pub is_active: Option<bool>,
 }
@@ -518,7 +518,7 @@ pub struct ListMcpTokensParams {
     #[param(minimum = 0)]
     #[validate(range(min = 0))]
     pub offset: Option<i64>,
-    #[serde(deserialize_with = "deserialize_optional_trimmed_nonempty")]
+    #[serde(default, deserialize_with = "deserialize_optional_trimmed_nonempty")]
     pub search: Option<String>,
     pub user_id: Option<i64>,
     pub is_active: Option<bool>,
@@ -533,7 +533,7 @@ pub struct ListRunnerManagersParams {
     #[param(minimum = 0)]
     #[validate(range(min = 0))]
     pub offset: Option<i64>,
-    #[serde(deserialize_with = "deserialize_optional_trimmed_nonempty")]
+    #[serde(default, deserialize_with = "deserialize_optional_trimmed_nonempty")]
     pub search: Option<String>,
     pub enabled: Option<bool>,
 }
@@ -891,4 +891,70 @@ pub struct OperationsSummary {
     pub runner_managers_online: i64,
     pub runner_managers_offline: i64,
     pub runner_managers_disabled: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{
+        ListApplicationsParams, ListMcpTokensParams, ListRunnerManagersParams,
+        deserialize_optional_trimmed_nonempty,
+    };
+
+    #[test]
+    fn omitted_search_defaults_to_none_for_list_query_params() {
+        let applications: ListApplicationsParams =
+            serde_json::from_value(json!({})).expect("parse");
+        assert!(applications.search.is_none());
+
+        let mcp: ListMcpTokensParams = serde_json::from_value(json!({})).expect("parse");
+        assert!(mcp.search.is_none());
+
+        let managers: ListRunnerManagersParams = serde_json::from_value(json!({})).expect("parse");
+        assert!(managers.search.is_none());
+    }
+
+    #[test]
+    fn blank_search_collapses_to_none_for_list_query_params() {
+        let applications: ListApplicationsParams =
+            serde_json::from_value(json!({ "search": "   " })).expect("parse");
+        assert!(applications.search.is_none());
+
+        let mcp: ListMcpTokensParams =
+            serde_json::from_value(json!({ "search": "" })).expect("parse");
+        assert!(mcp.search.is_none());
+
+        let managers: ListRunnerManagersParams =
+            serde_json::from_value(json!({ "search": "\t\n" })).expect("parse");
+        assert!(managers.search.is_none());
+    }
+
+    #[test]
+    fn non_blank_search_is_trimmed_for_list_query_params() {
+        let applications: ListApplicationsParams =
+            serde_json::from_value(json!({ "search": "  alpha  " })).expect("parse");
+        assert_eq!(applications.search.as_deref(), Some("alpha"));
+
+        let mcp: ListMcpTokensParams =
+            serde_json::from_value(json!({ "search": "beta" })).expect("parse");
+        assert_eq!(mcp.search.as_deref(), Some("beta"));
+
+        let managers: ListRunnerManagersParams =
+            serde_json::from_value(json!({ "search": " gamma " })).expect("parse");
+        assert_eq!(managers.search.as_deref(), Some("gamma"));
+    }
+
+    #[test]
+    fn empty_input_object_deserializes_optional_search_with_default() {
+        // Mirrors `#[serde(default, deserialize_with = ...)]` from a request without the key.
+        #[derive(serde::Deserialize)]
+        struct Input {
+            #[serde(default, deserialize_with = "deserialize_optional_trimmed_nonempty")]
+            value: Option<String>,
+        }
+
+        let input: Input = serde_json::from_value(json!({})).expect("parse");
+        assert!(input.value.is_none());
+    }
 }

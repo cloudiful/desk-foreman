@@ -45,7 +45,7 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let Query(value) = Query::<T>::from_request_parts(parts, state)
             .await
-            .map_err(map_query_rejection)?;
+            .map_err(|rejection| map_query_rejection(parts, rejection))?;
         value.validate().map_err(map_validation_errors)?;
         Ok(Self(value))
     }
@@ -130,8 +130,15 @@ fn map_json_rejection(rejection: JsonRejection) -> AppError {
     AppError::bad_request(rejection.body_text())
 }
 
-fn map_query_rejection(rejection: QueryRejection) -> AppError {
-    AppError::bad_request(rejection.body_text())
+fn map_query_rejection(parts: &Parts, rejection: QueryRejection) -> AppError {
+    let message = rejection.body_text();
+    tracing::warn!(
+        method = %parts.method,
+        path = %parts.uri.path(),
+        rejection = %message,
+        "rejected malformed query string"
+    );
+    AppError::bad_request(message)
 }
 
 fn validation_error(message: &'static str) -> ValidationError {
@@ -189,11 +196,16 @@ pub trait ReadFileRangeValidation {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        io,
+        sync::{Arc, Mutex},
+    };
+
     use serde::Deserialize;
 
     use super::{
-        deserialize_optional_trimmed_nonempty, validate_non_blank, validate_sort_dir,
-        validate_user_sort_by,
+        deserialize_optional_trimmed_nonempty, map_query_rejection, validate_non_blank,
+        validate_sort_dir, validate_user_sort_by,
     };
 
     #[test]
@@ -221,5 +233,104 @@ mod tests {
 
         let text: Input = serde_json::from_str(r#"{ "value": "  abc  " }"#).expect("text");
         assert_eq!(text.value.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn query_rejection_logs_method_and_path_without_query() {
+        // Forces a QueryRejection by deserializing an unknown field as the wrong type.
+        #[derive(Deserialize, Debug)]
+        #[allow(dead_code)]
+        struct StrictParams {
+            limit: u32,
+        }
+
+        let raw_query = "limit=not-a-number&secret=topsecret&token=abc123";
+        let uri: axum::http::Uri = format!("/api/admin/applications?{raw_query}")
+            .parse()
+            .expect("uri");
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri(uri.clone())
+            .body(())
+            .expect("request");
+        let (parts, _) = request.into_parts();
+
+        let rejection = axum::extract::Query::<StrictParams>::try_from_uri(&uri)
+            .err()
+            .expect("malformed limit should be rejected");
+
+        // Build a subscriber that writes to an in-memory buffer so we can assert
+        // the warn log includes method/path but never the query string or its values.
+        let buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let writer = SharedWriter(Arc::clone(&buffer));
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(writer)
+            .with_max_level(tracing::Level::WARN)
+            .with_ansi(false)
+            .with_target(false)
+            .finish();
+
+        let error = tracing::subscriber::with_default(subscriber, || {
+            map_query_rejection(&parts, rejection)
+        });
+
+        let captured = String::from_utf8(buffer.lock().expect("buffer lock").clone())
+            .expect("utf8 log output");
+
+        assert!(
+            captured.contains("WARN"),
+            "warn level missing from log output: {captured}"
+        );
+        assert!(
+            captured.contains("rejected malformed query string"),
+            "log message missing: {captured}"
+        );
+        assert!(
+            captured.contains("method=GET"),
+            "method missing from log output: {captured}"
+        );
+        assert!(
+            captured.contains("path=/api/admin/applications"),
+            "path missing from log output: {captured}"
+        );
+        // Sensitive raw query values must never appear in the log payload.
+        for needle in ["topsecret", "abc123", "secret=", "token=", raw_query] {
+            assert!(
+                !captured.contains(needle),
+                "log output leaked query value ({needle}): {captured}"
+            );
+        }
+
+        // BadRequest shape and body text are preserved.
+        match error {
+            crate::error::AppError::BadRequest(message) => {
+                assert!(
+                    !message.is_empty(),
+                    "rejection body text should be propagated"
+                );
+            }
+            other => panic!("expected BadRequest, got {other:?}"),
+        }
+    }
+
+    struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl io::Write for SharedWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().expect("buffer lock").extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedWriter {
+        type Writer = SharedWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            SharedWriter(Arc::clone(&self.0))
+        }
     }
 }
