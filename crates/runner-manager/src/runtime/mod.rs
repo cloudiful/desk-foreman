@@ -1,8 +1,14 @@
 mod backend;
 mod direct;
 mod docker;
+mod docker_backend;
 mod docker_command;
+mod docker_lifecycle;
+#[cfg(test)]
+mod docker_tests;
+mod janitor;
 mod local_service;
+mod reporter;
 pub(crate) mod session_gate;
 mod shell_manager;
 mod shell_session;
@@ -11,7 +17,9 @@ mod shell_spawn;
 pub use backend::{ProcessSpawnTarget, RunnerBackend};
 pub use direct::DirectRunnerBackend;
 pub use docker::DockerRunnerBackend;
+pub use janitor::spawn_janitor;
 pub use local_service::LocalRunnerService;
+pub use reporter::RunnerLifecycleReporter;
 
 use std::time::Instant;
 

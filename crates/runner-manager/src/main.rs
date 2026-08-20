@@ -5,6 +5,7 @@ mod upstream;
 
 use crate::{
     config::{RunnerBackendKind, RunnerManagerConfig, SharedRunnerManagerConfig},
+    runtime::{RunnerLifecycleReporter, spawn_janitor},
     server::{RunnerManagerState, build_app, build_runner_service},
 };
 use anyhow::Context;
@@ -46,18 +47,24 @@ async fn main() -> anyhow::Result<()> {
              runner manager in the desk-foreman admin UI"
         );
     }
-    let runner = build_runner_service(std::sync::Arc::clone(&config)).await?;
+    let manager_id = config.read().await.manager_id.clone();
+    let reporter = RunnerLifecycleReporter::spawn(std::sync::Arc::clone(&config));
+    let handles =
+        build_runner_service(std::sync::Arc::clone(&config), manager_id, reporter).await?;
+    if let Some(docker) = handles.docker_backend.clone() {
+        spawn_janitor(docker, config.read().await.idle_ttl);
+    }
     let state = RunnerManagerState {
         auth_token: std::sync::Arc::<str>::from(config.read().await.auth_token.clone()),
         config: std::sync::Arc::clone(&config),
-        runner: runner.clone(),
+        runner: handles.service.clone(),
     };
 
     let app = build_app(state);
 
     if config.read().await.control_plane_url.is_some() {
         let upstream_config = std::sync::Arc::clone(&config);
-        let upstream_runner = runner.clone();
+        let upstream_runner = handles.service.clone();
         tokio::spawn(async move {
             if let Err(error) = upstream::run(upstream_config, upstream_runner).await {
                 tracing::error!(error = %error, "runner upstream worker exited");

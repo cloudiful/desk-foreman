@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use runner_protocol::{
     CancelSessionRequest, CommandOutput, ExecRequest, InputRequest, RUNNER_JOB_TIMEOUT_SECS,
-    RunnerCommandRequest, RunnerJob, RunnerJobResult, RunnerSessionStatus, ShellToolOutput,
+    RUNNER_MANAGER_HEARTBEAT_TTL_SECS, RunnerCommandRequest, RunnerJob, RunnerJobResult,
+    RunnerOwner, RunnerSessionStatus, ShellToolOutput,
 };
 
 use crate::{
@@ -19,6 +20,7 @@ use crate::{
 
 struct QueuedJob {
     job: RunnerJob,
+    target_manager_id: Option<i64>,
 }
 
 struct PendingJob {
@@ -82,6 +84,37 @@ impl RunnerBroker {
         kind: &str,
         payload: &T,
     ) -> anyhow::Result<R> {
+        self.submit_inner(
+            kind,
+            payload,
+            None,
+            Duration::from_secs(RUNNER_JOB_TIMEOUT_SECS),
+        )
+        .await
+    }
+
+    async fn submit_to_manager<T: serde::Serialize, R: DeserializeOwned>(
+        &self,
+        manager_id: i64,
+        kind: &str,
+        payload: &T,
+    ) -> anyhow::Result<R> {
+        self.submit_inner(
+            kind,
+            payload,
+            Some(manager_id),
+            Duration::from_secs(RUNNER_MANAGER_HEARTBEAT_TTL_SECS * 2),
+        )
+        .await
+    }
+
+    async fn submit_inner<T: serde::Serialize, R: DeserializeOwned>(
+        &self,
+        kind: &str,
+        payload: &T,
+        target_manager_id: Option<i64>,
+        timeout_duration: Duration,
+    ) -> anyhow::Result<R> {
         db::queries::find_enabled_runner_manager(&self.db)
             .await?
             .context("no enabled runner manager is configured")?;
@@ -100,9 +133,10 @@ impl RunnerBroker {
                 kind: kind.to_string(),
                 payload: serde_json::to_value(payload)?,
             },
+            target_manager_id,
         });
         self.notify.notify_waiters();
-        let value = match timeout(Duration::from_secs(RUNNER_JOB_TIMEOUT_SECS), receiver).await {
+        let value = match timeout(timeout_duration, receiver).await {
             Ok(result) => {
                 result.context("runner manager disconnected before returning job result")??
             }
@@ -112,6 +146,40 @@ impl RunnerBroker {
             }
         };
         Ok(serde_json::from_value(value)?)
+    }
+
+    pub async fn cleanup_runner_owner_all(
+        self: &Arc<Self>,
+        owner: RunnerOwner,
+    ) -> anyhow::Result<()> {
+        let manager_ids = db::queries::list_live_runner_manager_ids(&self.db).await?;
+        if manager_ids.is_empty() {
+            anyhow::bail!("no live runner manager is available for owner cleanup");
+        }
+        let mut jobs = tokio::task::JoinSet::new();
+        for manager_id in manager_ids {
+            let broker = Arc::clone(self);
+            let owner = owner.clone();
+            jobs.spawn(async move {
+                broker
+                    .submit_to_manager::<_, Value>(manager_id, "cleanup_runner_owner", &owner)
+                    .await
+                    .map(|_| ())
+            });
+        }
+        let mut errors = Vec::new();
+        while let Some(result) = jobs.join_next().await {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => errors.push(error.to_string()),
+                Err(error) => errors.push(error.to_string()),
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            anyhow::bail!("runner cleanup failed: {}", errors.join("; "))
+        }
     }
 
     pub async fn next_job(&self, manager_id: i64) -> Option<RunnerJob> {
@@ -149,6 +217,9 @@ impl RunnerBroker {
                     pending
                         .get(&queued.job.job_id)
                         .is_some_and(|job| job.manager_id.is_none())
+                        && queued
+                            .target_manager_id
+                            .is_none_or(|target| target == manager_id)
                 });
                 index.and_then(|index| {
                     let job = jobs.remove(index)?.job;
@@ -231,5 +302,12 @@ impl RunnerService for PullRunnerService {
         request: RunnerCommandRequest,
     ) -> RunnerFuture<'a, anyhow::Result<CommandOutput>> {
         Box::pin(async move { self.broker.submit("run_command", &request).await })
+    }
+
+    fn cleanup_runner_owner<'a>(
+        &'a self,
+        owner: RunnerOwner,
+    ) -> RunnerFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move { self.broker.cleanup_runner_owner_all(owner).await })
     }
 }

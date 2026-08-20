@@ -6,8 +6,9 @@ use crate::{
     AppState,
     api::validation::ValidatedQuery,
     db::types::{
-        AuditLogResponse, ListAuditLogsParams, ListRunnerSessionsParams, ListWorkspaceRunnersParams,
-        OperationsSummary, Page, RunnerSessionResponse, WorkspaceRunnerResponse,
+        AuditLogResponse, ListAuditLogsParams, ListRunnerSessionsParams,
+        ListWorkspaceRunnersParams, OperationsSummary, Page, RunnerSessionResponse,
+        WorkspaceRunnerResponse,
     },
     error::AppError,
 };
@@ -122,8 +123,7 @@ pub async fn operations_summary(
         runner_managers_online,
         runner_managers_offline,
         runner_managers_disabled,
-    ) =
-        crate::db::queries::operations_summary(&state.db).await?;
+    ) = crate::db::queries::operations_summary(&state.db).await?;
     let active_sessions = state
         .runner
         .list_sessions()
@@ -148,6 +148,7 @@ fn workspace_runner_response(
 ) -> WorkspaceRunnerResponse {
     WorkspaceRunnerResponse {
         runner_id: row.runner_id,
+        runner_manager_id: row.runner_manager_id,
         owner_kind: row.owner_kind,
         owner_user_id: row.owner_user_id,
         owner_workspace_binding_id: row.owner_workspace_binding_id,
@@ -160,6 +161,7 @@ fn workspace_runner_response(
         network_enabled: row.network_enabled,
         workspace_root: row.workspace_root,
         last_active_at: row.last_active_at,
+        last_observed_at: row.last_observed_at,
         created_at: row.created_at,
         updated_at: row.updated_at,
         last_error: row.last_error,

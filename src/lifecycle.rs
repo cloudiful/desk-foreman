@@ -1,12 +1,10 @@
 use std::{fs, time::Duration};
 
-use chrono::{Duration as ChronoDuration, Utc};
-use runner_protocol::CancelSessionRequest;
-
 use crate::{
     AppState,
     db::{self, audit::AuditLogEntry},
 };
+use chrono::{Duration as ChronoDuration, Utc};
 
 pub fn spawn_janitor(state: AppState) {
     tokio::spawn(async move {
@@ -26,23 +24,27 @@ async fn cleanup_archived_workspaces(state: &AppState) -> anyhow::Result<()> {
             .map_err(|_| anyhow::anyhow!("invalid workspace retention"))?;
     let archived = db::queries::list_archived_workspace_bindings(&state.db, before).await?;
     for binding in archived {
-        for session in state.runner.list_sessions().await? {
-            if session.owner
-                == (runner_protocol::RunnerOwner::WorkspaceBinding {
-                    workspace_binding_id: binding.workspace_binding_id,
-                })
-            {
-                let _ = state
-                    .runner
-                    .cancel_session(CancelSessionRequest {
-                        owner: session.owner,
-                        session_key: session.session_key,
-                        session_id: session.session_id,
-                    })
-                    .await;
-            }
+        let owner = runner_protocol::RunnerOwner::WorkspaceBinding {
+            workspace_binding_id: binding.workspace_binding_id,
+        };
+        if let Err(error) = state.runner.cleanup_runner_owner(owner.clone()).await {
+            tracing::warn!(
+                workspace_binding_id = binding.workspace_binding_id,
+                %error,
+                "failed to clean up archived workspace runner"
+            );
+            continue;
         }
-        let _ = fs::remove_dir_all(&binding.workspace_root);
+        if let Err(error) = fs::remove_dir_all(&binding.workspace_root)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(
+                workspace_binding_id = binding.workspace_binding_id,
+                %error,
+                "failed to remove archived workspace directory"
+            );
+            continue;
+        }
         if db::queries::delete_workspace_binding(&state.db, binding.workspace_binding_id)
             .await?
             .is_some()

@@ -5,7 +5,7 @@ use desk_foreman::runner::RunnerService;
 use reqwest::Client;
 use runner_protocol::{
     CancelSessionRequest, ExecRequest, InputRequest, RUNNER_JOB_TIMEOUT_SECS, RunnerCommandRequest,
-    RunnerJob, RunnerJobResult,
+    RunnerJob, RunnerJobResult, RunnerOwner,
 };
 use serde_json::Value;
 use tokio::time::Instant;
@@ -105,7 +105,7 @@ async fn execute_job(
     job: RunnerJob,
 ) -> RunnerJobResult {
     let job_id = job.job_id.clone();
-    let result = match execute_job_inner(runner, config, gate, &job.kind, job.payload).await {
+    match execute_job_inner(runner, config, gate, &job.kind, job.payload).await {
         Ok(value) => RunnerJobResult {
             job_id,
             ok: true,
@@ -121,8 +121,7 @@ async fn execute_job(
                 error: Some(error.to_string()),
             }
         }
-    };
-    result
+    }
 }
 
 async fn execute_job_inner(
@@ -158,6 +157,11 @@ async fn execute_job_inner(
             let limits = config.read().await.clone();
             apply_limits(&mut request, &limits)?;
             Ok(serde_json::to_value(runner.run_command(request).await?)?)
+        }
+        "cleanup_runner_owner" => {
+            let owner = serde_json::from_value::<RunnerOwner>(payload)?;
+            runner.cleanup_runner_owner(owner).await?;
+            Ok(Value::Null)
         }
         _ => bail!("unknown runner job kind: {kind}"),
     }
@@ -260,6 +264,7 @@ mod tests {
     fn config() -> RunnerManagerConfig {
         RunnerManagerConfig {
             control_plane_url: None,
+            manager_id: "test-manager".to_string(),
             bind_addr: "127.0.0.1:0".to_string(),
             auth_token: "test-token".to_string(),
             backend: RunnerBackendKind::Direct,

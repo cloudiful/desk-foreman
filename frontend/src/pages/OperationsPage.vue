@@ -417,6 +417,10 @@ onUnmounted(() => {
             </dd>
           </div>
           <div class="flex justify-between gap-4">
+            <dt class="text-(--ui-text-muted)">Runner manager</dt>
+            <dd>{{ runnerDetail.runner_manager_id ?? '—' }}</dd>
+          </div>
+          <div class="flex justify-between gap-4">
             <dt class="text-(--ui-text-muted)">Status</dt>
             <dd><StatusBadge :status="runnerDetail.status" /></dd>
           </div>
@@ -439,6 +443,10 @@ onUnmounted(() => {
           <div class="flex justify-between gap-4">
             <dt class="text-(--ui-text-muted)">Last active</dt>
             <dd>{{ formatDateTime(runnerDetail.last_active_at) }}</dd>
+          </div>
+          <div class="flex justify-between gap-4">
+            <dt class="text-(--ui-text-muted)">Last observed</dt>
+            <dd>{{ formatDateTime(runnerDetail.last_observed_at) }}</dd>
           </div>
           <div
             v-if="runnerDetail.last_error"

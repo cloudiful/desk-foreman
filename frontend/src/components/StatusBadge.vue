@@ -14,11 +14,13 @@ const config = computed(() => {
       return { color: 'success', dot: true } as const
     case 'offline':
     case 'failed':
+    case 'cleanup_failed':
     case 'error':
     case 'inactive':
       return { color: 'error', dot: true } as const
     case 'pending':
     case 'idle':
+    case 'stale':
     case 'archived':
       return { color: 'warning', dot: true } as const
     case 'disabled':

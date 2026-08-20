@@ -7,7 +7,56 @@ pub const RUNNER_JOB_TIMEOUT_SECS: u64 = 3_660;
 pub const RUNNER_JOB_POLL_TIMEOUT_SECS: u64 = 10;
 pub const RUNNER_MANAGER_HEARTBEAT_TTL_SECS: u64 = 30;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunnerLifecycleStatus {
+    Running,
+    Removed,
+    CleanupFailed,
+}
+
+impl RunnerLifecycleStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Removed => "removed",
+            Self::CleanupFailed => "cleanup_failed",
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, ToSchema,
+)]
+pub struct RunnerLifecycleEvent {
+    pub owner: RunnerOwner,
+    pub container_name: String,
+    pub container_id: Option<String>,
+    pub status: RunnerLifecycleStatus,
+    pub workspace_root: Option<String>,
+    pub runtime: Option<String>,
+    pub runtime_class: Option<String>,
+    pub image_name: Option<String>,
+    pub network_enabled: Option<bool>,
+    pub last_error: Option<String>,
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::RunnerLifecycleStatus;
+
+    #[test]
+    fn lifecycle_statuses_use_database_names() {
+        assert_eq!(RunnerLifecycleStatus::Running.as_str(), "running");
+        assert_eq!(RunnerLifecycleStatus::Removed.as_str(), "removed");
+        assert_eq!(
+            RunnerLifecycleStatus::CleanupFailed.as_str(),
+            "cleanup_failed"
+        );
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize, ToSchema)]
 pub enum RunnerOwner {
     InternalUser { user_id: i64 },
     WorkspaceBinding { workspace_binding_id: i64 },

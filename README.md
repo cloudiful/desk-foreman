@@ -80,6 +80,7 @@ Desk Foreman can optionally review side-effecting operations with an OpenAI Resp
 - `DEFAULT_SHELL` default `bash`
 - `DESK_FOREMAN_URL` required by `runner-manager`, for example `http://desk-foreman:3000`
 - `RUNNER_MANAGER_TOKEN` required by `runner-manager`; create or register it from the admin Runner managers page
+- `RUNNER_MANAGER_ID` optional stable identity for standalone runner-managers; if omitted it is derived from `WORKSPACE_ROOT`; control-plane registration supplies this identity automatically
 - `RUNNER_HOST_WORKSPACE_ROOT` required by a containerized Docker runner-manager, and must be the host path corresponding to its `/workspace` mount
 - Runner image, network access, resource limits, and enabled state are managed from the admin Runner managers page
 - `SESSION_IDLE_TTL_SEC` default `1800`

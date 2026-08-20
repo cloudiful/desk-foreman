@@ -200,6 +200,19 @@ impl RunnerService for FakeRunnerService {
                 .collect())
         })
     }
+
+    fn cleanup_runner_owner<'a>(
+        &'a self,
+        owner: RunnerOwner,
+    ) -> RunnerFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            self.sessions
+                .lock()
+                .await
+                .retain(|_, session_owner| session_owner != &owner);
+            Ok(())
+        })
+    }
 }
 
 fn app_state(root: PathBuf) -> AppState {

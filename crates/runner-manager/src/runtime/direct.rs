@@ -55,9 +55,9 @@ impl RunnerBackend for DirectRunnerBackend {
         })
     }
 
-    fn reclaim_idle_runners<'a>(
+    fn cleanup_runner_owner<'a>(
         &'a self,
-        _active_owners: Vec<RunnerOwner>,
+        _owner: RunnerOwner,
     ) -> RunnerFuture<'a, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
     }

@@ -7,37 +7,43 @@ use std::{
 };
 
 use anyhow::Context;
-use desk_foreman::runner::RunnerFuture;
-use runner_protocol::{CommandOutput, RunnerCommandRequest, RunnerOwner, RunnerShellRequest};
-use serde_json::Value;
+use runner_protocol::{CommandOutput, RunnerOwner};
 use tokio::process::Command;
 
 use crate::config::{RunnerManagerConfig, SharedRunnerManagerConfig};
 
-use super::{
-    ProcessSpawnTarget, RunnerBackend,
-    docker_command::{ensure_docker_command_succeeded, is_missing_container_error},
-    shell_spawn::append_shell_args,
-};
+use super::{RunnerLifecycleReporter, docker_command::ensure_docker_command_succeeded};
 
 pub struct DockerRunnerBackend {
-    config: SharedRunnerManagerConfig,
+    pub(super) config: SharedRunnerManagerConfig,
+    pub(super) manager_id: String,
+    pub(super) reporter: Arc<RunnerLifecycleReporter>,
+    pub(super) observed: Mutex<HashMap<String, runner_protocol::RunnerLifecycleEvent>>,
     /// Serializes container create/start reconciliation per owner so concurrent
     /// first requests cannot race on `docker run --name <same-name>`.
-    runner_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    last_active: Mutex<HashMap<String, Instant>>,
+    pub(super) runner_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    pub(super) last_active: Mutex<HashMap<String, Instant>>,
+    pub(super) active_ops: Mutex<HashMap<String, usize>>,
 }
 
 impl DockerRunnerBackend {
-    pub fn new(config: SharedRunnerManagerConfig) -> Arc<Self> {
+    pub fn new(
+        config: SharedRunnerManagerConfig,
+        manager_id: String,
+        reporter: Arc<RunnerLifecycleReporter>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             config,
+            manager_id,
+            reporter,
+            observed: Mutex::new(HashMap::new()),
             runner_locks: Mutex::new(HashMap::new()),
             last_active: Mutex::new(HashMap::new()),
+            active_ops: Mutex::new(HashMap::new()),
         })
     }
 
-    fn runner_lock(&self, owner: &RunnerOwner) -> Arc<tokio::sync::Mutex<()>> {
+    pub(super) fn runner_lock(&self, owner: &RunnerOwner) -> Arc<tokio::sync::Mutex<()>> {
         let key = owner.stable_key().to_string();
         let mut locks = self.runner_locks.lock().expect("runner lock map poisoned");
         locks
@@ -46,7 +52,7 @@ impl DockerRunnerBackend {
             .clone()
     }
 
-    async fn ensure_runner(
+    pub(super) async fn ensure_runner(
         &self,
         owner: &RunnerOwner,
         workspace_root: &Path,
@@ -57,12 +63,28 @@ impl DockerRunnerBackend {
         let _guard = lock.lock().await;
         let network_enabled = requested_network_enabled && config.network_enabled;
         let container_name = owner.container_name();
-        self.last_active
-            .lock()
-            .expect("runner activity map poisoned")
-            .insert(owner.stable_key(), Instant::now());
         let host_workspace_root = Self::host_workspace_root(&config, workspace_root)?;
-        let mut inspected = self.inspect_container(&container_name).await?;
+        let mut inspected = self.inspect_container_metadata(&container_name).await?;
+        if let Some(metadata) = &inspected {
+            if metadata.manager_id.as_deref() == Some(self.manager_id.as_str())
+                && metadata.owner_key.as_deref() == Some(owner.stable_key().as_str())
+            {
+                // This container belongs to the current runner manager.
+            } else if metadata.manager_id.is_none()
+                && metadata.owner_key.as_deref() == Some(owner.stable_key().as_str())
+                && super::docker_lifecycle::legacy_workspace_mount_matches(
+                    &config,
+                    metadata.workspace_source.as_deref(),
+                )
+            {
+                self.stop_and_remove(&container_name).await?;
+                inspected = None;
+            } else {
+                anyhow::bail!(
+                    "runner container {container_name} has a different runner-manager identity; set RUNNER_MANAGER_ID consistently or remove the stale container manually"
+                );
+            }
+        }
         if inspected.is_none() {
             self.create_runner(
                 owner,
@@ -73,17 +95,29 @@ impl DockerRunnerBackend {
                 &config,
             )
             .await?;
-            inspected = self.inspect_container(&container_name).await?;
+            inspected = self.inspect_container_metadata(&container_name).await?;
         }
 
-        let inspected = inspected.with_context(|| {
+        let mut inspected = inspected.with_context(|| {
             format!("runner container {container_name} could not be inspected after creation")
         })?;
 
         if inspected.status != "running" {
             self.docker_status(["start", container_name.as_str()])
                 .await?;
+            inspected = self
+                .inspect_container_metadata(&container_name)
+                .await?
+                .with_context(|| {
+                    format!("runner container {container_name} disappeared after start")
+                })?;
         }
+
+        self.observe_running(owner, workspace_root, network_enabled, &config, &inspected);
+        self.last_active
+            .lock()
+            .expect("runner activity map poisoned")
+            .insert(owner.stable_key(), Instant::now());
 
         Ok(container_name)
     }
@@ -117,6 +151,8 @@ impl DockerRunnerBackend {
             format!("desk-foreman.owner={}", owner.stable_key()),
             "--label".to_string(),
             "desk-foreman.managed=true".to_string(),
+            "--label".to_string(),
+            format!("desk-foreman.manager={}", self.manager_id),
             "-e".to_string(),
             format!("WORKSPACE_ROOT={}", config.workdir),
             "-v".to_string(),
@@ -153,40 +189,22 @@ impl DockerRunnerBackend {
         ensure_docker_command_succeeded("create runner container", &output)
     }
 
-    async fn inspect_container(
+    pub(super) async fn docker_status<const N: usize>(
         &self,
-        container_name: &str,
-    ) -> anyhow::Result<Option<ContainerState>> {
-        let output = self
-            .docker_output(["inspect", container_name, "--format", "{{json .State}}"])
-            .await;
-        match output {
-            Ok(stdout) => {
-                let value: Value = serde_json::from_str(stdout.trim()).with_context(|| {
-                    format!("failed to parse docker inspect state for {container_name}")
-                })?;
-                let status = value
-                    .get("Status")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown")
-                    .to_string();
-                Ok(Some(ContainerState { status }))
-            }
-            Err(error) if is_missing_container_error(&error.to_string()) => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
-
-    async fn docker_status<const N: usize>(&self, args: [&str; N]) -> anyhow::Result<()> {
+        args: [&str; N],
+    ) -> anyhow::Result<()> {
         self.docker_output(args).await.map(|_| ())
     }
 
-    async fn docker_output<const N: usize>(&self, args: [&str; N]) -> anyhow::Result<String> {
+    pub(super) async fn docker_output<const N: usize>(
+        &self,
+        args: [&str; N],
+    ) -> anyhow::Result<String> {
         self.docker_output_vec(args.iter().map(|value| (*value).to_string()).collect())
             .await
     }
 
-    async fn docker_output_owned(
+    pub(super) async fn docker_output_owned(
         &self,
         args: Vec<String>,
         timeout_ms: Option<u64>,
@@ -231,7 +249,7 @@ impl DockerRunnerBackend {
         }
     }
 
-    fn container_workdir(
+    pub(super) fn container_workdir(
         config: &RunnerManagerConfig,
         workspace_root: &Path,
         working_dir: &Path,
@@ -257,119 +275,7 @@ impl DockerRunnerBackend {
     }
 }
 
-impl RunnerBackend for DockerRunnerBackend {
-    fn reconcile<'a>(&'a self) -> RunnerFuture<'a, anyhow::Result<()>> {
-        Box::pin(async { Ok(()) })
-    }
-
-    fn prepare_shell_spawn<'a>(
-        &'a self,
-        request: RunnerShellRequest,
-    ) -> RunnerFuture<'a, anyhow::Result<ProcessSpawnTarget>> {
-        Box::pin(async move {
-            let container_name = self
-                .ensure_runner(
-                    &request.owner,
-                    &request.workspace_root,
-                    request.network_enabled,
-                )
-                .await?;
-            let config = self.config.read().await.clone();
-            let workdir =
-                Self::container_workdir(&config, &request.workspace_root, &request.working_dir)?;
-            let mut args = vec!["exec".to_string(), "-i".to_string()];
-            if request.tty {
-                args.push("-t".to_string());
-            }
-            args.push("-w".to_string());
-            args.push(workdir);
-            args.push("-e".to_string());
-            args.push(format!("WORKSPACE_ROOT={}", config.workdir));
-            args.push(container_name);
-            args.push(request.shell);
-            args.extend(append_shell_args(request.login, &request.command));
-            Ok(ProcessSpawnTarget {
-                program: config.docker_cli.clone(),
-                args,
-                env: docker_host_env(&config),
-                cwd: None,
-            })
-        })
-    }
-
-    fn run_command<'a>(
-        &'a self,
-        request: RunnerCommandRequest,
-    ) -> RunnerFuture<'a, anyhow::Result<CommandOutput>> {
-        Box::pin(async move {
-            let container_name = self
-                .ensure_runner(
-                    &request.owner,
-                    &request.workspace_root,
-                    request.network_enabled,
-                )
-                .await?;
-            let config = self.config.read().await.clone();
-            let workdir =
-                Self::container_workdir(&config, &request.workspace_root, &request.working_dir)?;
-            let mut args = vec![
-                "exec".to_string(),
-                "-w".to_string(),
-                workdir,
-                "-e".to_string(),
-                format!("WORKSPACE_ROOT={}", config.workdir),
-                container_name,
-                request.program,
-            ];
-            args.extend(request.args);
-            self.docker_output_owned(args, request.timeout_ms, request.max_output_bytes)
-                .await
-        })
-    }
-
-    fn reclaim_idle_runners<'a>(
-        &'a self,
-        active_owners: Vec<RunnerOwner>,
-    ) -> RunnerFuture<'a, anyhow::Result<()>> {
-        Box::pin(async move {
-            let config = self.config.read().await.clone();
-            let active = active_owners
-                .into_iter()
-                .map(|owner| owner.stable_key())
-                .collect::<std::collections::HashSet<_>>();
-            let cutoff = Instant::now()
-                .checked_sub(config.idle_ttl)
-                .unwrap_or_else(Instant::now);
-            let stale = {
-                let mut activity = self
-                    .last_active
-                    .lock()
-                    .expect("runner activity map poisoned");
-                let stale = activity
-                    .iter()
-                    .filter(|(owner, last)| !active.contains(*owner) && **last <= cutoff)
-                    .map(|(owner, _)| owner.clone())
-                    .collect::<Vec<_>>();
-                for owner in &stale {
-                    activity.remove(owner);
-                }
-                stale
-            };
-            for owner in stale {
-                let container = format!("desk-foreman-runner-{}", owner.replace([':', '/'], "-"));
-                let _ = self.docker_status(["stop", container.as_str()]).await;
-            }
-            Ok(())
-        })
-    }
-}
-
-#[derive(Clone, Debug)]
-struct ContainerState {
-    status: String,
-}
-
-fn docker_host_env(config: &RunnerManagerConfig) -> Vec<(String, String)> {
+pub(super) fn docker_host_env(config: &RunnerManagerConfig) -> Vec<(String, String)> {
     config
         .docker_host
         .as_ref()

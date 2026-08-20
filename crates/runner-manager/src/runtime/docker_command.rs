@@ -1,7 +1,8 @@
 use runner_protocol::CommandOutput;
 
 pub(super) fn is_missing_container_error(message: &str) -> bool {
-    message.to_ascii_lowercase().contains("no such object")
+    let message = message.to_ascii_lowercase();
+    message.contains("no such object") || message.contains("no such container")
 }
 
 pub(super) fn ensure_docker_command_succeeded(
@@ -46,6 +47,9 @@ mod tests {
         ));
         assert!(is_missing_container_error(
             "error: no such object: runner-1"
+        ));
+        assert!(is_missing_container_error(
+            "Error: No such container: runner-1"
         ));
         assert!(!is_missing_container_error("permission denied"));
     }

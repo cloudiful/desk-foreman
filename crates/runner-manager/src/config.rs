@@ -27,6 +27,7 @@ impl RunnerBackendKind {
 #[derive(Clone, Debug)]
 pub struct RunnerManagerConfig {
     pub control_plane_url: Option<String>,
+    pub manager_id: String,
     pub bind_addr: String,
     pub auth_token: String,
     pub backend: RunnerBackendKind,
@@ -65,6 +66,10 @@ impl RunnerManagerConfig {
             control_plane_url: env::var("DESK_FOREMAN_URL")
                 .ok()
                 .filter(|value| !value.trim().is_empty()),
+            manager_id: env::var("RUNNER_MANAGER_ID")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| format!("standalone:{}", workspace_root.display())),
             bind_addr: env::var("RUNNER_MANAGER_BIND_ADDR")
                 .unwrap_or_else(|_| "0.0.0.0:3001".to_string()),
             auth_token: env::var("RUNNER_MANAGER_TOKEN")
@@ -150,6 +155,7 @@ impl RunnerManagerConfig {
         if !config.enabled {
             bail!("runner manager is disabled in desk-foreman");
         }
+        self.manager_id = config.runner_manager_id.to_string();
         self.image = config.image;
         self.network_enabled = config.network_enabled;
         self.max_output_bytes = usize::try_from(config.max_output_bytes)

@@ -4,7 +4,9 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use axum_extra::extract::cookie::CookieJar;
-use runner_protocol::{RUNNER_JOB_POLL_TIMEOUT_SECS, RunnerJob, RunnerJobResult};
+use runner_protocol::{
+    RUNNER_JOB_POLL_TIMEOUT_SECS, RunnerJob, RunnerJobResult, RunnerLifecycleEvent,
+};
 use serde_json::json;
 
 use crate::{
@@ -36,6 +38,10 @@ pub(super) fn router() -> axum::Router<AppState> {
         .route(
             "/api/internal/runner-manager/jobs/result",
             axum::routing::post(complete_runner_job),
+        )
+        .route(
+            "/api/internal/runner-manager/workspace-runners/report",
+            axum::routing::post(report_workspace_runner),
         )
         .route(
             "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/git/sync",
@@ -149,6 +155,34 @@ pub async fn complete_runner_job(
         .complete_job(manager.runner_manager_id, result)
         .await
         .map_err(AppError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/internal/runner-manager/workspace-runners/report",
+    tag = "internal",
+    request_body = Vec<RunnerLifecycleEvent>,
+    responses((status = 204))
+)]
+pub async fn report_workspace_runner(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(events): Json<Vec<RunnerLifecycleEvent>>,
+) -> Result<StatusCode, AppError> {
+    let manager = runner_manager_from_token(&state, &headers).await?;
+    if events.len() > 256 {
+        return Err(AppError::bad_request("too many runner lifecycle events"));
+    }
+    for event in &events {
+        if event.container_name != event.owner.container_name() {
+            return Err(AppError::bad_request(
+                "runner container does not match owner",
+            ));
+        }
+        crate::db::queries::report_workspace_runner(&state.db, manager.runner_manager_id, event)
+            .await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

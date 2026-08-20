@@ -15,7 +15,10 @@ use runner_protocol::{
 };
 
 use crate::config::{RunnerBackendKind, SharedRunnerManagerConfig};
-use crate::runtime::{DirectRunnerBackend, DockerRunnerBackend, LocalRunnerService, RunnerBackend};
+use crate::runtime::{
+    DirectRunnerBackend, DockerRunnerBackend, LocalRunnerService, RunnerBackend,
+    RunnerLifecycleReporter,
+};
 
 #[derive(Clone)]
 pub(crate) struct RunnerManagerState {
@@ -42,20 +45,34 @@ pub(crate) fn build_app(state: RunnerManagerState) -> Router {
         .merge(protected)
 }
 
+pub(crate) struct RunnerServiceHandles {
+    pub(crate) service: Arc<dyn RunnerService>,
+    pub(crate) docker_backend: Option<Arc<DockerRunnerBackend>>,
+}
+
 pub(crate) async fn build_runner_service(
     config: SharedRunnerManagerConfig,
-) -> anyhow::Result<Arc<dyn RunnerService>> {
+    manager_id: String,
+    reporter: Arc<RunnerLifecycleReporter>,
+) -> anyhow::Result<RunnerServiceHandles> {
     let initial = config.read().await.clone();
-    let backend: Arc<dyn RunnerBackend> = match initial.backend {
-        RunnerBackendKind::Direct => DirectRunnerBackend::new() as Arc<dyn RunnerBackend>,
-        RunnerBackendKind::Docker => {
-            DockerRunnerBackend::new(Arc::clone(&config)) as Arc<dyn RunnerBackend>
-        }
-    };
+    let (backend, docker_backend): (Arc<dyn RunnerBackend>, Option<Arc<DockerRunnerBackend>>) =
+        match initial.backend {
+            RunnerBackendKind::Direct => {
+                (DirectRunnerBackend::new() as Arc<dyn RunnerBackend>, None)
+            }
+            RunnerBackendKind::Docker => {
+                let docker = DockerRunnerBackend::new(Arc::clone(&config), manager_id, reporter);
+                (docker.clone() as Arc<dyn RunnerBackend>, Some(docker))
+            }
+        };
 
     let service = LocalRunnerService::new(backend, config);
     service.reconcile().await?;
-    Ok(service as Arc<dyn RunnerService>)
+    Ok(RunnerServiceHandles {
+        service: service as Arc<dyn RunnerService>,
+        docker_backend,
+    })
 }
 
 async fn healthz() -> &'static str {
@@ -259,6 +276,7 @@ mod tests {
     fn test_config() -> crate::config::RunnerManagerConfig {
         crate::config::RunnerManagerConfig {
             control_plane_url: None,
+            manager_id: "test-manager".to_string(),
             bind_addr: "127.0.0.1:0".to_string(),
             auth_token: "test-token".to_string(),
             backend: crate::config::RunnerBackendKind::Direct,

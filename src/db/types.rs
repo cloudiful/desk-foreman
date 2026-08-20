@@ -747,27 +747,10 @@ impl From<UserRecord> for UserResponse {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct WorkspaceRunnerSummary {
-    pub runner_id: i64,
-    pub owner_kind: String,
-    pub container_name: String,
-    pub container_id: Option<String>,
-    pub runtime: String,
-    pub runtime_class: Option<String>,
-    pub image_name: String,
-    pub status: String,
-    pub network_enabled: bool,
-    pub workspace_root: String,
-    pub last_error: Option<String>,
-    pub last_active_at: DateTime<Utc>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
 pub struct WorkspaceRunnerResponse {
     pub runner_id: i64,
+    pub runner_manager_id: Option<i64>,
     pub owner_kind: String,
     pub owner_user_id: Option<i64>,
     pub owner_workspace_binding_id: Option<i64>,
@@ -780,6 +763,7 @@ pub struct WorkspaceRunnerResponse {
     pub network_enabled: bool,
     pub workspace_root: String,
     pub last_active_at: DateTime<Utc>,
+    pub last_observed_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_error: Option<String>,

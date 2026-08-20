@@ -1,6 +1,6 @@
 use runner_protocol::{
     CancelSessionRequest, CommandOutput, ExecRequest, InputRequest, RunnerCommandRequest,
-    RunnerSessionStatus, ShellToolOutput,
+    RunnerOwner, RunnerSessionStatus, ShellToolOutput,
 };
 
 use crate::runner::RunnerFuture;
@@ -27,4 +27,9 @@ pub trait RunnerService: Send + Sync {
         &'a self,
         request: RunnerCommandRequest,
     ) -> RunnerFuture<'a, anyhow::Result<CommandOutput>>;
+
+    fn cleanup_runner_owner<'a>(
+        &'a self,
+        owner: RunnerOwner,
+    ) -> RunnerFuture<'a, anyhow::Result<()>>;
 }

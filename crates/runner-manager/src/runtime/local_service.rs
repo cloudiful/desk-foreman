@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use desk_foreman::runner::{RunnerFuture, RunnerService};
 use runner_protocol::{
-    CancelSessionRequest, ExecRequest, InputRequest, RunnerCommandRequest, RunnerSessionStatus,
-    ShellToolOutput,
+    CancelSessionRequest, ExecRequest, InputRequest, RunnerCommandRequest, RunnerOwner,
+    RunnerSessionStatus, ShellToolOutput,
 };
 
 use super::{RunnerBackend, shell_manager::ShellManager};
@@ -56,5 +56,36 @@ impl RunnerService for LocalRunnerService {
         request: RunnerCommandRequest,
     ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::CommandOutput>> {
         Box::pin(async move { self.backend.run_command(request).await })
+    }
+
+    fn cleanup_runner_owner<'a>(
+        &'a self,
+        owner: RunnerOwner,
+    ) -> RunnerFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let sessions = self.shell.list_sessions().await?;
+            for session in sessions
+                .into_iter()
+                .filter(|session| session.owner == owner)
+            {
+                if let Err(error) = self
+                    .shell
+                    .cancel_session(CancelSessionRequest {
+                        owner: owner.clone(),
+                        session_key: session.session_key,
+                        session_id: session.session_id,
+                    })
+                    .await
+                {
+                    tracing::warn!(
+                        owner = %owner.stable_key(),
+                        session_id = session.session_id,
+                        error = %error,
+                        "failed to cancel session during owner cleanup"
+                    );
+                }
+            }
+            self.backend.cleanup_runner_owner(owner).await
+        })
     }
 }

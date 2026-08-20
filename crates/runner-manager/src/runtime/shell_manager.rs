@@ -19,6 +19,7 @@ use tokio::time::timeout;
 
 use super::{
     RunnerBackend,
+    backend::RunnerOperationLease,
     session_gate::{SessionGate, SessionPermit},
     shell_session::ShellSession,
     shell_spawn::{build_command, build_pty_command, open_pty},
@@ -57,6 +58,7 @@ impl ShellManager {
             request.workdir.as_deref().unwrap_or("."),
         )?;
         let session_id = self.next_session_id.fetch_add(1, Ordering::Relaxed);
+        let operation = RunnerOperationLease::new(Arc::clone(&self.runner), request.owner.clone());
         let session = ShellSession::spawn(
             session_id,
             &*self.runner,
@@ -74,6 +76,7 @@ impl ShellManager {
                 owner: request.owner.clone(),
                 session_key: request.session_key.clone(),
                 session: Arc::clone(&session),
+                _operation: operation,
                 _slot: slot,
             }),
         );
@@ -95,7 +98,15 @@ impl ShellManager {
             }
         } else {
             interact.await
-        }?;
+        };
+        let output = match output {
+            Ok(output) => output,
+            Err(error) => {
+                self.sessions.lock().await.remove(&session_id);
+                let _ = session.kill().await;
+                return Err(error);
+            }
+        };
         if output.session_id.is_none() {
             self.sessions.lock().await.remove(&session_id);
         }
@@ -118,6 +129,7 @@ impl ShellManager {
         if session.owner != request.owner || session.session_key != request.session_key {
             anyhow::bail!("session does not belong to current user");
         }
+        self.runner.touch_activity(&request.owner);
         let interact = session.session.interact(
             &request.chars,
             request.yield_time_ms,
@@ -137,7 +149,15 @@ impl ShellManager {
             }
         } else {
             interact.await
-        }?;
+        };
+        let output = match output {
+            Ok(output) => output,
+            Err(error) => {
+                self.sessions.lock().await.remove(&request.session_id);
+                let _ = session.session.kill().await;
+                return Err(error);
+            }
+        };
         if output.session_id.is_none() {
             self.sessions.lock().await.remove(&request.session_id);
         }
@@ -197,12 +217,7 @@ impl ShellManager {
                 let _ = session.session.kill().await;
             }
         }
-        let active_owners = sessions
-            .values()
-            .map(|session| session.owner.clone())
-            .collect::<Vec<_>>();
         drop(sessions);
-        let _ = self.runner.reclaim_idle_runners(active_owners).await;
     }
 }
 
@@ -210,6 +225,7 @@ struct ManagedSession {
     owner: RunnerOwner,
     session_key: Option<String>,
     session: Arc<ShellSession>,
+    _operation: RunnerOperationLease,
     _slot: SessionPermit,
 }
 
