@@ -1,8 +1,10 @@
 import type { MessageSchema } from './schema'
+import applications from './applications'
 import approval from './approval'
 import audit from './audit'
 import auth from './auth'
 import dashboard from './dashboard'
+import users from './users'
 
 const enUS = {
   app: {
@@ -42,6 +44,8 @@ const enUS = {
   dashboard,
   audit,
   approval,
+  users,
+  applications,
   shared: {
     confirm: {
       cancel: 'Cancel',
@@ -62,6 +66,24 @@ const enUS = {
     token: {
       copyAriaLabel: 'Copy token',
       copied: 'Token copied',
+      create: 'Create token',
+      revoke: 'Revoke',
+      createTitle: 'Create a token',
+      copyTitle: 'Copy this token now',
+      copyDescription:
+        'The full token is shown only once and cannot be retrieved later.',
+      active: 'Active tokens',
+      created: 'Created {time}',
+      expires: 'expires {time}',
+      noScopes: 'no scopes',
+      pagination: 'Page {page} of {totalPages}',
+      tokenName: 'Token name',
+      scopes: 'Scopes',
+      expiresAt: 'Expires at',
+      optional: 'Optional',
+      revokeAriaLabel: 'Revoke {tokenName}',
+      createdNotification: 'Token created',
+      revokedNotification: 'Token revoked',
     },
     notifications: {
       copied: 'Copied',

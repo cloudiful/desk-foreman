@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   createAdminApplication,
   createAdminApplicationToken,
@@ -46,12 +47,20 @@ function unknownScopes(scopes: string[]): string[] {
 }
 
 const APPROVAL_MODES = [
-  { label: 'Inherit global settings', value: 'inherit' },
-  { label: 'Disabled', value: 'disabled' },
-  { label: 'Use application reviewer', value: 'enabled' },
+  { key: 'inherit', value: 'inherit' },
+  { key: 'disabled', value: 'disabled' },
+  { key: 'enabled', value: 'enabled' },
 ] as const
 
 const { success, error: notifyError } = useNotify()
+const { t } = useI18n()
+
+const approvalModes = computed(() =>
+  APPROVAL_MODES.map(({ key, value }) => ({
+    label: t(`applications.approvalModes.${key}`),
+    value,
+  })),
+)
 
 const rows = ref<ApplicationResponse[]>([])
 const total = ref(0)
@@ -84,7 +93,7 @@ async function load(): Promise<void> {
   } catch (err) {
     if (sequence === loadSequence) {
       error.value =
-        err instanceof Error ? err.message : 'Failed to load applications'
+        err instanceof Error ? err.message : t('applications.errors.load')
     }
   } finally {
     if (sequence === loadSequence) loading.value = false
@@ -224,7 +233,7 @@ function handleApplicationDrawerOpen(open: boolean): void {
 async function save(): Promise<void> {
   if (!editing.value || saving.value) return
   if (!editing.value.name.trim()) {
-    formError.value = 'Name is required'
+    formError.value = t('applications.validation.nameRequired')
     return
   }
   saving.value = true
@@ -261,20 +270,20 @@ async function save(): Promise<void> {
   try {
     if (editing.value.application_id === 0) {
       await createAdminApplication(body)
-      success('Application created', body.name)
+      success(t('applications.notifications.created'), body.name)
     } else {
       await updateAdminApplication(editing.value.application_id, {
         ...body,
         is_active: editing.value.is_active,
       })
-      success('Application updated', body.name)
+      success(t('applications.notifications.updated'), body.name)
     }
     drawerOpen.value = false
     editing.value = null
     await load()
   } catch (err) {
     formError.value =
-      err instanceof Error ? err.message : 'Failed to save application'
+      err instanceof Error ? err.message : t('applications.errors.save')
   } finally {
     saving.value = false
   }
@@ -295,7 +304,7 @@ async function testApplicationApproval(): Promise<void> {
     )
   } catch (err) {
     formError.value =
-      err instanceof Error ? err.message : 'Failed to test application reviewer'
+      err instanceof Error ? err.message : t('applications.errors.test')
   } finally {
     approvalTesting.value = false
   }
@@ -372,7 +381,7 @@ async function loadTokens(): Promise<void> {
     }
   } catch (err) {
     notifyError(
-      'Failed to load application tokens',
+      t('applications.errors.loadTokens'),
       err instanceof Error ? err.message : undefined,
     )
   }
@@ -397,10 +406,10 @@ async function createToken(): Promise<void> {
     })
     tokenName.value = ''
     await loadTokens()
-    success('Token created')
+    success(t('shared.token.createdNotification'))
   } catch (err) {
     notifyError(
-      'Failed to create token',
+      t('applications.errors.createToken'),
       err instanceof Error ? err.message : undefined,
     )
   } finally {
@@ -413,12 +422,15 @@ async function confirmRevokeToken(): Promise<void> {
   revoking.value = true
   try {
     await deleteAdminApplicationToken(revokeTarget.value.token_id)
-    success('Token revoked', revokeTarget.value.token_name)
+    success(
+      t('shared.token.revokedNotification'),
+      revokeTarget.value.token_name,
+    )
     revokeTarget.value = null
     await loadTokens()
   } catch (err) {
     notifyError(
-      'Failed to revoke token',
+      t('applications.errors.revokeToken'),
       err instanceof Error ? err.message : undefined,
     )
   } finally {
@@ -431,20 +443,18 @@ onMounted(() => void load())
 
 <template>
   <div class="space-y-6">
-    <PageHeader
-      title="Applications"
-      description="Integrations with workspace access and per-application policies"
-    >
+    <PageHeader>
       <template #actions>
         <UButton
           icon="i-lucide-refresh-cw"
           variant="outline"
           color="neutral"
           :loading="loading"
+          :aria-label="t('applications.actions.refresh')"
           @click="load"
         />
         <UButton icon="i-lucide-plus" @click="startCreate">
-          Create application
+          {{ t('applications.actions.create') }}
         </UButton>
       </template>
     </PageHeader>
@@ -457,21 +467,21 @@ onMounted(() => void load())
       >
         <UInput
           v-model="search"
-          placeholder="Search applications…"
+          :placeholder="t('applications.searchPlaceholder')"
           leading-icon="i-lucide-search"
           class="md:max-w-xs"
         />
         <USelect
           v-model="statusFilter"
           :items="[
-            { label: 'All statuses', value: 'all' },
-            { label: 'Active', value: 'active' },
-            { label: 'Inactive', value: 'inactive' },
+            { label: t('applications.filters.allStatuses'), value: 'all' },
+            { label: t('applications.filters.active'), value: 'active' },
+            { label: t('applications.filters.inactive'), value: 'inactive' },
           ]"
           class="w-36"
         />
         <span class="ml-auto text-sm text-(--ui-text-muted)">
-          {{ total }} applications
+          {{ t('applications.count', { total }) }}
         </span>
       </div>
 
@@ -480,22 +490,24 @@ onMounted(() => void load())
       <DataTable
         :rows="rows"
         :columns="[
-          { key: 'name', label: 'Application' },
-          { key: 'limits', label: 'Limits' },
-          { key: 'scopes', label: 'Scopes' },
-          { key: 'status', label: 'Status' },
-          { key: 'updated_at', label: 'Updated' },
+          { key: 'name', label: t('applications.table.application') },
+          { key: 'limits', label: t('applications.table.limits') },
+          { key: 'scopes', label: t('applications.table.scopes') },
+          { key: 'status', label: t('applications.table.status') },
+          { key: 'updated_at', label: t('applications.table.updated') },
           { key: 'actions', label: '', class: 'text-right' },
         ]"
         :loading="loading"
         :row-key="(row) => row.application_id as number"
         :empty-title="
-          search ? 'No matching applications' : 'No applications yet'
+          search
+            ? t('applications.empty.matchingTitle')
+            : t('applications.empty.title')
         "
         :empty-description="
           search
-            ? 'Try a different search.'
-            : 'Create the first application to get started.'
+            ? t('applications.empty.searchDescription')
+            : t('applications.empty.description')
         "
       >
         <template #cell-name="{ row }">
@@ -511,7 +523,7 @@ onMounted(() => void load())
               </div>
               <div class="truncate font-mono text-xs text-(--ui-text-muted)">
                 #{{ row.application_id }} ·
-                {{ row.default_shell ?? 'default shell' }}
+                {{ row.default_shell ?? t('applications.limits.defaultShell') }}
               </div>
             </div>
           </div>
@@ -519,19 +531,34 @@ onMounted(() => void load())
         <template #cell-limits="{ row }">
           <span class="text-xs text-(--ui-text-muted)">
             <template v-if="row.max_timeout_ms">
-              timeout {{ formatMilliseconds(row.max_timeout_ms as number)
+              {{
+                t('applications.limits.timeout', {
+                  value: formatMilliseconds(row.max_timeout_ms as number),
+                })
               }}<br />
             </template>
-            <template v-else>no timeout<br /></template>
-            <template v-if="row.max_output_bytes">
-              output {{ formatBytes(row.max_output_bytes as number) }}
+            <template v-else>
+              {{ t('applications.limits.noTimeout') }}<br />
             </template>
-            <template v-else>unlimited output</template>
+            <template v-if="row.max_output_bytes">
+              {{
+                t('applications.limits.output', {
+                  value: formatBytes(row.max_output_bytes as number),
+                })
+              }}
+            </template>
+            <template v-else>
+              {{ t('applications.limits.unlimitedOutput') }}
+            </template>
           </span>
         </template>
         <template #cell-scopes="{ row }">
           <UBadge variant="subtle" color="neutral" size="sm">
-            {{ (row.default_scopes as string[]).length }} scopes
+            {{
+              t('applications.limits.scopes', {
+                count: (row.default_scopes as string[]).length,
+              })
+            }}
           </UBadge>
         </template>
         <template #cell-status="{ row }">
@@ -551,7 +578,7 @@ onMounted(() => void load())
               variant="ghost"
               color="neutral"
               size="sm"
-              aria-label="Edit application"
+              :aria-label="t('applications.actions.edit')"
               @click="startEdit(row as unknown as ApplicationResponse)"
             />
             <UButton
@@ -559,7 +586,7 @@ onMounted(() => void load())
               variant="ghost"
               color="neutral"
               size="sm"
-              aria-label="Application tokens"
+              :aria-label="t('applications.actions.tokens')"
               @click="openTokenDrawer(row as unknown as ApplicationResponse)"
             />
           </div>
@@ -571,7 +598,7 @@ onMounted(() => void load())
         class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
       >
         <span class="text-sm text-(--ui-text-muted)">
-          Page {{ page }} of {{ totalPages }}
+          {{ t('applications.pagination', { page, totalPages }) }}
         </span>
         <UPagination
           v-model:page="page"
@@ -587,8 +614,8 @@ onMounted(() => void load())
       v-model:open="drawerOpen"
       :title="
         editing?.application_id === 0
-          ? 'Create application'
-          : 'Edit application'
+          ? t('applications.drawer.createTitle')
+          : t('applications.drawer.editTitle')
       "
       :dismissible="!saving"
       @update:open="handleApplicationDrawerOpen"
@@ -604,24 +631,30 @@ onMounted(() => void load())
             <div
               class="text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
             >
-              General
+              {{ t('applications.sections.general') }}
             </div>
-            <UFormField label="Name">
-              <UInput v-model="editing.name" placeholder="e.g. code-agent" />
+            <UFormField :label="t('applications.fields.name')">
+              <UInput
+                v-model="editing.name"
+                :placeholder="t('applications.placeholders.name')"
+              />
             </UFormField>
             <UFormField
-              label="Workspace template"
-              hint="Optional template directory copied into new workspaces"
+              :label="t('applications.fields.workspaceTemplate')"
+              :hint="t('applications.hints.workspaceTemplate')"
             >
               <UInput
                 v-model="editing.workspace_template"
-                placeholder="e.g. web-app-template"
+                :placeholder="t('applications.placeholders.workspaceTemplate')"
               />
             </UFormField>
-            <UFormField label="Default shell">
-              <UInput v-model="editing.default_shell" placeholder="/bin/bash" />
+            <UFormField :label="t('applications.fields.defaultShell')">
+              <UInput
+                v-model="editing.default_shell"
+                :placeholder="t('applications.placeholders.defaultShell')"
+              />
             </UFormField>
-            <UFormField label="Scopes">
+            <UFormField :label="t('shared.token.scopes')">
               <UCheckboxGroup
                 v-model="editing.default_scopes"
                 :items="[...AVAILABLE_SCOPES]"
@@ -633,39 +666,39 @@ onMounted(() => void load())
             <div
               class="text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
             >
-              Resource limits
+              {{ t('applications.sections.resourceLimits') }}
             </div>
             <div class="grid grid-cols-2 gap-3">
-              <UFormField label="Max timeout (ms)">
+              <UFormField :label="t('applications.fields.maxTimeout')">
                 <UInput
                   v-model.number="editing.max_timeout_ms"
                   type="number"
                   min="0"
-                  placeholder="Unlimited"
+                  :placeholder="t('applications.placeholders.unlimited')"
                 />
               </UFormField>
-              <UFormField label="Max output (bytes)">
+              <UFormField :label="t('applications.fields.maxOutput')">
                 <UInput
                   v-model.number="editing.max_output_bytes"
                   type="number"
                   min="0"
-                  placeholder="Unlimited"
+                  :placeholder="t('applications.placeholders.unlimited')"
                 />
               </UFormField>
-              <UFormField label="Max file (bytes)">
+              <UFormField :label="t('applications.fields.maxFile')">
                 <UInput
                   v-model.number="editing.max_file_bytes"
                   type="number"
                   min="0"
-                  placeholder="Unlimited"
+                  :placeholder="t('applications.placeholders.unlimited')"
                 />
               </UFormField>
-              <UFormField label="Max sessions">
+              <UFormField :label="t('applications.fields.maxSessions')">
                 <UInput
                   v-model.number="editing.max_sessions"
                   type="number"
                   min="0"
-                  placeholder="Unlimited"
+                  :placeholder="t('applications.placeholders.unlimited')"
                 />
               </UFormField>
             </div>
@@ -674,10 +707,10 @@ onMounted(() => void load())
             >
               <div>
                 <div class="text-sm font-medium text-(--ui-text-highlighted)">
-                  Network access
+                  {{ t('applications.fields.networkAccess') }}
                 </div>
                 <div class="text-xs text-(--ui-text-muted)">
-                  Allow outbound network for sessions
+                  {{ t('applications.hints.networkAccess') }}
                 </div>
               </div>
               <USwitch v-model="editing.network_enabled" />
@@ -688,10 +721,10 @@ onMounted(() => void load())
             >
               <div>
                 <div class="text-sm font-medium text-(--ui-text-highlighted)">
-                  Active
+                  {{ t('applications.fields.active') }}
                 </div>
                 <div class="text-xs text-(--ui-text-muted)">
-                  Inactive applications cannot authenticate
+                  {{ t('applications.hints.active') }}
                 </div>
               </div>
               <USwitch v-model="editing.is_active" />
@@ -702,13 +735,13 @@ onMounted(() => void load())
             <div
               class="text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
             >
-              Approval reviewer
+              {{ t('applications.sections.approvalReviewer') }}
             </div>
-            <UFormField label="Mode">
+            <UFormField :label="t('applications.fields.mode')">
               <USelect
                 v-model="editing.approval_mode"
                 :items="
-                  APPROVAL_MODES as unknown as {
+                  approvalModes as unknown as {
                     label: string
                     value: string
                   }[]
@@ -717,28 +750,28 @@ onMounted(() => void load())
               />
             </UFormField>
             <template v-if="editing.approval_mode === 'enabled'">
-              <UFormField label="Responses API base URL">
+              <UFormField :label="t('applications.fields.endpoint')">
                 <UInput
                   v-model="editing.approval_endpoint"
-                  placeholder="https://api.openai.com/v1"
+                  :placeholder="t('applications.placeholders.endpoint')"
                 />
               </UFormField>
-              <UFormField label="Model">
+              <UFormField :label="t('applications.fields.model')">
                 <UInput
                   v-model="editing.approval_model"
-                  placeholder="Reviewer model"
+                  :placeholder="t('applications.placeholders.model')"
                 />
               </UFormField>
               <UFormField
-                label="API key"
-                hint="Leave blank to keep the stored key"
+                :label="t('applications.fields.apiKey')"
+                :hint="t('applications.hints.apiKey')"
               >
                 <div class="flex gap-2">
                   <UInput
                     v-model="editing.approval_api_key"
                     type="password"
                     autocomplete="new-password"
-                    placeholder="Enter an application reviewer key"
+                    :placeholder="t('applications.placeholders.apiKey')"
                     class="min-w-0 flex-1"
                     @input="editing.clear_approval_api_key = false"
                   />
@@ -748,46 +781,46 @@ onMounted(() => void load())
                     icon="i-lucide-trash-2"
                     variant="outline"
                     color="error"
-                    aria-label="Clear application reviewer API key"
+                    :aria-label="t('applications.actions.clearApiKey')"
                     @click="clearApplicationKey"
                   />
                 </div>
               </UFormField>
               <div class="grid gap-4 sm:grid-cols-3">
-                <UFormField label="Timeout (ms)">
+                <UFormField :label="t('applications.fields.timeout')">
                   <UInput
                     v-model.number="editing.approval_timeout_ms"
                     type="number"
                     min="100"
                     max="30000"
-                    placeholder="Global default"
+                    :placeholder="t('applications.placeholders.globalDefault')"
                   />
                 </UFormField>
-                <UFormField label="Max input (bytes)">
+                <UFormField :label="t('applications.fields.maxInput')">
                   <UInput
                     v-model.number="editing.approval_max_input_bytes"
                     type="number"
                     min="1"
                     max="524288"
-                    placeholder="Global default"
+                    :placeholder="t('applications.placeholders.globalDefault')"
                   />
                 </UFormField>
-                <UFormField label="Concurrent reviews">
+                <UFormField :label="t('applications.fields.concurrentReviews')">
                   <UInput
                     v-model.number="editing.approval_max_concurrent"
                     type="number"
                     min="1"
                     max="64"
-                    placeholder="Global default"
+                    :placeholder="t('applications.placeholders.globalDefault')"
                   />
                 </UFormField>
-                <UFormField label="Max output tokens">
+                <UFormField :label="t('applications.fields.maxOutputTokens')">
                   <UInput
                     v-model.number="editing.approval_max_output_tokens"
                     type="number"
                     min="256"
                     max="8192"
-                    placeholder="Global default"
+                    :placeholder="t('applications.placeholders.globalDefault')"
                   />
                 </UFormField>
               </div>
@@ -801,21 +834,25 @@ onMounted(() => void load())
                   :loading="approvalTesting"
                   @click="testApplicationApproval"
                 >
-                  Test application reviewer
+                  {{ t('applications.actions.testReviewer') }}
                 </UButton>
                 <span class="text-xs text-(--ui-text-muted)">
-                  Tests the saved application configuration without executing a
-                  tool.
+                  {{ t('applications.hints.testReviewer') }}
                 </span>
               </div>
               <UAlert
                 v-if="approvalTestResult"
                 :title="
                   approvalTestResult.ok
-                    ? 'Reviewer test passed'
-                    : 'Reviewer test failed'
+                    ? t('applications.approvalTest.passed')
+                    : t('applications.approvalTest.failed')
                 "
-                :description="`${approvalTestResult.message} (${approvalTestResult.latency_ms} ms)`"
+                :description="
+                  t('applications.approvalTest.description', {
+                    message: approvalTestResult.message,
+                    latency: approvalTestResult.latency_ms,
+                  })
+                "
                 :color="approvalTestResult.ok ? 'success' : 'error'"
                 variant="subtle"
               />
@@ -842,7 +879,7 @@ onMounted(() => void load())
               }
             "
           >
-            Cancel
+            {{ t('shared.confirm.cancel') }}
           </UButton>
           <UButton
             type="submit"
@@ -852,8 +889,8 @@ onMounted(() => void load())
           >
             {{
               editing?.application_id === 0
-                ? 'Create application'
-                : 'Save changes'
+                ? t('applications.actions.create')
+                : t('applications.actions.saveChanges')
             }}
           </UButton>
         </div>
@@ -863,7 +900,7 @@ onMounted(() => void load())
     <!-- Tokens drawer -->
     <UDrawer
       v-model:open="tokenDrawerOpen"
-      title="Application tokens"
+      :title="t('applications.tokens.title')"
       @update:open="handleTokenDrawerOpen"
     >
       <template #body>
@@ -889,22 +926,25 @@ onMounted(() => void load())
 
           <div class="space-y-4 rounded-lg border border-(--ui-border) p-4">
             <div class="text-sm font-semibold text-(--ui-text-highlighted)">
-              Create a token
+              {{ t('shared.token.createTitle') }}
             </div>
-            <UFormField label="Token name">
+            <UFormField :label="t('shared.token.tokenName')">
               <UInput
                 v-model="tokenName"
-                placeholder="e.g. ci-agent"
+                :placeholder="t('applications.placeholders.tokenName')"
                 @keyup.enter="createToken"
               />
             </UFormField>
-            <UFormField label="Scopes">
+            <UFormField :label="t('shared.token.scopes')">
               <UCheckboxGroup
                 v-model="tokenScopes"
                 :items="[...AVAILABLE_SCOPES]"
               />
             </UFormField>
-            <UFormField label="Expires at" hint="Optional">
+            <UFormField
+              :label="t('shared.token.expiresAt')"
+              :hint="t('shared.token.optional')"
+            >
               <UInput v-model="tokenExpiresAt" type="datetime-local" />
             </UFormField>
             <UButton
@@ -914,14 +954,14 @@ onMounted(() => void load())
               :disabled="!tokenName.trim()"
               @click="createToken"
             >
-              Create token
+              {{ t('shared.token.create') }}
             </UButton>
           </div>
 
           <UAlert
             v-if="revealedToken"
-            title="Copy this token now"
-            description="The full token is shown only once and cannot be retrieved later."
+            :title="t('shared.token.copyTitle')"
+            :description="t('shared.token.copyDescription')"
             color="warning"
             variant="subtle"
           >
@@ -934,7 +974,7 @@ onMounted(() => void load())
             <div
               class="mb-2 text-sm font-semibold text-(--ui-text-highlighted)"
             >
-              Active tokens
+              {{ t('shared.token.active') }}
             </div>
             <div v-if="visibleTokens.length" class="space-y-2">
               <div
@@ -949,13 +989,22 @@ onMounted(() => void load())
                     {{ token.token_name }}
                   </div>
                   <div class="mt-0.5 text-xs text-(--ui-text-muted)">
-                    Created {{ formatDateTime(token.created_at) }}
+                    {{
+                      t('shared.token.created', {
+                        time: formatDateTime(token.created_at),
+                      })
+                    }}
                     <template v-if="token.expires_at">
-                      · expires {{ formatDateTime(token.expires_at) }}
+                      ·
+                      {{
+                        t('shared.token.expires', {
+                          time: formatDateTime(token.expires_at),
+                        })
+                      }}
                     </template>
                   </div>
                   <div class="text-xs text-(--ui-text-dimmed)">
-                    {{ token.scopes.join(', ') || 'no scopes' }}
+                    {{ token.scopes.join(', ') || t('shared.token.noScopes') }}
                   </div>
                 </div>
                 <UButton
@@ -963,7 +1012,11 @@ onMounted(() => void load())
                   variant="ghost"
                   color="error"
                   size="sm"
-                  :aria-label="`Revoke ${token.token_name}`"
+                  :aria-label="
+                    t('shared.token.revokeAriaLabel', {
+                      tokenName: token.token_name,
+                    })
+                  "
                   @click="
                     () => {
                       revokeTarget = token
@@ -973,14 +1026,19 @@ onMounted(() => void load())
               </div>
             </div>
             <p v-else class="text-sm text-(--ui-text-muted)">
-              No tokens for this application yet.
+              {{ t('applications.tokens.noTokens') }}
             </p>
             <div
               v-if="tokenTotalPages > 1"
               class="mt-3 flex items-center justify-between border-t border-(--ui-border) pt-3"
             >
               <span class="text-xs text-(--ui-text-muted)">
-                Page {{ tokenPage }} of {{ tokenTotalPages }}
+                {{
+                  t('shared.token.pagination', {
+                    page: tokenPage,
+                    totalPages: tokenTotalPages,
+                  })
+                }}
               </span>
               <UPagination
                 v-model:page="tokenPage"
@@ -997,13 +1055,15 @@ onMounted(() => void load())
     <!-- Revoke token confirm -->
     <ConfirmModal
       v-model:open="revokeModalOpen"
-      title="Revoke token"
+      :title="t('applications.confirmations.revokeTitle')"
       :description="
         revokeTarget
-          ? `Clients using ${revokeTarget.token_name} will lose access immediately.`
+          ? t('applications.confirmations.revokeDescription', {
+              tokenName: revokeTarget.token_name,
+            })
           : undefined
       "
-      confirm-label="Revoke"
+      :confirm-label="t('shared.token.revoke')"
       confirm-color="error"
       :loading="revoking"
       @confirm="confirmRevokeToken"

@@ -1,7 +1,9 @@
 import type { ApprovalMessages } from './approval'
+import type { ApplicationsMessages } from './applications'
 import type { AuditMessages } from './audit'
 import type { AuthMessages } from './auth'
 import type { DashboardMessages } from './dashboard'
+import type { UsersMessages } from './users'
 
 export interface MessageSchema {
   app: {
@@ -41,6 +43,8 @@ export interface MessageSchema {
   dashboard: DashboardMessages
   audit: AuditMessages
   approval: ApprovalMessages
+  users: UsersMessages
+  applications: ApplicationsMessages
   shared: {
     confirm: {
       cancel: string
@@ -61,6 +65,23 @@ export interface MessageSchema {
     token: {
       copyAriaLabel: string
       copied: string
+      create: string
+      revoke: string
+      createTitle: string
+      copyTitle: string
+      copyDescription: string
+      active: string
+      created: string
+      expires: string
+      noScopes: string
+      pagination: string
+      tokenName: string
+      scopes: string
+      expiresAt: string
+      optional: string
+      revokeAriaLabel: string
+      createdNotification: string
+      revokedNotification: string
     }
     notifications: {
       copied: string

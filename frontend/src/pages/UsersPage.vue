@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   createAdminMcpToken,
   createAdminUser,
@@ -28,6 +29,7 @@ const AVAILABLE_SCOPES = [
 type AvailableScope = (typeof AVAILABLE_SCOPES)[number]
 
 const { success, error: notifyError } = useNotify()
+const { t } = useI18n()
 
 const rows = ref<UserResponse[]>([])
 const loading = ref(false)
@@ -71,7 +73,7 @@ async function load(): Promise<void> {
     total.value = result.total
   } catch (err) {
     if (sequence === loadSequence) {
-      error.value = err instanceof Error ? err.message : 'Failed to load users'
+      error.value = err instanceof Error ? err.message : t('users.errors.load')
     }
   } finally {
     if (sequence === loadSequence) loading.value = false
@@ -164,12 +166,14 @@ function handleUserDrawerOpen(open: boolean): void {
 function validateUser(): string | null {
   const form = editing.value
   if (!form) return null
-  if (!form.login_name.trim()) return 'Login name is required'
-  if (!form.display_name.trim()) return 'Display name is required'
-  if (!form.email.trim()) return 'Email is required'
-  if (form.user_id === 0 && !form.password) return 'Password is required'
+  if (!form.login_name.trim()) return t('users.validation.loginNameRequired')
+  if (!form.display_name.trim())
+    return t('users.validation.displayNameRequired')
+  if (!form.email.trim()) return t('users.validation.emailRequired')
+  if (form.user_id === 0 && !form.password)
+    return t('users.validation.passwordRequired')
   if (form.user_id === 0 && form.password.length < 8)
-    return 'Password must be at least 8 characters'
+    return t('users.validation.passwordLength')
   return null
 }
 
@@ -189,7 +193,12 @@ async function saveUser(): Promise<void> {
         is_admin: editing.value.is_admin,
         workspace_root: null,
       })
-      success('User created', `${editing.value.login_name} can now sign in`)
+      success(
+        t('users.notifications.userCreated'),
+        t('users.notifications.userCreatedDescription', {
+          login: editing.value.login_name,
+        }),
+      )
     } else {
       await updateAdminUser(editing.value.user_id, {
         display_name: editing.value.display_name.trim(),
@@ -198,14 +207,14 @@ async function saveUser(): Promise<void> {
         is_admin: editing.value.is_admin,
         is_active: editing.value.is_active,
       })
-      success('User updated', editing.value.login_name)
+      success(t('users.notifications.userUpdated'), editing.value.login_name)
     }
     userDrawerOpen.value = false
     editing.value = null
     await load()
   } catch (err) {
     userFormError.value =
-      err instanceof Error ? err.message : 'Failed to save user'
+      err instanceof Error ? err.message : t('users.errors.save')
   } finally {
     savingUser.value = false
   }
@@ -227,12 +236,15 @@ async function confirmDeactivate(): Promise<void> {
   deactivating.value = true
   try {
     await deactivateAdminUser(deactivateTarget.value.user_id)
-    success('User deactivated', deactivateTarget.value.login_name)
+    success(
+      t('users.notifications.userDeactivated'),
+      deactivateTarget.value.login_name,
+    )
     deactivateTarget.value = null
     await load()
   } catch (err) {
     notifyError(
-      'Failed to deactivate user',
+      t('users.errors.deactivate'),
       err instanceof Error ? err.message : undefined,
     )
   } finally {
@@ -249,11 +261,11 @@ async function activateUser(row: UserResponse): Promise<void> {
       is_admin: row.is_admin,
       is_active: true,
     })
-    success('User activated', row.login_name)
+    success(t('users.notifications.userActivated'), row.login_name)
     await load()
   } catch (err) {
     notifyError(
-      'Failed to activate user',
+      t('users.errors.activate'),
       err instanceof Error ? err.message : undefined,
     )
   }
@@ -281,7 +293,7 @@ function openReset(row: UserResponse): void {
 async function confirmReset(): Promise<void> {
   if (!resetTarget.value || resetting.value) return
   if (newPassword.value.length < 8) {
-    resetError.value = 'Password must be at least 8 characters'
+    resetError.value = t('users.validation.passwordLength')
     return
   }
   resetting.value = true
@@ -290,12 +302,15 @@ async function confirmReset(): Promise<void> {
     await resetAdminUserPassword(resetTarget.value.user_id, {
       password: newPassword.value,
     })
-    success('Password reset', resetTarget.value.login_name)
+    success(
+      t('users.notifications.passwordReset'),
+      resetTarget.value.login_name,
+    )
     resetTarget.value = null
     newPassword.value = ''
   } catch (err) {
     resetError.value =
-      err instanceof Error ? err.message : 'Failed to reset password'
+      err instanceof Error ? err.message : t('users.errors.reset')
   } finally {
     resetting.value = false
   }
@@ -366,7 +381,7 @@ async function loadTokens(): Promise<void> {
     }
   } catch (err) {
     notifyError(
-      'Failed to load MCP tokens',
+      t('users.errors.loadTokens'),
       err instanceof Error ? err.message : undefined,
     )
   }
@@ -391,10 +406,10 @@ async function createToken(): Promise<void> {
     })
     tokenName.value = ''
     await loadTokens()
-    success('Token created')
+    success(t('shared.token.createdNotification'))
   } catch (err) {
     notifyError(
-      'Failed to create token',
+      t('users.errors.createToken'),
       err instanceof Error ? err.message : undefined,
     )
   } finally {
@@ -407,12 +422,15 @@ async function confirmRevokeToken(): Promise<void> {
   revoking.value = true
   try {
     await deleteAdminMcpToken(revokeTarget.value.token_id)
-    success('Token revoked', revokeTarget.value.token_name)
+    success(
+      t('shared.token.revokedNotification'),
+      revokeTarget.value.token_name,
+    )
     revokeTarget.value = null
     await loadTokens()
   } catch (err) {
     notifyError(
-      'Failed to revoke token',
+      t('users.errors.revokeToken'),
       err instanceof Error ? err.message : undefined,
     )
   } finally {
@@ -425,20 +443,18 @@ onMounted(() => void load())
 
 <template>
   <div class="space-y-6">
-    <PageHeader
-      title="Users"
-      description="Manage web users, roles and MCP tokens"
-    >
+    <PageHeader>
       <template #actions>
         <UButton
           icon="i-lucide-refresh-cw"
           variant="outline"
           color="neutral"
           :loading="loading"
+          :aria-label="t('users.actions.refresh')"
           @click="load"
         />
         <UButton icon="i-lucide-user-plus" @click="startCreate">
-          Create user
+          {{ t('users.actions.create') }}
         </UButton>
       </template>
     </PageHeader>
@@ -451,7 +467,7 @@ onMounted(() => void load())
       >
         <UInput
           v-model="search"
-          placeholder="Search by name, login or email…"
+          :placeholder="t('users.searchPlaceholder')"
           leading-icon="i-lucide-search"
           class="md:max-w-xs"
           @keyup.enter="onSearchEnter"
@@ -460,23 +476,23 @@ onMounted(() => void load())
           <USelect
             v-model="roleFilter"
             :items="[
-              { label: 'All roles', value: 'all' },
-              { label: 'Admins', value: 'admin' },
-              { label: 'Users', value: 'user' },
+              { label: t('users.filters.allRoles'), value: 'all' },
+              { label: t('users.filters.admins'), value: 'admin' },
+              { label: t('users.filters.users'), value: 'user' },
             ]"
             class="w-36"
           />
           <USelect
             v-model="statusFilter"
             :items="[
-              { label: 'All statuses', value: 'all' },
-              { label: 'Active', value: 'active' },
-              { label: 'Inactive', value: 'inactive' },
+              { label: t('users.filters.allStatuses'), value: 'all' },
+              { label: t('users.filters.active'), value: 'active' },
+              { label: t('users.filters.inactive'), value: 'inactive' },
             ]"
             class="w-36"
           />
           <span class="ml-auto text-sm text-(--ui-text-muted)">
-            {{ rows.length }} of {{ total }} users
+            {{ t('users.count', { shown: rows.length, total }) }}
           </span>
         </div>
       </div>
@@ -486,21 +502,31 @@ onMounted(() => void load())
       <DataTable
         :rows="rows"
         :columns="[
-          { key: 'login_name', label: 'User', sortable: true },
-          { key: 'role', label: 'Role' },
-          { key: 'status', label: 'Status' },
-          { key: 'last_login_at', label: 'Last login', sortable: true },
-          { key: 'updated_at', label: 'Updated', sortable: true },
+          { key: 'login_name', label: t('users.table.user'), sortable: true },
+          { key: 'role', label: t('users.table.role') },
+          { key: 'status', label: t('users.table.status') },
+          {
+            key: 'last_login_at',
+            label: t('users.table.lastLogin'),
+            sortable: true,
+          },
+          {
+            key: 'updated_at',
+            label: t('users.table.updated'),
+            sortable: true,
+          },
           { key: 'actions', label: '', class: 'text-right' },
         ]"
         :loading="loading"
         :row-key="(row) => row.user_id as number"
         :sort="sort"
-        :empty-title="search ? 'No matching users' : 'No users yet'"
+        :empty-title="
+          search ? t('users.empty.matchingTitle') : t('users.empty.title')
+        "
         :empty-description="
           search
-            ? 'Try a different search or filter.'
-            : 'Create the first user to get started.'
+            ? t('users.empty.searchDescription')
+            : t('users.empty.description')
         "
         @update:sort="changeSort"
       >
@@ -527,9 +553,11 @@ onMounted(() => void load())
         </template>
         <template #cell-role="{ row }">
           <UBadge v-if="row.is_admin" color="primary" variant="soft" size="sm">
-            Admin
+            {{ t('users.roles.admin') }}
           </UBadge>
-          <span v-else class="text-sm text-(--ui-text-muted)">User</span>
+          <span v-else class="text-sm text-(--ui-text-muted)">
+            {{ t('users.roles.user') }}
+          </span>
         </template>
         <template #cell-status="{ row }">
           <StatusBadge
@@ -556,7 +584,7 @@ onMounted(() => void load())
               variant="ghost"
               color="neutral"
               size="sm"
-              aria-label="Edit user"
+              :aria-label="t('users.actions.edit')"
               @click="startEdit(row as unknown as UserResponse)"
             />
             <UButton
@@ -564,21 +592,21 @@ onMounted(() => void load())
               variant="ghost"
               color="neutral"
               size="sm"
-              aria-label="MCP tokens"
+              :aria-label="t('users.actions.tokens')"
               @click="openTokenDrawer(row as unknown as UserResponse)"
             />
             <UDropdownMenu
               :items="[
                 [
                   {
-                    label: 'Reset password',
+                    label: t('users.actions.resetPassword'),
                     icon: 'i-lucide-refresh-ccw',
                     onSelect: () => openReset(row as unknown as UserResponse),
                   },
                   {
                     label: (row.is_active as boolean)
-                      ? 'Deactivate'
-                      : 'Activate',
+                      ? t('users.actions.deactivate')
+                      : t('users.actions.activate'),
                     icon: (row.is_active as boolean)
                       ? 'i-lucide-user-x'
                       : 'i-lucide-user-check',
@@ -599,7 +627,7 @@ onMounted(() => void load())
                 variant="ghost"
                 color="neutral"
                 size="sm"
-                aria-label="More actions"
+                :aria-label="t('users.actions.more')"
               />
             </UDropdownMenu>
           </div>
@@ -611,7 +639,7 @@ onMounted(() => void load())
         class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
       >
         <span class="text-sm text-(--ui-text-muted)">
-          Page {{ page }} of {{ pageCount }}
+          {{ t('users.pagination', { page, totalPages: pageCount }) }}
         </span>
         <UPagination
           v-model:page="page"
@@ -625,7 +653,11 @@ onMounted(() => void load())
     <!-- User create/edit drawer -->
     <UDrawer
       v-model:open="userDrawerOpen"
-      :title="editing?.user_id === 0 ? 'Create user' : 'Edit user'"
+      :title="
+        editing?.user_id === 0
+          ? t('users.drawer.createTitle')
+          : t('users.drawer.editTitle')
+      "
       :dismissible="!savingUser"
       @update:open="handleUserDrawerOpen"
     >
@@ -636,44 +668,44 @@ onMounted(() => void load())
           class="space-y-5"
           @submit.prevent="saveUser"
         >
-          <UFormField label="Login name">
+          <UFormField :label="t('users.fields.loginName')">
             <UInput
               v-model="editing.login_name"
               name="login_name"
               autocomplete="off"
               :disabled="editing.user_id !== 0"
-              placeholder="e.g. alice"
+              :placeholder="t('users.placeholders.loginName')"
             />
           </UFormField>
           <UFormField
             v-if="editing.user_id === 0"
-            label="Password"
-            hint="At least 8 characters"
+            :label="t('users.fields.password')"
+            :hint="t('users.hints.password')"
           >
             <UInput
               v-model="editing.password"
               name="password"
               type="password"
               autocomplete="new-password"
-              placeholder="••••••••"
+              :placeholder="t('users.placeholders.password')"
             />
           </UFormField>
-          <UFormField label="Display name">
+          <UFormField :label="t('users.fields.displayName')">
             <UInput
               v-model="editing.display_name"
               name="display_name"
-              placeholder="e.g. Alice"
+              :placeholder="t('users.placeholders.displayName')"
             />
           </UFormField>
-          <UFormField label="Email">
+          <UFormField :label="t('users.fields.email')">
             <UInput
               v-model="editing.email"
               name="email"
               type="email"
-              placeholder="alice@example.com"
+              :placeholder="t('users.placeholders.email')"
             />
           </UFormField>
-          <UFormField label="Timezone">
+          <UFormField :label="t('users.fields.timezone')">
             <USelectMenu
               v-model="editing.timezone"
               :items="timezones().map((zone) => ({ label: zone, value: zone }))"
@@ -684,8 +716,8 @@ onMounted(() => void load())
           </UFormField>
           <UFormField
             v-if="editing.user_id !== 0"
-            label="Workspace root"
-            hint="Assigned by the server; changeable only via database"
+            :label="t('users.fields.workspaceRoot')"
+            :hint="t('users.hints.workspaceRoot')"
           >
             <UInput
               :model-value="editing.workspace_root"
@@ -697,10 +729,10 @@ onMounted(() => void load())
             <div class="flex items-center justify-between">
               <div>
                 <div class="text-sm font-medium text-(--ui-text-highlighted)">
-                  Administrator
+                  {{ t('users.fields.administrator') }}
                 </div>
                 <div class="text-xs text-(--ui-text-muted)">
-                  Full access to the control plane
+                  {{ t('users.hints.administrator') }}
                 </div>
               </div>
               <USwitch v-model="editing.is_admin" />
@@ -711,10 +743,10 @@ onMounted(() => void load())
             >
               <div>
                 <div class="text-sm font-medium text-(--ui-text-highlighted)">
-                  Active
+                  {{ t('users.fields.active') }}
                 </div>
                 <div class="text-xs text-(--ui-text-muted)">
-                  Inactive users cannot sign in
+                  {{ t('users.hints.active') }}
                 </div>
               </div>
               <USwitch v-model="editing.is_active" />
@@ -740,7 +772,7 @@ onMounted(() => void load())
               }
             "
           >
-            Cancel
+            {{ t('shared.confirm.cancel') }}
           </UButton>
           <UButton
             type="submit"
@@ -748,7 +780,11 @@ onMounted(() => void load())
             :loading="savingUser"
             :disabled="savingUser"
           >
-            {{ editing?.user_id === 0 ? 'Create user' : 'Save changes' }}
+            {{
+              editing?.user_id === 0
+                ? t('users.actions.create')
+                : t('users.actions.saveChanges')
+            }}
           </UButton>
         </div>
       </template>
@@ -757,13 +793,16 @@ onMounted(() => void load())
     <!-- Reset password modal -->
     <ConfirmModal
       v-model:open="resetModalOpen"
-      title="Reset password"
+      :title="t('users.confirmations.resetTitle')"
       :description="
         resetTarget
-          ? `Set a new password for ${resetTarget.display_name} (${resetTarget.login_name}).`
+          ? t('users.confirmations.resetDescription', {
+              displayName: resetTarget.display_name,
+              login: resetTarget.login_name,
+            })
           : undefined
       "
-      confirm-label="Reset password"
+      :confirm-label="t('users.actions.resetPassword')"
       :loading="resetting"
       @confirm="confirmReset"
     >
@@ -771,7 +810,7 @@ onMounted(() => void load())
         <UInput
           v-model="newPassword"
           type="password"
-          placeholder="New password"
+          :placeholder="t('users.placeholders.newPassword')"
           autocomplete="new-password"
         />
         <UAlert
@@ -786,13 +825,15 @@ onMounted(() => void load())
     <!-- Deactivate confirm modal -->
     <ConfirmModal
       v-model:open="deactivateModalOpen"
-      title="Deactivate user"
+      :title="t('users.confirmations.deactivateTitle')"
       :description="
         deactivateTarget
-          ? `${deactivateTarget.display_name} will no longer be able to sign in. Sessions are revoked.`
+          ? t('users.confirmations.deactivateDescription', {
+              displayName: deactivateTarget.display_name,
+            })
           : undefined
       "
-      confirm-label="Deactivate"
+      :confirm-label="t('users.actions.deactivate')"
       confirm-color="error"
       :loading="deactivating"
       @confirm="confirmDeactivate"
@@ -801,7 +842,7 @@ onMounted(() => void load())
     <!-- MCP tokens drawer -->
     <UDrawer
       v-model:open="tokenDrawerOpen"
-      title="MCP tokens"
+      :title="t('users.tokens.title')"
       @update:open="handleTokenDrawerOpen"
     >
       <template #body>
@@ -827,22 +868,25 @@ onMounted(() => void load())
 
           <div class="space-y-4 rounded-lg border border-(--ui-border) p-4">
             <div class="text-sm font-semibold text-(--ui-text-highlighted)">
-              Create a token
+              {{ t('shared.token.createTitle') }}
             </div>
-            <UFormField label="Token name">
+            <UFormField :label="t('shared.token.tokenName')">
               <UInput
                 v-model="tokenName"
-                placeholder="e.g. my-mcp-client"
+                :placeholder="t('users.placeholders.tokenName')"
                 @keyup.enter="createToken"
               />
             </UFormField>
-            <UFormField label="Scopes">
+            <UFormField :label="t('shared.token.scopes')">
               <UCheckboxGroup
                 v-model="tokenScopes"
                 :items="[...AVAILABLE_SCOPES]"
               />
             </UFormField>
-            <UFormField label="Expires at" hint="Optional">
+            <UFormField
+              :label="t('shared.token.expiresAt')"
+              :hint="t('shared.token.optional')"
+            >
               <UInput v-model="tokenExpiresAt" type="datetime-local" />
             </UFormField>
             <UButton
@@ -852,14 +896,14 @@ onMounted(() => void load())
               :disabled="!tokenName.trim()"
               @click="createToken"
             >
-              Create token
+              {{ t('shared.token.create') }}
             </UButton>
           </div>
 
           <UAlert
             v-if="revealedToken"
-            title="Copy this token now"
-            description="The full token is shown only once and cannot be retrieved later."
+            :title="t('shared.token.copyTitle')"
+            :description="t('shared.token.copyDescription')"
             color="warning"
             variant="subtle"
           >
@@ -872,7 +916,7 @@ onMounted(() => void load())
             <div
               class="mb-2 text-sm font-semibold text-(--ui-text-highlighted)"
             >
-              Active tokens
+              {{ t('shared.token.active') }}
             </div>
             <div v-if="visibleTokens.length" class="space-y-2">
               <div
@@ -887,13 +931,22 @@ onMounted(() => void load())
                     {{ token.token_name }}
                   </div>
                   <div class="mt-0.5 text-xs text-(--ui-text-muted)">
-                    Created {{ formatDateTime(token.created_at) }}
+                    {{
+                      t('shared.token.created', {
+                        time: formatDateTime(token.created_at),
+                      })
+                    }}
                     <template v-if="token.expires_at">
-                      · expires {{ formatDateTime(token.expires_at) }}
+                      ·
+                      {{
+                        t('shared.token.expires', {
+                          time: formatDateTime(token.expires_at),
+                        })
+                      }}
                     </template>
                   </div>
                   <div class="text-xs text-(--ui-text-dimmed)">
-                    {{ token.scopes.join(', ') || 'no scopes' }}
+                    {{ token.scopes.join(', ') || t('shared.token.noScopes') }}
                   </div>
                 </div>
                 <UButton
@@ -901,7 +954,11 @@ onMounted(() => void load())
                   variant="ghost"
                   color="error"
                   size="sm"
-                  :aria-label="`Revoke ${token.token_name}`"
+                  :aria-label="
+                    t('shared.token.revokeAriaLabel', {
+                      tokenName: token.token_name,
+                    })
+                  "
                   @click="
                     () => {
                       revokeTarget = token
@@ -911,14 +968,19 @@ onMounted(() => void load())
               </div>
             </div>
             <p v-else class="text-sm text-(--ui-text-muted)">
-              No tokens for this user yet.
+              {{ t('users.tokens.noTokens') }}
             </p>
             <div
               v-if="tokenTotalPages > 1"
               class="mt-3 flex items-center justify-between border-t border-(--ui-border) pt-3"
             >
               <span class="text-xs text-(--ui-text-muted)">
-                Page {{ tokenPage }} of {{ tokenTotalPages }}
+                {{
+                  t('shared.token.pagination', {
+                    page: tokenPage,
+                    totalPages: tokenTotalPages,
+                  })
+                }}
               </span>
               <UPagination
                 v-model:page="tokenPage"
@@ -935,13 +997,15 @@ onMounted(() => void load())
     <!-- Revoke token confirm -->
     <ConfirmModal
       v-model:open="revokeModalOpen"
-      title="Revoke token"
+      :title="t('users.confirmations.revokeTitle')"
       :description="
         revokeTarget
-          ? `Clients using ${revokeTarget.token_name} will lose access immediately.`
+          ? t('users.confirmations.revokeDescription', {
+              tokenName: revokeTarget.token_name,
+            })
           : undefined
       "
-      confirm-label="Revoke"
+      :confirm-label="t('shared.token.revoke')"
       confirm-color="error"
       :loading="revoking"
       @confirm="confirmRevokeToken"

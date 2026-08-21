@@ -1,8 +1,10 @@
 import type { MessageSchema } from './schema'
+import { zhCN as applications } from './applications'
 import { zhCN as approval } from './approval'
 import { zhCN as audit } from './audit'
 import { zhCN as auth } from './auth'
 import { zhCN as dashboard } from './dashboard'
+import { zhCN as users } from './users'
 
 const zhCN = {
   app: {
@@ -42,6 +44,8 @@ const zhCN = {
   dashboard,
   audit,
   approval,
+  users,
+  applications,
   shared: {
     confirm: {
       cancel: '取消',
@@ -62,6 +66,23 @@ const zhCN = {
     token: {
       copyAriaLabel: '复制令牌',
       copied: '令牌已复制',
+      create: '创建令牌',
+      revoke: '撤销',
+      createTitle: '创建令牌',
+      copyTitle: '请立即复制此令牌',
+      copyDescription: '完整令牌只显示一次，之后无法再次获取。',
+      active: '活跃令牌',
+      created: '创建于 {time}',
+      expires: '过期于 {time}',
+      noScopes: '无权限范围',
+      pagination: '第 {page} 页，共 {totalPages} 页',
+      tokenName: '令牌名称',
+      scopes: '权限范围',
+      expiresAt: '过期时间',
+      optional: '可选',
+      revokeAriaLabel: '撤销 {tokenName}',
+      createdNotification: '令牌已创建',
+      revokedNotification: '令牌已撤销',
     },
     notifications: {
       copied: '已复制',
