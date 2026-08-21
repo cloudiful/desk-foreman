@@ -4,7 +4,7 @@ use sqlx::{PgPool, Row};
 
 use crate::db::types::{
     ListWorkspaceBindingsParams, Page, TakeoverConflictReason, WorkspaceBindingResponse,
-    WorkspaceLeaseStatusRow, WorkspaceLeaseTakeoverLockRow,
+    WorkspaceLeaseStatusResponse, WorkspaceLeaseStatusRow, WorkspaceLeaseTakeoverLockRow,
 };
 
 /// Outcome of an atomic, stale-guarded write-lease takeover attempt.
@@ -256,6 +256,7 @@ pub async fn acquire_workspace_write_lease_takeover(
                 write_lease_owner: locked.write_lease_owner,
                 write_lease_acquired_at: locked.write_lease_acquired_at,
                 write_lease_expires_at: locked.write_lease_expires_at,
+                db_now: locked.db_now,
             };
             Ok(TakeoverOutcome::Conflict { reason, current })
         }
@@ -310,7 +311,7 @@ fn classify_takeover(
 /// `threshold_seconds` older than the supplied database clock. Uses
 /// `chrono`'s duration arithmetic against UTC and clamps negative elapsed
 /// times to zero (clock-skew defense).
-fn lease_is_stale(
+pub(crate) fn lease_is_stale(
     db_now: DateTime<Utc>,
     acquired_at: DateTime<Utc>,
     threshold_seconds: u64,
@@ -318,6 +319,34 @@ fn lease_is_stale(
     let elapsed_seconds = (db_now - acquired_at).num_seconds().max(0);
     let threshold = i64::try_from(threshold_seconds).unwrap_or(i64::MAX);
     elapsed_seconds >= threshold
+}
+
+/// Convert a lease row into the response shared by the status and takeover
+/// conflict endpoints. The row and threshold use the same database clock
+/// semantics as takeover classification.
+pub(crate) fn workspace_lease_status_response(
+    row: WorkspaceLeaseStatusRow,
+    stale_threshold_seconds: u64,
+) -> WorkspaceLeaseStatusResponse {
+    let stale = row.write_lease_owner.is_some()
+        && row.write_lease_acquired_at.is_some_and(|acquired_at| {
+            lease_is_stale(row.db_now, acquired_at, stale_threshold_seconds)
+        });
+
+    WorkspaceLeaseStatusResponse {
+        workspace_binding_id: row.workspace_binding_id,
+        application_id: row.application_id,
+        workspace_key: row.workspace_key,
+        is_active: row.is_active,
+        lifecycle_state: row.lifecycle_state,
+        resource_kind: row.resource_kind,
+        resource_id: row.resource_id,
+        write_lease_owner: row.write_lease_owner,
+        write_lease_acquired_at: row.write_lease_acquired_at,
+        write_lease_expires_at: row.write_lease_expires_at,
+        stale,
+        stale_threshold_seconds,
+    }
 }
 
 /// Read the current lease state for an active resource workspace binding.
@@ -456,8 +485,9 @@ mod tests {
 
     use super::{
         TakeoverDecision, WorkspaceLeaseTakeoverLockRow, classify_takeover, lease_is_stale,
+        workspace_lease_status_response,
     };
-    use crate::db::types::TakeoverConflictReason;
+    use crate::db::types::{TakeoverConflictReason, WorkspaceLeaseStatusRow};
 
     fn lock_row_with(lease_owner: Option<&str>, age_seconds: i64) -> WorkspaceLeaseTakeoverLockRow {
         let now = Utc::now();
@@ -554,5 +584,50 @@ mod tests {
             "expected_owner_mismatch"
         );
         assert_eq!(TakeoverConflictReason::NotActive.as_str(), "not_active");
+    }
+
+    #[test]
+    fn lease_status_response_serializes_stale_for_a_live_owner() {
+        let db_now = Utc::now();
+        let row = WorkspaceLeaseStatusRow {
+            workspace_binding_id: 1,
+            application_id: 1,
+            workspace_key: "code_project:abc".to_string(),
+            is_active: true,
+            lifecycle_state: "active".to_string(),
+            resource_kind: Some("code_project".to_string()),
+            resource_id: Some("abc".to_string()),
+            write_lease_owner: Some("conversation:1".to_string()),
+            write_lease_acquired_at: Some(db_now - Duration::seconds(180)),
+            write_lease_expires_at: Some(db_now + Duration::seconds(600)),
+            db_now,
+        };
+
+        let value =
+            serde_json::to_value(workspace_lease_status_response(row, 180)).expect("serialize");
+        assert_eq!(value["stale"], true);
+        assert_eq!(value["stale_threshold_seconds"], 180);
+    }
+
+    #[test]
+    fn lease_status_response_serializes_false_without_a_lease() {
+        let db_now = Utc::now();
+        let row = WorkspaceLeaseStatusRow {
+            workspace_binding_id: 1,
+            application_id: 1,
+            workspace_key: "code_project:abc".to_string(),
+            is_active: true,
+            lifecycle_state: "active".to_string(),
+            resource_kind: Some("code_project".to_string()),
+            resource_id: Some("abc".to_string()),
+            write_lease_owner: None,
+            write_lease_acquired_at: None,
+            write_lease_expires_at: None,
+            db_now,
+        };
+
+        let value =
+            serde_json::to_value(workspace_lease_status_response(row, 180)).expect("serialize");
+        assert_eq!(value["stale"], false);
     }
 }

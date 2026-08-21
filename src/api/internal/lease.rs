@@ -287,10 +287,10 @@ pub async fn takeover_resource_workspace_lease(
                 error: conflict_message(reason),
                 reason: reason_str,
                 stale_threshold_seconds: LEASE_TAKEOVER_STALE_THRESHOLD_SECONDS,
-                current: WorkspaceLeaseStatusResponse {
-                    stale_threshold_seconds: LEASE_TAKEOVER_STALE_THRESHOLD_SECONDS,
-                    ..current.into()
-                },
+                current: queries::workspace_lease_status_response(
+                    current,
+                    LEASE_TAKEOVER_STALE_THRESHOLD_SECONDS,
+                ),
             }))
         }
         TakeoverOutcome::NotFound => Err(AppError::not_found("workspace binding not found")),
@@ -321,16 +321,17 @@ pub async fn resource_workspace_lease_status(
     let (_application_id, binding) =
         resolve_resource_binding_for_application(&state, &headers, &resource_kind, &resource_id)
             .await?;
-    let mut status: WorkspaceLeaseStatusResponse = queries::find_active_resource_workspace_lease(
+    let status = queries::find_active_resource_workspace_lease(
         &state.db,
         binding.application_id,
         &resource_kind,
         &resource_id,
     )
     .await?
-    .ok_or_else(|| AppError::not_found("workspace binding not found"))?
-    .into();
-    status.stale_threshold_seconds = LEASE_TAKEOVER_STALE_THRESHOLD_SECONDS;
+    .map(|row| {
+        queries::workspace_lease_status_response(row, LEASE_TAKEOVER_STALE_THRESHOLD_SECONDS)
+    })
+    .ok_or_else(|| AppError::not_found("workspace binding not found"))?;
     Ok(Json(status))
 }
 

@@ -590,6 +590,8 @@ pub struct WorkspaceLeaseStatusRow {
     pub write_lease_owner: Option<String>,
     pub write_lease_acquired_at: Option<DateTime<Utc>>,
     pub write_lease_expires_at: Option<DateTime<Utc>>,
+    /// Database NOW() captured with the lease row.
+    pub db_now: DateTime<Utc>,
 }
 
 /// Authenticated lease-status response exposed via the lease-status read
@@ -609,25 +611,8 @@ pub struct WorkspaceLeaseStatusResponse {
     pub write_lease_owner: Option<String>,
     pub write_lease_acquired_at: Option<DateTime<Utc>>,
     pub write_lease_expires_at: Option<DateTime<Utc>>,
+    pub stale: bool,
     pub stale_threshold_seconds: u64,
-}
-
-impl From<WorkspaceLeaseStatusRow> for WorkspaceLeaseStatusResponse {
-    fn from(row: WorkspaceLeaseStatusRow) -> Self {
-        Self {
-            workspace_binding_id: row.workspace_binding_id,
-            application_id: row.application_id,
-            workspace_key: row.workspace_key,
-            is_active: row.is_active,
-            lifecycle_state: row.lifecycle_state,
-            resource_kind: row.resource_kind,
-            resource_id: row.resource_id,
-            write_lease_owner: row.write_lease_owner,
-            write_lease_acquired_at: row.write_lease_acquired_at,
-            write_lease_expires_at: row.write_lease_expires_at,
-            stale_threshold_seconds: 0,
-        }
-    }
 }
 
 fn default_lease_ttl_seconds() -> u64 {
@@ -1217,6 +1202,7 @@ mod tests {
                 write_lease_owner: Some("conversation:a".to_string()),
                 write_lease_acquired_at: Some(Utc::now()),
                 write_lease_expires_at: Some(Utc::now()),
+                stale: true,
                 stale_threshold_seconds: 180,
             },
         };
@@ -1227,28 +1213,6 @@ mod tests {
             value["current"]["write_lease_owner"],
             json!("conversation:a")
         );
-    }
-
-    #[test]
-    fn lease_status_row_converts_to_response_with_zero_threshold() {
-        let row = super::WorkspaceLeaseStatusRow {
-            workspace_binding_id: 1,
-            application_id: 1,
-            workspace_key: "code_project:abc".to_string(),
-            is_active: true,
-            lifecycle_state: "active".to_string(),
-            resource_kind: Some("code_project".to_string()),
-            resource_id: Some("abc".to_string()),
-            write_lease_owner: None,
-            write_lease_acquired_at: None,
-            write_lease_expires_at: None,
-        };
-        let response: super::WorkspaceLeaseStatusResponse = row.into();
-        // The handler always overwrites stale_threshold_seconds with the
-        // server constant; the conversion leaves it at zero so the omission
-        // is visible.
-        assert_eq!(response.stale_threshold_seconds, 0);
-        assert_eq!(response.write_lease_owner, None);
-        assert_eq!(response.lifecycle_state, "active");
+        assert_eq!(value["current"]["stale"], json!(true));
     }
 }

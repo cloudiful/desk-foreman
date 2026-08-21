@@ -12,7 +12,8 @@ SELECT
     resource_id,
     write_lease_owner,
     write_lease_acquired_at,
-    write_lease_expires_at
+    write_lease_expires_at,
+    NOW() AS db_now
 FROM workspace_bindings
 WHERE workspace_binding_id = $1
 LIMIT 1;
