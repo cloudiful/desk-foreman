@@ -1,8 +1,12 @@
 <script setup lang="ts">
-defineProps<{
+import { useI18n } from 'vue-i18n'
+
+const props = defineProps<{
   title?: string
   description?: string
 }>()
+
+const { t } = useI18n()
 </script>
 
 <template>
@@ -11,10 +15,13 @@ defineProps<{
   >
     <UIcon name="i-lucide-inbox" class="size-8 text-(--ui-text-dimmed)" />
     <p class="text-sm font-medium text-(--ui-text-muted)">
-      {{ title ?? 'No data' }}
+      {{ props.title ?? t('shared.empty.noData') }}
     </p>
-    <p v-if="description" class="max-w-sm text-xs text-(--ui-text-dimmed)">
-      {{ description }}
+    <p
+      v-if="props.description"
+      class="max-w-sm text-xs text-(--ui-text-dimmed)"
+    >
+      {{ props.description }}
     </p>
     <div v-if="$slots.actions" class="mt-2">
       <slot name="actions" />

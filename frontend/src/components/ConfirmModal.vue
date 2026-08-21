@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
 const props = defineProps<{
   title: string
   description?: string
@@ -19,6 +21,7 @@ const emit = defineEmits<{
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
+const { t } = useI18n()
 </script>
 
 <template>
@@ -42,7 +45,7 @@ const open = defineModel<boolean>('open', { required: true })
           }
         "
       >
-        Cancel
+        {{ t('shared.confirm.cancel') }}
       </UButton>
       <UButton
         :color="props.confirmColor ?? 'primary'"
@@ -51,7 +54,7 @@ const open = defineModel<boolean>('open', { required: true })
         type="button"
         @click="emit('confirm')"
       >
-        {{ props.confirmLabel ?? 'Confirm' }}
+        {{ props.confirmLabel ?? t('shared.confirm.confirm') }}
       </UButton>
     </template>
   </UModal>

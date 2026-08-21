@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
 defineProps<{
   title: string
   description?: string
 }>()
+
+const { t } = useI18n()
 </script>
 
 <template>
@@ -11,7 +15,12 @@ defineProps<{
   >
     <div class="min-w-0">
       <div class="flex items-center gap-2 text-sm text-(--ui-text-muted)">
-        <UBreadcrumb :items="[{ label: 'Control plane' }, { label: title }]" />
+        <UBreadcrumb
+          :items="[
+            { label: t('shared.pageHeader.controlPlane') },
+            { label: title },
+          ]"
+        />
       </div>
       <h1
         class="mt-1 text-2xl font-semibold tracking-tight text-(--ui-text-highlighted)"

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 export interface DataColumn {
   key: string
@@ -19,10 +20,18 @@ const props = withDefaults(
   }>(),
   {
     loading: false,
-    emptyTitle: 'No data',
-    emptyDescription: 'Nothing to show yet.',
+    emptyTitle: undefined,
+    emptyDescription: undefined,
     rowKey: 'id',
   },
+)
+
+const { t } = useI18n()
+const emptyTitle = computed(
+  () => props.emptyTitle ?? t('shared.dataTable.noData'),
+)
+const emptyDescription = computed(
+  () => props.emptyDescription ?? t('shared.dataTable.nothingToShow'),
 )
 
 const sort = defineModel<{ key: string; dir: 'asc' | 'desc' } | null>('sort', {
@@ -121,7 +130,7 @@ function toggleSort(column: DataColumn): void {
       class="flex items-center justify-center gap-2 py-8 text-sm text-(--ui-text-muted)"
     >
       <UIcon name="i-lucide-loader-2" class="size-4 animate-spin" />
-      Loading…
+      {{ t('shared.dataTable.loading') }}
     </div>
   </div>
 </template>

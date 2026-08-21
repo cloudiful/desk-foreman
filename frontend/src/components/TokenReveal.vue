@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { useNotify } from '../composables/useNotify'
 
 defineProps<{
@@ -6,6 +7,7 @@ defineProps<{
 }>()
 
 const { copy } = useNotify()
+const { t } = useI18n()
 </script>
 
 <template>
@@ -22,8 +24,8 @@ const { copy } = useNotify()
       size="xs"
       variant="outline"
       color="neutral"
-      :aria-label="'Copy token'"
-      @click="copy(token, 'Token copied')"
+      :aria-label="t('shared.token.copyAriaLabel')"
+      @click="copy(token, t('shared.token.copied'))"
     />
   </div>
 </template>

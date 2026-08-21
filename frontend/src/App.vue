@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onErrorCaptured, ref } from 'vue'
 import { RouterView } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 
 const renderError = ref(false)
+const { t } = useI18n()
 
 onErrorCaptured(() => {
   renderError.value = true
@@ -16,16 +18,19 @@ function reload(): void {
 
 <template>
   <UApp>
-    <div v-if="renderError" class="flex min-h-screen items-center justify-center p-6">
+    <div
+      v-if="renderError"
+      class="flex min-h-screen items-center justify-center p-6"
+    >
       <UAlert
-        title="The page could not be rendered"
-        description="Reload the page to recover the application."
+        :title="t('app.errorBoundary.title')"
+        :description="t('app.errorBoundary.description')"
         color="error"
         variant="subtle"
       >
         <template #actions>
           <UButton color="error" variant="soft" @click="reload">
-            Reload
+            {{ t('app.errorBoundary.reload') }}
           </UButton>
         </template>
       </UAlert>
