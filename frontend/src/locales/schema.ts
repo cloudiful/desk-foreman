@@ -1,3 +1,8 @@
+import type { ApprovalMessages } from './approval'
+import type { AuditMessages } from './audit'
+import type { AuthMessages } from './auth'
+import type { DashboardMessages } from './dashboard'
+
 export interface MessageSchema {
   app: {
     errorBoundary: {
@@ -32,6 +37,10 @@ export interface MessageSchema {
     }
     user: string
   }
+  auth: AuthMessages
+  dashboard: DashboardMessages
+  audit: AuditMessages
+  approval: ApprovalMessages
   shared: {
     confirm: {
       cancel: string
@@ -48,9 +57,6 @@ export interface MessageSchema {
     errorAlert: {
       description: string
       retry: string
-    }
-    pageHeader: {
-      controlPlane: string
     }
     token: {
       copyAriaLabel: string

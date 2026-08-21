@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { authState } from '../api/auth'
 
 const router = useRouter()
+const { t } = useI18n()
 const currentPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
@@ -11,11 +13,12 @@ const error = ref('')
 const loading = ref(false)
 
 function validate(): string | null {
-  if (!currentPassword.value) return 'Enter your current password'
+  if (!currentPassword.value)
+    return t('auth.changePassword.currentPasswordRequired')
   if (newPassword.value.length < 8)
-    return 'New password must be at least 8 characters'
+    return t('auth.changePassword.minimumLength')
   if (newPassword.value !== confirmPassword.value)
-    return 'Passwords do not match'
+    return t('auth.changePassword.mismatch')
   return null
 }
 
@@ -35,7 +38,9 @@ async function submit(): Promise<void> {
     await router.push('/')
   } catch (err) {
     error.value =
-      err instanceof Error ? err.message : 'Failed to change password'
+      err instanceof Error && err.message
+        ? err.message
+        : t('auth.errors.changePasswordFailed')
   } finally {
     loading.value = false
   }
@@ -57,10 +62,10 @@ async function submit(): Promise<void> {
           <h1
             class="text-xl font-semibold tracking-tight text-(--ui-text-highlighted)"
           >
-            Set a new password
+            {{ t('auth.changePassword.title') }}
           </h1>
           <p class="mt-1 text-sm text-(--ui-text-muted)">
-            You must change the default password before continuing
+            {{ t('auth.changePassword.subtitle') }}
           </p>
         </div>
       </div>
@@ -69,36 +74,39 @@ async function submit(): Promise<void> {
         class="space-y-4 rounded-xl border border-(--ui-border) bg-(--ui-bg) p-6 shadow-sm"
         @submit.prevent="submit"
       >
-        <UFormField label="Current password">
+        <UFormField :label="t('auth.changePassword.currentPassword')">
           <UInput
             v-model="currentPassword"
             name="current_password"
             type="password"
             autocomplete="current-password"
             size="lg"
-            placeholder="••••••••"
+            :placeholder="t('auth.login.passwordPlaceholder')"
             leading-icon="i-lucide-lock"
           />
         </UFormField>
-        <UFormField label="New password" hint="At least 8 characters">
+        <UFormField
+          :label="t('auth.changePassword.newPassword')"
+          :hint="t('auth.changePassword.newPasswordHint')"
+        >
           <UInput
             v-model="newPassword"
             name="new_password"
             type="password"
             autocomplete="new-password"
             size="lg"
-            placeholder="••••••••"
+            :placeholder="t('auth.login.passwordPlaceholder')"
             leading-icon="i-lucide-lock"
           />
         </UFormField>
-        <UFormField label="Confirm new password">
+        <UFormField :label="t('auth.changePassword.confirmPassword')">
           <UInput
             v-model="confirmPassword"
             name="confirm_password"
             type="password"
             autocomplete="new-password"
             size="lg"
-            placeholder="••••••••"
+            :placeholder="t('auth.login.passwordPlaceholder')"
             leading-icon="i-lucide-lock"
           />
         </UFormField>
@@ -118,7 +126,7 @@ async function submit(): Promise<void> {
           :loading="loading"
           leading-icon="i-lucide-check"
         >
-          Change password
+          {{ t('auth.changePassword.changePassword') }}
         </UButton>
       </form>
     </div>

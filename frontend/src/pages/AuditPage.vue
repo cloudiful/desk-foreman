@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { listAdminAuditLogs } from '../api/users'
 import { formatDateTime, formatMilliseconds } from '../utils/format'
 import { AUDIT_PAGE_SIZE, pageCount, pageOffset } from '../utils/pagination'
 import type { AuditLogResponse } from '../generated/openapi/types.gen'
+
+const { t } = useI18n()
 
 function truncateId(id: string): string {
   if (!id) return ''
@@ -40,7 +43,9 @@ async function load(): Promise<void> {
   } catch (err) {
     if (sequence === loadSequence) {
       error.value =
-        err instanceof Error ? err.message : 'Failed to load audit logs'
+        err instanceof Error && err.message
+          ? err.message
+          : t('audit.errors.load')
     }
   } finally {
     if (sequence === loadSequence) loading.value = false
@@ -61,6 +66,13 @@ function statusColor(status: string | null | undefined): string {
   if (status === 'success') return 'text-(--ui-text-success)'
   if (status && status !== 'unknown') return 'text-(--ui-text-error)'
   return 'text-(--ui-text-muted)'
+}
+
+function statusLabel(status: string | null | undefined): string {
+  if (status === 'success') return t('audit.status.success')
+  if (status === 'failure') return t('audit.status.failure')
+  if (status === 'unknown') return t('audit.status.unknown')
+  return status ?? t('audit.notAvailable')
 }
 
 function payloadPreview(payload: unknown): string {
@@ -88,16 +100,14 @@ onUnmounted(() => {
 
 <template>
   <div class="space-y-6">
-    <PageHeader
-      title="Audit log"
-      description="Immutable trail of control-plane activity"
-    >
+    <PageHeader>
       <template #actions>
         <UButton
           icon="i-lucide-refresh-cw"
           variant="outline"
           color="neutral"
           :loading="loading"
+          :aria-label="t('audit.refresh')"
           @click="load"
         />
       </template>
@@ -111,22 +121,22 @@ onUnmounted(() => {
       >
         <UInput
           v-model="actionFilter"
-          placeholder="Filter by action, actor or target…"
+          :placeholder="t('audit.filterPlaceholder')"
           leading-icon="i-lucide-search"
           class="md:max-w-sm"
         />
         <USelect
           v-model="statusFilter"
           :items="[
-            { label: 'All outcomes', value: 'all' },
-            { label: 'Success', value: 'success' },
-            { label: 'Failure', value: 'failure' },
-            { label: 'Unknown', value: 'unknown' },
+            { label: t('audit.outcomes.all'), value: 'all' },
+            { label: t('audit.outcomes.success'), value: 'success' },
+            { label: t('audit.outcomes.failure'), value: 'failure' },
+            { label: t('audit.outcomes.unknown'), value: 'unknown' },
           ]"
           class="w-36"
         />
         <span class="ml-auto text-sm text-(--ui-text-muted)">
-          {{ rows.length }} of {{ total }} events
+          {{ t('audit.eventsCount', { shown: rows.length, total }) }}
         </span>
       </div>
 
@@ -135,17 +145,17 @@ onUnmounted(() => {
       <DataTable
         :rows="rows"
         :columns="[
-          { key: 'created_at', label: 'Time' },
-          { key: 'action', label: 'Action' },
-          { key: 'actor', label: 'Actor' },
-          { key: 'target', label: 'Target' },
-          { key: 'status', label: 'Outcome' },
+          { key: 'created_at', label: t('audit.columns.time') },
+          { key: 'action', label: t('audit.columns.action') },
+          { key: 'actor', label: t('audit.columns.actor') },
+          { key: 'target', label: t('audit.columns.target') },
+          { key: 'status', label: t('audit.columns.outcome') },
           { key: 'actions', label: '', class: 'text-right' },
         ]"
         :loading="loading"
         :row-key="(row) => row.audit_id as number"
-        empty-title="No audit events"
-        empty-description="Events appear as actions are performed on the control plane."
+        :empty-title="t('audit.noEvents')"
+        :empty-description="t('audit.noEventsDescription')"
       >
         <template #cell-created_at="{ row }">
           <span class="whitespace-nowrap text-sm text-(--ui-text-muted)">
@@ -181,7 +191,7 @@ onUnmounted(() => {
             class="text-sm"
             :class="statusColor(row.status as string | null)"
           >
-            {{ row.status ?? '—' }}
+            {{ statusLabel(row.status as string | null) }}
           </span>
         </template>
         <template #cell-actions="{ row }">
@@ -191,7 +201,7 @@ onUnmounted(() => {
               variant="ghost"
               color="neutral"
               size="sm"
-              aria-label="Audit event details"
+              :aria-label="t('audit.detailsAriaLabel')"
               @click="
                 () => {
                   detail = row as unknown as AuditLogResponse
@@ -207,7 +217,7 @@ onUnmounted(() => {
         class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
       >
         <span class="text-sm text-(--ui-text-muted)">
-          Page {{ page }} of {{ totalPages }}
+          {{ t('audit.page', { page, totalPages }) }}
         </span>
         <UPagination
           v-model:page="page"
@@ -218,21 +228,29 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <UDrawer v-model:open="detailOpen" title="Audit event" :close="true">
+    <UDrawer
+      v-model:open="detailOpen"
+      :title="t('audit.detailTitle')"
+      :close="true"
+    >
       <template #body>
         <dl v-if="detail" class="space-y-3 text-sm">
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Time</dt>
+            <dt class="text-(--ui-text-muted)">{{ t('audit.detail.time') }}</dt>
             <dd>{{ formatDateTime(detail.created_at) }}</dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Action</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('audit.detail.action') }}
+            </dt>
             <dd>
               <code class="font-mono">{{ detail.action }}</code>
             </dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Actor</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('audit.detail.actor') }}
+            </dt>
             <dd>
               {{ detail.actor_type }}
               <span v-if="detail.actor_user_id" class="font-mono text-xs"
@@ -241,23 +259,31 @@ onUnmounted(() => {
             </dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Target</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('audit.detail.target') }}
+            </dt>
             <dd class="max-w-[55%] break-all font-mono text-right">
               {{ detail.target_type }} {{ detail.target_id }}
             </dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Outcome</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('audit.detail.outcome') }}
+            </dt>
             <dd :class="statusColor(detail.status)">
-              {{ detail.status ?? '—' }}
+              {{ statusLabel(detail.status) }}
             </dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Duration</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('audit.detail.duration') }}
+            </dt>
             <dd>{{ formatMilliseconds(detail.duration_ms) }}</dd>
           </div>
           <div v-if="detail.request_id" class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Request ID</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('audit.detail.requestId') }}
+            </dt>
             <dd class="max-w-[55%] break-all font-mono text-right text-xs">
               {{ detail.request_id }}
             </dd>
@@ -268,7 +294,7 @@ onUnmounted(() => {
             <dt
               class="mb-2 text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
             >
-              Payload
+              {{ t('audit.detail.payload') }}
             </dt>
             <dd>
               <pre

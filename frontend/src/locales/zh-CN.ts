@@ -1,4 +1,8 @@
 import type { MessageSchema } from './schema'
+import { zhCN as approval } from './approval'
+import { zhCN as audit } from './audit'
+import { zhCN as auth } from './auth'
+import { zhCN as dashboard } from './dashboard'
 
 const zhCN = {
   app: {
@@ -34,6 +38,10 @@ const zhCN = {
     },
     user: '用户',
   },
+  auth,
+  dashboard,
+  audit,
+  approval,
   shared: {
     confirm: {
       cancel: '取消',
@@ -50,9 +58,6 @@ const zhCN = {
     errorAlert: {
       description: '请求失败，请检查详情后重试。',
       retry: '重试',
-    },
-    pageHeader: {
-      controlPlane: '控制平面',
     },
     token: {
       copyAriaLabel: '复制令牌',

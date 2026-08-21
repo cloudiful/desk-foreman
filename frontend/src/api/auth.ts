@@ -9,6 +9,7 @@ import {
   type AuthMeResponse,
 } from './generated'
 import { requireOk } from './http'
+import { i18n } from '../i18n'
 
 const currentUser = ref<AuthMeResponse['user'] | null>(null)
 const initializing = ref(false)
@@ -42,14 +43,14 @@ async function initialize(force = false): Promise<void> {
 
 async function loginWithPassword(body: AuthLoginRequest): Promise<void> {
   const { data, response } = await login({ body })
-  await requireOk(response, 'Login failed')
+  await requireOk(response, i18n.global.t('auth.errors.loginFailed'))
   currentUser.value = data?.user ?? null
   initialized = true
 }
 
 async function logoutCurrentUser(): Promise<void> {
   const { response } = await logout()
-  await requireOk(response, 'Logout failed')
+  await requireOk(response, i18n.global.t('auth.errors.logoutFailed'))
   currentUser.value = null
   initialized = false
 }
@@ -66,7 +67,7 @@ async function changeCurrentPassword(
   const { response } = await changePassword({
     body: { current_password, new_password },
   })
-  await requireOk(response, 'Failed to change password')
+  await requireOk(response, i18n.global.t('auth.errors.changePasswordFailed'))
   await initialize(true)
 }
 

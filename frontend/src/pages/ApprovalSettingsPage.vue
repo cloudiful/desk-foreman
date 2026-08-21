@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   getAdminApprovalSettings,
   testAdminApprovalSettings,
@@ -13,6 +14,7 @@ import type {
 } from '../generated/openapi/types.gen'
 
 const { success, error: notifyError } = useNotify()
+const { t } = useI18n()
 
 const settings = ref<ApprovalSettingsResponse | null>(null)
 const enabled = ref(true)
@@ -47,7 +49,9 @@ async function load(): Promise<void> {
     maxOutputTokens.value = settings.value.max_output_tokens
   } catch (err) {
     error.value =
-      err instanceof Error ? err.message : 'Failed to load approval settings'
+      err instanceof Error && err.message
+        ? err.message
+        : t('approval.errors.load')
   } finally {
     loading.value = false
   }
@@ -85,13 +89,15 @@ async function save(): Promise<void> {
     maxOutputTokens.value = settings.value.max_output_tokens
     apiKey.value = ''
     clearApiKey.value = false
-    success('Approval settings saved')
+    success(t('approval.notifications.saved'))
   } catch (err) {
     error.value =
-      err instanceof Error ? err.message : 'Failed to update approval settings'
+      err instanceof Error && err.message
+        ? err.message
+        : t('approval.errors.update')
     notifyError(
-      'Failed to save approval settings',
-      err instanceof Error ? err.message : undefined,
+      t('approval.notifications.saveFailed'),
+      err instanceof Error && err.message ? err.message : undefined,
     )
   } finally {
     saving.value = false
@@ -105,7 +111,9 @@ async function test(): Promise<void> {
     testResult.value = await testAdminApprovalSettings()
   } catch (err) {
     error.value =
-      err instanceof Error ? err.message : 'Failed to test approval reviewer'
+      err instanceof Error && err.message
+        ? err.message
+        : t('approval.errors.test')
   } finally {
     testing.value = false
   }
@@ -121,16 +129,14 @@ onMounted(() => void load())
 
 <template>
   <div class="space-y-6">
-    <PageHeader
-      title="Approval reviewer"
-      description="Automatic review of risky operations before they run"
-    >
+    <PageHeader>
       <template #actions>
         <UButton
           icon="i-lucide-refresh-cw"
           variant="outline"
           color="neutral"
           :loading="loading"
+          :aria-label="t('approval.refresh')"
           @click="load"
         />
         <UButton
@@ -141,7 +147,7 @@ onMounted(() => void load())
           :disabled="!enabled"
           @click="test"
         >
-          Test reviewer
+          {{ t('approval.testReviewer') }}
         </UButton>
         <UButton
           type="submit"
@@ -150,7 +156,7 @@ onMounted(() => void load())
           :loading="saving"
           :disabled="saving"
         >
-          Save settings
+          {{ t('approval.saveSettings') }}
         </UButton>
       </template>
     </PageHeader>
@@ -162,7 +168,7 @@ onMounted(() => void load())
         <div
           class="text-xs font-medium uppercase tracking-wide text-(--ui-text-muted)"
         >
-          Configured
+          {{ t('approval.configured') }}
         </div>
         <div
           class="mt-2 flex items-center gap-2 text-lg font-semibold text-(--ui-text-highlighted)"
@@ -180,13 +186,15 @@ onMounted(() => void load())
             "
             class="size-5"
           />
-          {{ settings?.configured ? 'Yes' : 'No' }}
+          {{ settings?.configured ? t('approval.yes') : t('approval.no') }}
         </div>
         <p
           v-if="settings?.updated_at"
           class="mt-1 text-xs text-(--ui-text-dimmed)"
         >
-          Updated {{ formatDateTime(settings.updated_at) }}
+          {{
+            t('approval.updated', { time: formatDateTime(settings.updated_at) })
+          }}
         </p>
       </div>
       <div
@@ -195,7 +203,7 @@ onMounted(() => void load())
         <div
           class="text-xs font-medium uppercase tracking-wide text-(--ui-text-muted)"
         >
-          API key
+          {{ t('approval.apiKey') }}
         </div>
         <div
           class="mt-2 flex items-center gap-2 text-lg font-semibold text-(--ui-text-highlighted)"
@@ -213,10 +221,23 @@ onMounted(() => void load())
             "
             class="size-5"
           />
-          {{ settings?.api_key_configured ? 'Configured' : 'Missing' }}
+          {{
+            settings?.api_key_configured
+              ? t('approval.configured')
+              : t('approval.missing')
+          }}
         </div>
         <p class="mt-1 text-xs text-(--ui-text-dimmed)">
-          Source: {{ settings?.api_key_source ?? 'none' }}
+          {{
+            t('approval.source', {
+              source:
+                settings?.api_key_source === 'database'
+                  ? t('approval.apiKeySources.database')
+                  : settings?.api_key_source === 'environment'
+                    ? t('approval.apiKeySources.environment')
+                    : t('approval.apiKeySources.none'),
+            })
+          }}
         </p>
       </div>
       <div
@@ -225,7 +246,7 @@ onMounted(() => void load())
         <div
           class="text-xs font-medium uppercase tracking-wide text-(--ui-text-muted)"
         >
-          Mode
+          {{ t('approval.mode') }}
         </div>
         <div
           class="mt-2 flex items-center gap-2 text-lg font-semibold text-(--ui-text-highlighted)"
@@ -234,10 +255,10 @@ onMounted(() => void load())
             :name="enabled ? 'i-lucide-bot' : 'i-lucide-bot-off'"
             class="size-5 text-(--ui-text-dimmed)"
           />
-          {{ enabled ? 'Enabled' : 'Disabled' }}
+          {{ enabled ? t('approval.enabled') : t('approval.disabled') }}
         </div>
         <p class="mt-1 text-xs text-(--ui-text-dimmed)">
-          Applies to applications inheriting global settings
+          {{ t('approval.inheritedDescription') }}
         </p>
       </div>
     </div>
@@ -256,27 +277,33 @@ onMounted(() => void load())
         >
           <div>
             <div class="text-sm font-medium text-(--ui-text-highlighted)">
-              Enable automatic review
+              {{ t('approval.enableAutomaticReview') }}
             </div>
             <div class="text-xs text-(--ui-text-muted)">
-              Applications using inherit will call this reviewer when enabled
+              {{ t('approval.automaticReviewDescription') }}
             </div>
           </div>
           <USwitch v-model="enabled" />
         </div>
         <UFormField
-          label="Responses API base URL"
+          :label="t('approval.endpoint')"
           class="md:col-span-2"
-          hint="Base URL of an OpenAI-compatible Responses API"
+          :hint="t('approval.endpointHint')"
         >
-          <UInput v-model="endpoint" placeholder="https://api.openai.com/v1" />
+          <UInput
+            v-model="endpoint"
+            :placeholder="t('approval.endpointPlaceholder')"
+          />
         </UFormField>
-        <UFormField label="Model">
-          <UInput v-model="model" placeholder="Reviewer model" />
+        <UFormField :label="t('approval.model')">
+          <UInput
+            v-model="model"
+            :placeholder="t('approval.modelPlaceholder')"
+          />
         </UFormField>
         <UFormField
-          label="API key"
-          hint="Leave blank to keep the stored key"
+          :label="t('approval.apiKey')"
+          :hint="t('approval.apiKeyHint')"
           class="md:col-span-2"
         >
           <div class="flex gap-2">
@@ -284,7 +311,7 @@ onMounted(() => void load())
               v-model="apiKey"
               type="password"
               autocomplete="new-password"
-              placeholder="Enter a new reviewer API key"
+              :placeholder="t('approval.apiKeyPlaceholder')"
               class="min-w-0 flex-1"
               @input="clearApiKey = false"
             />
@@ -294,12 +321,12 @@ onMounted(() => void load())
               icon="i-lucide-trash-2"
               variant="outline"
               color="error"
-              aria-label="Clear stored API key"
+              :aria-label="t('approval.clearStoredApiKey')"
               @click="clearStoredKey"
             />
           </div>
         </UFormField>
-        <UFormField label="Timeout (ms)">
+        <UFormField :label="t('approval.timeout')">
           <UInput
             v-model.number="timeoutMs"
             type="number"
@@ -307,7 +334,7 @@ onMounted(() => void load())
             max="30000"
           />
         </UFormField>
-        <UFormField label="Max input (bytes)">
+        <UFormField :label="t('approval.maxInput')">
           <UInput
             v-model.number="maxInputBytes"
             type="number"
@@ -315,7 +342,7 @@ onMounted(() => void load())
             max="524288"
           />
         </UFormField>
-        <UFormField label="Concurrent reviews">
+        <UFormField :label="t('approval.concurrentReviews')">
           <UInput
             v-model.number="maxConcurrent"
             type="number"
@@ -323,7 +350,7 @@ onMounted(() => void load())
             max="64"
           />
         </UFormField>
-        <UFormField label="Max output tokens">
+        <UFormField :label="t('approval.maxOutputTokens')">
           <UInput
             v-model.number="maxOutputTokens"
             type="number"
@@ -335,8 +362,15 @@ onMounted(() => void load())
       <UAlert
         v-if="testResult"
         class="mt-4"
-        :title="testResult.ok ? 'Reviewer test passed' : 'Reviewer test failed'"
-        :description="`${testResult.message} (${testResult.latency_ms} ms)`"
+        :title="
+          testResult.ok ? t('approval.testPassed') : t('approval.testFailed')
+        "
+        :description="
+          t('approval.testDescription', {
+            message: testResult.message,
+            latency: testResult.latency_ms,
+          })
+        "
         :color="testResult.ok ? 'success' : 'error'"
         variant="subtle"
       />

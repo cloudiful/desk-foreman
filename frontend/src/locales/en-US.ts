@@ -1,4 +1,8 @@
 import type { MessageSchema } from './schema'
+import approval from './approval'
+import audit from './audit'
+import auth from './auth'
+import dashboard from './dashboard'
 
 const enUS = {
   app: {
@@ -34,6 +38,10 @@ const enUS = {
     },
     user: 'User',
   },
+  auth,
+  dashboard,
+  audit,
+  approval,
   shared: {
     confirm: {
       cancel: 'Cancel',
@@ -50,9 +58,6 @@ const enUS = {
     errorAlert: {
       description: 'The request failed. Check the details and try again.',
       retry: 'Retry',
-    },
-    pageHeader: {
-      controlPlane: 'Control plane',
     },
     token: {
       copyAriaLabel: 'Copy token',

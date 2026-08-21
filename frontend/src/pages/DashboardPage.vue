@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import {
   getAdminOperationsSummary,
@@ -10,6 +11,7 @@ import { formatRelative } from '../utils/format'
 import type { RunnerManagerResponse } from '../generated/openapi/types.gen'
 
 const router = useRouter()
+const { t } = useI18n()
 
 const summary = useAsyncData(() => getAdminOperationsSummary())
 const managers = useAsyncData(() => listAdminRunnerManagers({ limit: 5 }))
@@ -26,22 +28,22 @@ const managerStats = computed(() => {
 
 const statCards = computed(() => [
   {
-    title: 'Active runners',
+    title: t('dashboard.stats.activeRunners'),
     value: summary.data.value?.active_runners ?? 0,
     icon: 'i-lucide-play-circle',
   },
   {
-    title: 'Active sessions',
+    title: t('dashboard.stats.activeSessions'),
     value: summary.data.value?.active_sessions ?? 0,
     icon: 'i-lucide-terminal-square',
   },
   {
-    title: 'Failed operations',
+    title: t('dashboard.stats.failedOperations'),
     value: summary.data.value?.failed_operations ?? 0,
     icon: 'i-lucide-triangle-alert',
   },
   {
-    title: 'Archived workspaces',
+    title: t('dashboard.stats.archivedWorkspaces'),
     value: summary.data.value?.archived_workspaces ?? 0,
     icon: 'i-lucide-archive',
   },
@@ -64,16 +66,17 @@ onMounted(refresh)
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="Overview" description="Control plane status at a glance">
+    <PageHeader>
       <template #actions>
         <UButton
           icon="i-lucide-refresh-cw"
           variant="outline"
           color="neutral"
           :loading="summary.loading.value || managers.loading.value"
+          :aria-label="t('dashboard.refresh')"
           @click="refresh"
         >
-          Refresh
+          {{ t('dashboard.refresh') }}
         </UButton>
       </template>
     </PageHeader>
@@ -104,12 +107,16 @@ onMounted(refresh)
         >
           <div>
             <h2 class="text-sm font-semibold text-(--ui-text-highlighted)">
-              Runner managers
+              {{ t('dashboard.runnerManagers') }}
             </h2>
             <p class="text-xs text-(--ui-text-muted)">
-              {{ managerStats.online }} online ·
-              {{ managerStats.offline }} offline ·
-              {{ managerStats.disabled }} disabled
+              {{
+                t('dashboard.runnerManagersSummary', {
+                  online: managerStats.online,
+                  offline: managerStats.offline,
+                  disabled: managerStats.disabled,
+                })
+              }}
             </p>
           </div>
           <UButton
@@ -121,7 +128,7 @@ onMounted(refresh)
               }
             "
           >
-            Manage
+            {{ t('dashboard.manage') }}
           </UButton>
         </div>
 
@@ -163,14 +170,20 @@ onMounted(refresh)
               </p>
             </div>
             <div class="shrink-0 text-right text-xs text-(--ui-text-dimmed)">
-              <div>Last seen {{ formatRelative(manager.last_seen_at) }}</div>
+              <div>
+                {{
+                  t('dashboard.lastSeen', {
+                    time: formatRelative(manager.last_seen_at),
+                  })
+                }}
+              </div>
             </div>
           </li>
         </ul>
         <EmptyState
           v-else
-          title="No runner managers"
-          description="Register a runner manager to start executing workspace jobs."
+          :title="t('dashboard.noRunnerManagers')"
+          :description="t('dashboard.noRunnerManagersDescription')"
           class="py-10"
         />
       </section>
@@ -179,10 +192,10 @@ onMounted(refresh)
         class="rounded-xl border border-(--ui-border) bg-(--ui-bg) p-5 shadow-sm lg:col-span-2"
       >
         <h2 class="text-sm font-semibold text-(--ui-text-highlighted)">
-          Quick actions
+          {{ t('dashboard.quickActions') }}
         </h2>
         <p class="mt-1 text-xs text-(--ui-text-muted)">
-          Common administration tasks
+          {{ t('dashboard.commonTasks') }}
         </p>
         <div class="mt-4 space-y-2">
           <UButton
@@ -195,7 +208,7 @@ onMounted(refresh)
               }
             "
           >
-            Create a user
+            {{ t('dashboard.createUser') }}
           </UButton>
           <UButton
             block
@@ -207,7 +220,7 @@ onMounted(refresh)
               }
             "
           >
-            Create an application
+            {{ t('dashboard.createApplication') }}
           </UButton>
           <UButton
             block
@@ -219,7 +232,7 @@ onMounted(refresh)
               }
             "
           >
-            Register a runner manager
+            {{ t('dashboard.registerRunnerManager') }}
           </UButton>
         </div>
       </section>

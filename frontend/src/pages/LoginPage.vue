@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { authState } from '../api/auth'
 
 const router = useRouter()
+const { t } = useI18n()
 
 const loginName = ref('')
 const password = ref('')
@@ -12,7 +14,7 @@ const error = ref('')
 
 async function submit(): Promise<void> {
   if (!loginName.value.trim() || !password.value) {
-    error.value = 'Enter your login name and password'
+    error.value = t('auth.login.required')
     return
   }
   loading.value = true
@@ -24,7 +26,10 @@ async function submit(): Promise<void> {
     })
     await router.push('/')
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Login failed'
+    error.value =
+      err instanceof Error && err.message
+        ? err.message
+        : t('auth.errors.loginFailed')
     password.value = ''
   } finally {
     loading.value = false
@@ -47,10 +52,10 @@ async function submit(): Promise<void> {
           <h1
             class="text-xl font-semibold tracking-tight text-(--ui-text-highlighted)"
           >
-            Desk Foreman
+            {{ t('shell.productName') }}
           </h1>
           <p class="mt-1 text-sm text-(--ui-text-muted)">
-            Sign in to the control plane
+            {{ t('auth.login.subtitle') }}
           </p>
         </div>
       </div>
@@ -59,24 +64,24 @@ async function submit(): Promise<void> {
         class="space-y-4 rounded-xl border border-(--ui-border) bg-(--ui-bg) p-6 shadow-sm"
         @submit.prevent="submit"
       >
-        <UFormField label="Login name">
+        <UFormField :label="t('auth.login.loginName')">
           <UInput
             v-model="loginName"
             name="login_name"
             autocomplete="username"
             size="lg"
-            placeholder="admin"
+            :placeholder="t('auth.login.loginNamePlaceholder')"
             leading-icon="i-lucide-user"
           />
         </UFormField>
-        <UFormField label="Password">
+        <UFormField :label="t('auth.login.password')">
           <UInput
             v-model="password"
             name="password"
             type="password"
             autocomplete="current-password"
             size="lg"
-            placeholder="••••••••"
+            :placeholder="t('auth.login.passwordPlaceholder')"
             leading-icon="i-lucide-lock"
           />
         </UFormField>
@@ -96,7 +101,7 @@ async function submit(): Promise<void> {
           :loading="loading"
           leading-icon="i-lucide-log-in"
         >
-          Sign in
+          {{ t('auth.login.signIn') }}
         </UButton>
       </form>
     </div>
