@@ -101,7 +101,6 @@ export interface UsersMessages {
   }
   tokens: {
     title: string
-    active: string
     noTokens: string
   }
 }
@@ -211,7 +210,6 @@ const users: UsersMessages = {
   },
   tokens: {
     title: 'MCP tokens',
-    active: 'Active tokens',
     noTokens: 'No tokens for this user yet.',
   },
 }
@@ -319,7 +317,6 @@ export const zhCN: UsersMessages = {
   },
   tokens: {
     title: 'MCP 令牌',
-    active: '活跃令牌',
     noTokens: '此用户暂无令牌。',
   },
 }

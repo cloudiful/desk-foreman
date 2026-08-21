@@ -50,7 +50,6 @@ export interface ApplicationsMessages {
     name: string
     workspaceTemplate: string
     defaultShell: string
-    scopes: string
     maxTimeout: string
     maxOutput: string
     maxFile: string
@@ -111,7 +110,6 @@ export interface ApplicationsMessages {
   }
   tokens: {
     title: string
-    active: string
     noTokens: string
   }
   confirmations: {
@@ -172,7 +170,6 @@ const applications: ApplicationsMessages = {
     name: 'Name',
     workspaceTemplate: 'Workspace template',
     defaultShell: 'Default shell',
-    scopes: 'Scopes',
     maxTimeout: 'Max timeout (ms)',
     maxOutput: 'Max output (bytes)',
     maxFile: 'Max file (bytes)',
@@ -234,7 +231,6 @@ const applications: ApplicationsMessages = {
   },
   tokens: {
     title: 'Application tokens',
-    active: 'Active tokens',
     noTokens: 'No tokens for this application yet.',
   },
   confirmations: {
@@ -296,7 +292,6 @@ export const zhCN: ApplicationsMessages = {
     name: '名称',
     workspaceTemplate: '工作区模板',
     defaultShell: '默认 Shell',
-    scopes: '权限范围',
     maxTimeout: '最大超时（毫秒）',
     maxOutput: '最大输出（字节）',
     maxFile: '最大文件（字节）',
@@ -357,7 +352,6 @@ export const zhCN: ApplicationsMessages = {
   },
   tokens: {
     title: '应用令牌',
-    active: '活跃令牌',
     noTokens: '此应用暂无令牌。',
   },
   confirmations: {
