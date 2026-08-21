@@ -77,13 +77,14 @@ import {
   type UpdateRunnerManagerRequest,
 } from './generated'
 import { requireOk } from './http'
+import { i18n } from '../i18n'
 import { emptyPage } from '../utils/pagination'
 
 export async function listAdminUsers(
   query: NonNullable<ListUsersData['query']>,
 ): Promise<PageUserResponse> {
   const { data, response } = await listUsers({ query })
-  await requireOk(response, 'Failed to load users')
+  await requireOk(response, i18n.global.t('users.errors.load'))
   return data ?? emptyPage<UserResponse>(query.limit ?? 100, query.offset ?? 0)
 }
 
@@ -91,7 +92,7 @@ export async function listAdminRunnerManagers(
   query: ListRunnerManagersData['query'] = {},
 ): Promise<PageRunnerManagerResponse> {
   const { data, response } = await listRunnerManagers({ query })
-  await requireOk(response, 'Failed to load runner managers')
+  await requireOk(response, i18n.global.t('runnerManagers.errors.load'))
   return (
     data ??
     emptyPage<RunnerManagerResponse>(query.limit ?? 100, query.offset ?? 0)
@@ -102,8 +103,9 @@ export async function createAdminRunnerManager(
   body: CreateRunnerManagerRequest,
 ): Promise<CreateRunnerManagerResponse> {
   const { data, response } = await createRunnerManager({ body })
-  await requireOk(response, 'Failed to create runner manager')
-  if (!data) throw new Error('Failed to create runner manager')
+  const fallback = i18n.global.t('runnerManagers.errors.create')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
@@ -115,8 +117,9 @@ export async function updateAdminRunnerManager(
     path: { runner_manager_id },
     body,
   })
-  await requireOk(response, 'Failed to update runner manager')
-  if (!data) throw new Error('Failed to update runner manager')
+  const fallback = i18n.global.t('runnerManagers.errors.update')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
@@ -124,8 +127,9 @@ export async function createAdminUser(
   body: CreateUserRequest,
 ): Promise<UserResponse> {
   const { data, response } = await createUser({ body })
-  await requireOk(response, 'Failed to create user')
-  if (!data) throw new Error('Failed to create user')
+  const fallback = i18n.global.t('users.errors.save')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
@@ -134,8 +138,9 @@ export async function updateAdminUser(
   body: UpdateUserRequest,
 ): Promise<UserResponse> {
   const { data, response } = await updateUser({ path: { user_id }, body })
-  await requireOk(response, 'Failed to update user')
-  if (!data) throw new Error('Failed to update user')
+  const fallback = i18n.global.t('users.errors.save')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
@@ -144,12 +149,12 @@ export async function resetAdminUserPassword(
   body: ResetPasswordRequest,
 ): Promise<void> {
   const { response } = await resetUserPassword({ path: { user_id }, body })
-  await requireOk(response, 'Failed to reset password')
+  await requireOk(response, i18n.global.t('users.errors.reset'))
 }
 
 export async function deactivateAdminUser(user_id: number): Promise<void> {
   const { response } = await deleteUser({ path: { user_id } })
-  await requireOk(response, 'Failed to deactivate user')
+  await requireOk(response, i18n.global.t('users.errors.deactivate'))
 }
 
 export async function listAdminMcpTokens(
@@ -157,7 +162,7 @@ export async function listAdminMcpTokens(
 ): Promise<PageMcpTokenResponse> {
   const effectiveQuery = { ...query, is_active: query.is_active ?? true }
   const { data, response } = await listMcpTokens({ query: effectiveQuery })
-  await requireOk(response, 'Failed to load MCP tokens')
+  await requireOk(response, i18n.global.t('users.errors.loadTokens'))
   return (
     data ?? emptyPage<McpTokenResponse>(query.limit ?? 100, query.offset ?? 0)
   )
@@ -167,21 +172,22 @@ export async function createAdminMcpToken(
   body: CreateMcpTokenRequest,
 ): Promise<CreateMcpTokenResponse> {
   const { data, response } = await createMcpToken({ body })
-  await requireOk(response, 'Failed to create MCP token')
-  if (!data) throw new Error('Failed to create MCP token')
+  const fallback = i18n.global.t('users.errors.createToken')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
 export async function deleteAdminMcpToken(token_id: number): Promise<void> {
   const { response } = await deleteMcpToken({ path: { token_id } })
-  await requireOk(response, 'Failed to revoke MCP token')
+  await requireOk(response, i18n.global.t('users.errors.revokeToken'))
 }
 
 export async function listAdminApplications(
   query: ListApplicationsData['query'] = {},
 ): Promise<PageApplicationResponse> {
   const { data, response } = await listApplications({ query })
-  await requireOk(response, 'Failed to load applications')
+  await requireOk(response, i18n.global.t('applications.errors.load'))
   return (
     data ??
     emptyPage<ApplicationResponse>(query.limit ?? 100, query.offset ?? 0)
@@ -192,8 +198,9 @@ export async function createAdminApplication(
   body: CreateApplicationRequest,
 ): Promise<ApplicationResponse> {
   const { data, response } = await createApplication({ body })
-  await requireOk(response, 'Failed to create application')
-  if (!data) throw new Error('Failed to create application')
+  const fallback = i18n.global.t('applications.errors.save')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
@@ -205,15 +212,17 @@ export async function updateAdminApplication(
     path: { application_id },
     body,
   })
-  await requireOk(response, 'Failed to update application')
-  if (!data) throw new Error('Failed to update application')
+  const fallback = i18n.global.t('applications.errors.save')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
 export async function getAdminApprovalSettings(): Promise<ApprovalSettingsResponse> {
   const { data, response } = await getApprovalSettings()
-  await requireOk(response, 'Failed to load approval settings')
-  if (!data) throw new Error('Failed to load approval settings')
+  const fallback = i18n.global.t('approval.errors.load')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
@@ -221,15 +230,17 @@ export async function updateAdminApprovalSettings(
   body: UpdateApprovalSettingsRequest,
 ): Promise<ApprovalSettingsResponse> {
   const { data, response } = await updateApprovalSettings({ body })
-  await requireOk(response, 'Failed to update approval settings')
-  if (!data) throw new Error('Failed to update approval settings')
+  const fallback = i18n.global.t('approval.errors.update')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
 export async function testAdminApprovalSettings(): Promise<ApprovalTestResponse> {
   const { data, response } = await testApprovalSettings()
-  await requireOk(response, 'Failed to test approval reviewer')
-  if (!data) throw new Error('Failed to test approval reviewer')
+  const fallback = i18n.global.t('approval.errors.test')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
@@ -239,8 +250,9 @@ export async function testAdminApplicationApproval(
   const { data, response } = await testApplicationApproval({
     path: { application_id },
   })
-  await requireOk(response, 'Failed to test application reviewer')
-  if (!data) throw new Error('Failed to test application reviewer')
+  const fallback = i18n.global.t('applications.errors.test')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
@@ -251,7 +263,7 @@ export async function listAdminApplicationTokens(
   const { data, response } = await listApplicationTokens({
     query: effectiveQuery,
   })
-  await requireOk(response, 'Failed to load application tokens')
+  await requireOk(response, i18n.global.t('applications.errors.loadTokens'))
   return (
     data ??
     emptyPage<ApplicationTokenResponse>(query.limit ?? 100, query.offset ?? 0)
@@ -262,8 +274,9 @@ export async function createAdminApplicationToken(
   body: CreateApplicationTokenRequest,
 ): Promise<CreateApplicationTokenResponse> {
   const { data, response } = await createApplicationToken({ body })
-  await requireOk(response, 'Failed to create application token')
-  if (!data) throw new Error('Failed to create application token')
+  const fallback = i18n.global.t('applications.errors.createToken')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
@@ -271,7 +284,7 @@ export async function deleteAdminApplicationToken(
   token_id: number,
 ): Promise<void> {
   const { response } = await deleteApplicationToken({ path: { token_id } })
-  await requireOk(response, 'Failed to revoke application token')
+  await requireOk(response, i18n.global.t('applications.errors.revokeToken'))
 }
 
 export async function updateAdminApplicationToken(
@@ -282,8 +295,9 @@ export async function updateAdminApplicationToken(
     path: { token_id },
     body,
   })
-  await requireOk(response, 'Failed to update application token')
-  if (!data) throw new Error('Failed to update application token')
+  const fallback = i18n.global.t('applications.errors.save')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
@@ -292,8 +306,9 @@ export async function updateAdminMcpToken(
   body: UpdateMcpTokenRequest,
 ): Promise<McpTokenResponse> {
   const { data, response } = await updateMcpToken({ path: { token_id }, body })
-  await requireOk(response, 'Failed to update MCP token')
-  if (!data) throw new Error('Failed to update MCP token')
+  const fallback = i18n.global.t('users.errors.save')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
@@ -301,7 +316,7 @@ export async function listAdminWorkspaceBindings(
   query: ListWorkspaceBindingsData['query'] = {},
 ): Promise<PageWorkspaceBindingResponse> {
   const { data, response } = await listWorkspaceBindings({ query })
-  await requireOk(response, 'Failed to load workspace bindings')
+  await requireOk(response, i18n.global.t('workspaceBindings.errors.load'))
   return (
     data ??
     emptyPage<WorkspaceBindingResponse>(query.limit ?? 100, query.offset ?? 0)
@@ -319,8 +334,14 @@ export async function transitionAdminWorkspaceBinding(
         ? restoreWorkspaceBinding
         : resetWorkspaceBinding
   const { data, response } = await operation({ path: { binding_id } })
-  await requireOk(response, `Failed to ${action} workspace`)
-  if (!data) throw new Error(`Failed to ${action} workspace`)
+  const fallback =
+    action === 'archive'
+      ? i18n.global.t('workspaceBindings.errors.archive')
+      : action === 'restore'
+        ? i18n.global.t('workspaceBindings.errors.restore')
+        : i18n.global.t('workspaceBindings.errors.reset')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }
 
@@ -328,7 +349,7 @@ export async function listAdminAuditLogs(
   query: ListAuditLogsData['query'] = {},
 ): Promise<PageAuditLogResponse> {
   const { data, response } = await listAuditLogs({ query })
-  await requireOk(response, 'Failed to load audit logs')
+  await requireOk(response, i18n.global.t('audit.errors.load'))
   return (
     data ?? emptyPage<AuditLogResponse>(query.limit ?? 50, query.offset ?? 0)
   )
@@ -338,7 +359,7 @@ export async function listAdminRunnerSessions(
   query: ListRunnerSessionsData['query'] = {},
 ): Promise<PageRunnerSessionResponse> {
   const { data, response } = await listRunnerSessions({ query })
-  await requireOk(response, 'Failed to load runner sessions')
+  await requireOk(response, i18n.global.t('operations.errors.loadSessions'))
   return (
     data ??
     emptyPage<RunnerSessionResponse>(query.limit ?? 100, query.offset ?? 0)
@@ -349,7 +370,7 @@ export async function listAdminWorkspaceRunners(
   query: ListWorkspaceRunnersData['query'] = {},
 ): Promise<PageWorkspaceRunnerResponse> {
   const { data, response } = await listWorkspaceRunners({ query })
-  await requireOk(response, 'Failed to load workspace runners')
+  await requireOk(response, i18n.global.t('operations.errors.loadRunners'))
   return (
     data ??
     emptyPage<WorkspaceRunnerResponse>(query.limit ?? 100, query.offset ?? 0)
@@ -358,7 +379,8 @@ export async function listAdminWorkspaceRunners(
 
 export async function getAdminOperationsSummary(): Promise<OperationsSummary> {
   const { data, response } = await operationsSummary()
-  await requireOk(response, 'Failed to load operations summary')
-  if (!data) throw new Error('Failed to load operations summary')
+  const fallback = i18n.global.t('operations.errors.loadSummary')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
   return data
 }

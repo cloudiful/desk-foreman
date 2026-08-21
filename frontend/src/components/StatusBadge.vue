@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   status: string
 }>()
+
+const { t, te } = useI18n()
 
 const config = computed(() => {
   switch (props.status) {
@@ -36,6 +39,12 @@ const config = computed(() => {
     <template #leading>
       <span v-if="config.dot" class="size-1.5 rounded-full bg-current" />
     </template>
-    {{ status }}
+    {{
+      status
+        ? te(`shared.status.${status}`)
+          ? t(`shared.status.${status}`)
+          : status
+        : t('shared.status.unknown')
+    }}
   </UBadge>
 </template>

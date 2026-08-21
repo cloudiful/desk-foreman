@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   createAdminRunnerManager,
   listAdminRunnerManagers,
@@ -19,6 +20,7 @@ import type {
 } from '../generated/openapi/types.gen'
 
 const { success } = useNotify()
+const { t } = useI18n()
 
 const rows = ref<RunnerManagerResponse[]>([])
 const total = ref(0)
@@ -56,7 +58,7 @@ async function load(): Promise<void> {
   } catch (err) {
     if (sequence === loadSequence) {
       error.value =
-        err instanceof Error ? err.message : 'Failed to load runner managers'
+        err instanceof Error ? err.message : t('runnerManagers.errors.load')
     }
   } finally {
     if (sequence === loadSequence) loading.value = false
@@ -174,11 +176,11 @@ function toNumber(
 async function save(): Promise<void> {
   if (!editing.value || saving.value) return
   if (!editing.value.name.trim()) {
-    formError.value = 'Name is required'
+    formError.value = t('runnerManagers.validation.nameRequired')
     return
   }
   if (!editing.value.endpoint.trim()) {
-    formError.value = 'Endpoint is required'
+    formError.value = t('runnerManagers.validation.endpointRequired')
     return
   }
   saving.value = true
@@ -199,7 +201,10 @@ async function save(): Promise<void> {
         memory_limit: editing.value.memory_limit.trim() || '1g',
         cpu_limit: editing.value.cpu_limit.trim() || '2',
       })
-      success('Runner manager registered', editing.value.name.trim())
+      success(
+        t('runnerManagers.notifications.registered'),
+        editing.value.name.trim(),
+      )
       if (result.token) {
         createdToken.value = result
         tokenModalOpen.value = true
@@ -218,14 +223,17 @@ async function save(): Promise<void> {
         memory_limit: editing.value.memory_limit.trim() || '1g',
         cpu_limit: editing.value.cpu_limit.trim() || '2',
       })
-      success('Runner manager updated', editing.value.name.trim())
+      success(
+        t('runnerManagers.notifications.updated'),
+        editing.value.name.trim(),
+      )
     }
     drawerOpen.value = false
     editing.value = null
     await load()
   } catch (err) {
     formError.value =
-      err instanceof Error ? err.message : 'Failed to save runner manager'
+      err instanceof Error ? err.message : t('runnerManagers.errors.save')
   } finally {
     saving.value = false
   }
@@ -236,37 +244,35 @@ onMounted(() => void load())
 
 <template>
   <div class="space-y-6">
-    <PageHeader
-      title="Runner managers"
-      description="Execution agents that pull and run workspace jobs"
-    >
+    <PageHeader>
       <template #actions>
         <UButton
           icon="i-lucide-refresh-cw"
           variant="outline"
           color="neutral"
           :loading="loading"
+          :aria-label="t('runnerManagers.actions.refresh')"
           @click="load"
         />
         <UButton icon="i-lucide-plus" @click="openCreate">
-          Add runner manager
+          {{ t('runnerManagers.actions.add') }}
         </UButton>
       </template>
     </PageHeader>
 
     <div class="grid gap-4 sm:grid-cols-3">
       <StatCard
-        title="Online"
+        :title="t('runnerManagers.stats.online')"
         :value="stats.online"
         icon="i-lucide-circle-check"
       />
       <StatCard
-        title="Offline"
+        :title="t('runnerManagers.stats.offline')"
         :value="stats.offline"
         icon="i-lucide-circle-alert"
       />
       <StatCard
-        title="Disabled"
+        :title="t('runnerManagers.stats.disabled')"
         :value="stats.disabled"
         icon="i-lucide-circle-off"
       />
@@ -278,7 +284,7 @@ onMounted(() => void load())
       <div class="border-b border-(--ui-border) p-4">
         <UInput
           v-model="search"
-          placeholder="Search by name or endpoint…"
+          :placeholder="t('runnerManagers.searchPlaceholder')"
           leading-icon="i-lucide-search"
           class="md:max-w-xs"
         />
@@ -289,19 +295,23 @@ onMounted(() => void load())
       <DataTable
         :rows="rows"
         :columns="[
-          { key: 'name', label: 'Manager' },
-          { key: 'status', label: 'Status' },
-          { key: 'limits', label: 'Limits' },
-          { key: 'last_seen_at', label: 'Last seen' },
+          { key: 'name', label: t('runnerManagers.table.manager') },
+          { key: 'status', label: t('runnerManagers.table.status') },
+          { key: 'limits', label: t('runnerManagers.table.limits') },
+          { key: 'last_seen_at', label: t('runnerManagers.table.lastSeen') },
           { key: 'actions', label: '', class: 'text-right' },
         ]"
         :loading="loading"
         :row-key="(row) => row.runner_manager_id as number"
-        :empty-title="search ? 'No matching managers' : 'No runner managers'"
+        :empty-title="
+          search
+            ? t('runnerManagers.empty.matchingTitle')
+            : t('runnerManagers.empty.title')
+        "
         :empty-description="
           search
-            ? 'Try a different search.'
-            : 'Register a runner manager to execute workspace jobs.'
+            ? t('runnerManagers.empty.searchDescription')
+            : t('runnerManagers.empty.description')
         "
       >
         <template #cell-name="{ row }">
@@ -338,9 +348,13 @@ onMounted(() => void load())
         </template>
         <template #cell-limits="{ row }">
           <span class="text-xs text-(--ui-text-muted)">
-            {{ row.max_sessions }} sessions ·
-            {{ formatMilliseconds(row.max_timeout_ms as number) }} timeout ·
-            {{ formatBytes(row.max_output_bytes as number) }} output
+            {{
+              t('runnerManagers.limits', {
+                sessions: row.max_sessions,
+                timeout: formatMilliseconds(row.max_timeout_ms as number),
+                output: formatBytes(row.max_output_bytes as number),
+              })
+            }}
           </span>
         </template>
         <template #cell-last_seen_at="{ row }">
@@ -355,7 +369,7 @@ onMounted(() => void load())
               variant="ghost"
               color="neutral"
               size="sm"
-              aria-label="Edit runner manager"
+              :aria-label="t('runnerManagers.actions.edit')"
               @click="openEdit(row as unknown as RunnerManagerResponse)"
             />
           </div>
@@ -367,7 +381,7 @@ onMounted(() => void load())
         class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
       >
         <span class="text-sm text-(--ui-text-muted)">
-          Page {{ page }} of {{ totalPages }}
+          {{ t('runnerManagers.pagination', { page, totalPages }) }}
         </span>
         <UPagination
           v-model:page="page"
@@ -382,7 +396,11 @@ onMounted(() => void load())
     <UDrawer
       v-model:open="drawerOpen"
       :title="
-        editingId === null ? 'Create runner manager' : 'Edit runner manager'
+        t(
+          editingId === null
+            ? 'runnerManagers.drawer.createTitle'
+            : 'runnerManagers.drawer.editTitle',
+        )
       "
       :dismissible="!saving"
       @update:open="handleRunnerDrawerOpen"
@@ -398,42 +416,44 @@ onMounted(() => void load())
             <div
               class="text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
             >
-              Connection
+              {{ t('runnerManagers.sections.connection') }}
             </div>
-            <UFormField label="Name">
+            <UFormField :label="t('runnerManagers.fields.name')">
               <UInput
                 v-model="editing.name"
-                placeholder="e.g. homelab-docker"
+                :placeholder="t('runnerManagers.placeholders.name')"
                 :disabled="editingId !== null"
                 class="w-full"
               />
             </UFormField>
-            <UFormField label="Endpoint">
+            <UFormField :label="t('runnerManagers.fields.endpoint')">
               <UInput
                 v-model="editing.endpoint"
-                placeholder="http://runner-manager:3001"
+                :placeholder="t('runnerManagers.placeholders.endpoint')"
                 class="w-full"
               />
             </UFormField>
             <UFormField
-              label="Host workspace root"
-              hint="Optional: host path for runner workspace bind mounts; must match the workspace directory mounted into the runner manager"
+              :label="t('runnerManagers.fields.hostWorkspaceRoot')"
+              :hint="t('runnerManagers.hints.hostWorkspaceRoot')"
             >
               <UInput
                 v-model="editing.host_workspace_root"
-                placeholder="/opt/desk-foreman/vol/workspace"
+                :placeholder="
+                  t('runnerManagers.placeholders.hostWorkspaceRoot')
+                "
                 class="w-full"
               />
             </UFormField>
             <UFormField
               v-if="editingId === null"
-              label="Existing token"
-              hint="Optional: reuse a previously issued runner token"
+              :label="t('runnerManagers.fields.existingToken')"
+              :hint="t('runnerManagers.hints.existingToken')"
             >
               <UInput
                 v-model="editing.access_token"
                 type="password"
-                placeholder="Leave blank to issue a new token"
+                :placeholder="t('runnerManagers.placeholders.existingToken')"
                 autocomplete="off"
                 class="w-full"
               />
@@ -443,10 +463,10 @@ onMounted(() => void load())
             >
               <div>
                 <div class="text-sm font-medium text-(--ui-text-highlighted)">
-                  Enabled
+                  {{ t('runnerManagers.fields.enabled') }}
                 </div>
                 <div class="text-xs text-(--ui-text-muted)">
-                  Disabled managers stop receiving jobs
+                  {{ t('runnerManagers.hints.enabled') }}
                 </div>
               </div>
               <USwitch v-model="enabled" />
@@ -457,12 +477,12 @@ onMounted(() => void load())
             <div
               class="text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
             >
-              Container
+              {{ t('runnerManagers.sections.container') }}
             </div>
-            <UFormField label="Runner image">
+            <UFormField :label="t('runnerManagers.fields.runnerImage')">
               <UInput
                 v-model="editing.image"
-                placeholder="desk-foreman-workspace-runner:local"
+                :placeholder="t('runnerManagers.placeholders.runnerImage')"
                 class="w-full"
               />
             </UFormField>
@@ -471,17 +491,16 @@ onMounted(() => void load())
             >
               <div>
                 <div class="text-sm font-medium text-(--ui-text-highlighted)">
-                  Network access
+                  {{ t('runnerManagers.fields.networkAccess') }}
                 </div>
                 <div class="text-xs text-(--ui-text-muted)">
-                  Allow outbound network in runner containers
+                  {{ t('runnerManagers.hints.networkAccess') }}
                 </div>
               </div>
               <USwitch v-model="editing.network_enabled" />
             </div>
             <p class="text-xs text-(--ui-text-dimmed)">
-              Image and network changes apply to newly started runner containers
-              only.
+              {{ t('runnerManagers.hints.imageAndNetwork') }}
             </p>
           </div>
 
@@ -489,10 +508,10 @@ onMounted(() => void load())
             <div
               class="text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
             >
-              Resource limits
+              {{ t('runnerManagers.sections.resourceLimits') }}
             </div>
             <div class="grid grid-cols-2 gap-3">
-              <UFormField label="Max sessions">
+              <UFormField :label="t('runnerManagers.fields.maxSessions')">
                 <UInput
                   v-model.number="editing.max_sessions"
                   type="number"
@@ -500,7 +519,7 @@ onMounted(() => void load())
                   class="w-full"
                 />
               </UFormField>
-              <UFormField label="Max output (bytes)">
+              <UFormField :label="t('runnerManagers.fields.maxOutput')">
                 <UInput
                   v-model.number="editing.max_output_bytes"
                   type="number"
@@ -508,7 +527,7 @@ onMounted(() => void load())
                   class="w-full"
                 />
               </UFormField>
-              <UFormField label="Max timeout (ms)">
+              <UFormField :label="t('runnerManagers.fields.maxTimeout')">
                 <UInput
                   v-model.number="editing.max_timeout_ms"
                   type="number"
@@ -516,7 +535,7 @@ onMounted(() => void load())
                   class="w-full"
                 />
               </UFormField>
-              <UFormField label="PID limit">
+              <UFormField :label="t('runnerManagers.fields.pidLimit')">
                 <UInput
                   v-model.number="editing.pids_limit"
                   type="number"
@@ -524,23 +543,23 @@ onMounted(() => void load())
                   class="w-full"
                 />
               </UFormField>
-              <UFormField label="Memory limit">
+              <UFormField :label="t('runnerManagers.fields.memoryLimit')">
                 <UInput
                   v-model="editing.memory_limit"
-                  placeholder="1g"
+                  :placeholder="t('runnerManagers.placeholders.memoryLimit')"
                   class="w-full"
                 />
               </UFormField>
-              <UFormField label="CPU limit">
+              <UFormField :label="t('runnerManagers.fields.cpuLimit')">
                 <UInput
                   v-model="editing.cpu_limit"
-                  placeholder="2"
+                  :placeholder="t('runnerManagers.placeholders.cpuLimit')"
                   class="w-full"
                 />
               </UFormField>
             </div>
             <p class="text-xs text-(--ui-text-dimmed)">
-              Timeout and output limits are enforced on every job, old and new.
+              {{ t('runnerManagers.hints.limits') }}
             </p>
           </div>
 
@@ -564,7 +583,7 @@ onMounted(() => void load())
               }
             "
           >
-            Cancel
+            {{ t('runnerManagers.actions.cancel') }}
           </UButton>
           <UButton
             type="submit"
@@ -572,7 +591,13 @@ onMounted(() => void load())
             :loading="saving"
             :disabled="saving"
           >
-            {{ editingId === null ? 'Register manager' : 'Save changes' }}
+            {{
+              t(
+                editingId === null
+                  ? 'runnerManagers.actions.register'
+                  : 'runnerManagers.actions.save',
+              )
+            }}
           </UButton>
         </div>
       </template>
@@ -581,8 +606,8 @@ onMounted(() => void load())
     <!-- Token reveal modal -->
     <UModal
       v-model:open="tokenModalOpen"
-      title="Runner token"
-      description="The runner manager needs this token to authenticate with the control plane."
+      :title="t('runnerManagers.token.title')"
+      :description="t('runnerManagers.token.description')"
       @update:open="
         (open) => {
           if (!open) createdToken = null
@@ -592,14 +617,14 @@ onMounted(() => void load())
       <template #body>
         <div class="space-y-4">
           <UAlert
-            title="Copy this token now"
-            description="It is shown only once and cannot be retrieved later."
+            :title="t('runnerManagers.token.copyTitle')"
+            :description="t('runnerManagers.token.copyDescription')"
             color="warning"
             variant="subtle"
           />
           <TokenReveal v-if="createdToken?.token" :token="createdToken.token" />
           <p class="text-xs text-(--ui-text-muted)">
-            Configure it on the runner manager as
+            {{ t('runnerManagers.token.configure') }}
             <code class="font-mono">RUNNER_MANAGER_TOKEN</code>.
           </p>
         </div>
@@ -612,7 +637,7 @@ onMounted(() => void load())
               tokenModalOpen = false
             }
           "
-          >Done</UButton
+          >{{ t('runnerManagers.actions.done') }}</UButton
         >
       </template>
     </UModal>

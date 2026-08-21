@@ -1,3 +1,5 @@
+import { i18n } from '../i18n'
+
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—'
   const date = new Date(value)
@@ -14,13 +16,25 @@ export function formatRelative(value: string | null | undefined): string {
   if (Number.isNaN(date.getTime())) return '—'
   const diffMs = Date.now() - date.getTime()
   const seconds = Math.round(diffMs / 1000)
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.round(hours / 24)
-  return `${days}d ago`
+  let amount = seconds
+  let unit: Intl.RelativeTimeFormatUnit = 'second'
+  if (Math.abs(seconds) >= 60) {
+    const minutes = Math.round(seconds / 60)
+    amount = minutes
+    unit = 'minute'
+    if (Math.abs(minutes) >= 60) {
+      const hours = Math.round(minutes / 60)
+      amount = hours
+      unit = 'hour'
+      if (Math.abs(hours) >= 24) {
+        amount = Math.round(hours / 24)
+        unit = 'day'
+      }
+    }
+  }
+  return new Intl.RelativeTimeFormat(i18n.global.locale.value, {
+    numeric: 'always',
+  }).format(-amount, unit)
 }
 
 export function formatBytes(bytes: number | null | undefined): string {
@@ -39,12 +53,14 @@ export function formatBytes(bytes: number | null | undefined): string {
 
 export function formatDuration(seconds: number | null | undefined): string {
   if (seconds === null || seconds === undefined) return '—'
-  if (seconds < 60) return `${seconds}s`
+  if (seconds < 60)
+    return i18n.global.t('shared.duration.seconds', { value: seconds })
   const minutes = Math.floor(seconds / 60)
   const rest = seconds % 60
-  if (minutes < 60) return `${minutes}m ${rest}s`
+  if (minutes < 60)
+    return `${i18n.global.t('shared.duration.minutes', { value: minutes })} ${i18n.global.t('shared.duration.seconds', { value: rest })}`
   const hours = Math.floor(minutes / 60)
-  return `${hours}h ${minutes % 60}m`
+  return `${i18n.global.t('shared.duration.hours', { value: hours })} ${i18n.global.t('shared.duration.minutes', { value: minutes % 60 })}`
 }
 
 export function formatMilliseconds(ms: number | null | undefined): string {

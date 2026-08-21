@@ -4,7 +4,10 @@ import { zhCN as approval } from './approval'
 import { zhCN as audit } from './audit'
 import { zhCN as auth } from './auth'
 import { zhCN as dashboard } from './dashboard'
+import { zhCN as operations } from './operations'
+import { zhCN as runnerManagers } from './runnerManagers'
 import { zhCN as users } from './users'
+import { zhCN as workspaceBindings } from './workspaceBindings'
 
 const zhCN = {
   app: {
@@ -46,7 +49,16 @@ const zhCN = {
   approval,
   users,
   applications,
+  runnerManagers,
+  operations,
+  workspaceBindings,
   shared: {
+    requestFailed: '请求失败',
+    duration: {
+      seconds: '{value}秒',
+      minutes: '{value}分钟',
+      hours: '{value}小时',
+    },
     confirm: {
       cancel: '取消',
       confirm: '确认',
@@ -87,6 +99,30 @@ const zhCN = {
     notifications: {
       copied: '已复制',
       copyFailed: '复制失败',
+    },
+    status: {
+      online: '在线',
+      offline: '离线',
+      active: '活跃',
+      inactive: '未启用',
+      disabled: '已禁用',
+      success: '成功',
+      failure: '失败',
+      failed: '失败',
+      error: '错误',
+      running: '运行中',
+      pending: '等待中',
+      idle: '空闲',
+      stale: '已过期',
+      archived: '已归档',
+      cleanup_failed: '清理失败',
+      removed: '已移除',
+      cancelled: '已取消',
+      timed_out: '已超时',
+      exited: '已退出',
+      resetting: '重置中',
+      ready: '就绪',
+      unknown: '未知',
     },
   },
 } satisfies MessageSchema

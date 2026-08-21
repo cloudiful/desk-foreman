@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   listAdminWorkspaceBindings,
   transitionAdminWorkspaceBinding,
@@ -13,8 +14,10 @@ import type {
 } from '../generated/openapi/types.gen'
 
 type LifecycleFilter = 'all' | 'active' | 'archived' | 'resetting'
+type BindingAction = 'archive' | 'restore' | 'reset'
 
 const { success, error: notifyError } = useNotify()
+const { t } = useI18n()
 
 function truncateId(id: string | null | undefined): string {
   if (!id) return ''
@@ -32,7 +35,7 @@ const lifecycleFilter = ref<LifecycleFilter>('all')
 const page = ref(1)
 const actionTarget = ref<{
   binding: WorkspaceBindingResponse
-  action: 'archive' | 'restore' | 'reset'
+  action: BindingAction
 } | null>(null)
 const acting = ref(false)
 let loadSequence = 0
@@ -60,7 +63,7 @@ async function load(): Promise<void> {
   } catch (err) {
     if (sequence === loadSequence) {
       error.value =
-        err instanceof Error ? err.message : 'Failed to load workspace bindings'
+        err instanceof Error ? err.message : t('workspaceBindings.errors.load')
     }
   } finally {
     if (sequence === loadSequence) loading.value = false
@@ -83,9 +86,29 @@ watch(lifecycleFilter, () => {
 
 function confirmAction(
   binding: WorkspaceBindingResponse,
-  action: 'archive' | 'restore' | 'reset',
+  action: BindingAction,
 ): void {
   actionTarget.value = { binding, action }
+}
+
+function actionLabel(action: BindingAction): string {
+  if (action === 'archive') return t('workspaceBindings.actions.archive')
+  if (action === 'restore') return t('workspaceBindings.actions.restore')
+  return t('workspaceBindings.actions.reset')
+}
+
+function actionError(action: BindingAction): string {
+  if (action === 'archive') return t('workspaceBindings.errors.archive')
+  if (action === 'restore') return t('workspaceBindings.errors.restore')
+  return t('workspaceBindings.errors.reset')
+}
+
+function actionSuccess(action: BindingAction): string {
+  if (action === 'archive')
+    return t('workspaceBindings.notifications.archiveSuccess')
+  if (action === 'restore')
+    return t('workspaceBindings.notifications.restoreSuccess')
+  return t('workspaceBindings.notifications.resetSuccess')
 }
 
 function parseApplicationId(value: string): number | undefined {
@@ -104,14 +127,16 @@ async function runAction(): Promise<void> {
       target.action,
     )
     success(
-      `${target.action[0].toUpperCase()}${target.action.slice(1)}d workspace`,
-      `Binding #${target.binding.workspace_binding_id}`,
+      actionSuccess(target.action),
+      t('workspaceBindings.notifications.binding', {
+        id: target.binding.workspace_binding_id,
+      }),
     )
     actionTarget.value = null
     await load()
   } catch (err) {
     notifyError(
-      `Failed to ${target.action} workspace`,
+      actionError(target.action),
       err instanceof Error ? err.message : undefined,
     )
   } finally {
@@ -124,11 +149,25 @@ const actionDescription = computed(() => {
   if (!target) return ''
   const id = `#${target.binding.workspace_binding_id}`
   if (target.action === 'archive')
-    return `${id} is archived: the workspace is detached and stops accepting activity.`
+    return t('workspaceBindings.confirmations.archiveDescription', { id })
   if (target.action === 'restore')
-    return `${id} is restored and becomes active again.`
-  return `${id} is reset: the workspace directory is cleared. This cannot be undone.`
+    return t('workspaceBindings.confirmations.restoreDescription', { id })
+  return t('workspaceBindings.confirmations.resetDescription', { id })
 })
+
+const actionTitle = computed(() =>
+  actionTarget.value
+    ? t('workspaceBindings.confirmations.title', {
+        action: actionLabel(actionTarget.value.action),
+      })
+    : '',
+)
+
+const actionConfirmLabel = computed(() =>
+  actionTarget.value
+    ? actionLabel(actionTarget.value.action)
+    : t('shared.confirm.confirm'),
+)
 
 const actionModalOpen = computed<boolean>({
   get: () => Boolean(actionTarget.value),
@@ -142,16 +181,14 @@ onMounted(() => void load())
 
 <template>
   <div class="space-y-6">
-    <PageHeader
-      title="Workspace bindings"
-      description="Workspaces tied to applications and external users"
-    >
+    <PageHeader>
       <template #actions>
         <UButton
           icon="i-lucide-refresh-cw"
           variant="outline"
           color="neutral"
           :loading="loading"
+          :aria-label="t('workspaceBindings.actions.refresh')"
           @click="load"
         />
       </template>
@@ -165,30 +202,39 @@ onMounted(() => void load())
       >
         <UInput
           v-model="applicationId"
-          placeholder="Application ID"
+          :placeholder="t('workspaceBindings.filters.applicationId')"
           type="number"
           class="w-32"
           @keyup.enter="onSearchEnter"
         />
         <UInput
           v-model="externalUserId"
-          placeholder="External user ID"
+          :placeholder="t('workspaceBindings.filters.externalUserId')"
           class="md:max-w-xs"
           @keyup.enter="onSearchEnter"
         />
         <UInput
           v-model="workspaceKey"
-          placeholder="Workspace key"
+          :placeholder="t('workspaceBindings.filters.workspaceKey')"
           class="md:max-w-xs"
           @keyup.enter="onSearchEnter"
         />
         <USelect
           v-model="lifecycleFilter"
           :items="[
-            { label: 'All states', value: 'all' },
-            { label: 'Active', value: 'active' },
-            { label: 'Archived', value: 'archived' },
-            { label: 'Resetting', value: 'resetting' },
+            {
+              label: t('workspaceBindings.filters.allStates'),
+              value: 'all',
+            },
+            { label: t('workspaceBindings.filters.active'), value: 'active' },
+            {
+              label: t('workspaceBindings.filters.archived'),
+              value: 'archived',
+            },
+            {
+              label: t('workspaceBindings.filters.resetting'),
+              value: 'resetting',
+            },
           ]"
           class="w-36"
         />
@@ -198,7 +244,7 @@ onMounted(() => void load())
           :loading="loading"
           @click="onSearchEnter"
         >
-          Apply
+          {{ t('workspaceBindings.actions.apply') }}
         </UButton>
       </div>
 
@@ -207,17 +253,17 @@ onMounted(() => void load())
       <DataTable
         :rows="rows"
         :columns="[
-          { key: 'id', label: 'Binding' },
-          { key: 'identity', label: 'Identity' },
-          { key: 'workspace', label: 'Workspace' },
-          { key: 'lifecycle_state', label: 'State' },
-          { key: 'last_used_at', label: 'Last used' },
+          { key: 'id', label: t('workspaceBindings.table.binding') },
+          { key: 'identity', label: t('workspaceBindings.table.identity') },
+          { key: 'workspace', label: t('workspaceBindings.table.workspace') },
+          { key: 'lifecycle_state', label: t('workspaceBindings.table.state') },
+          { key: 'last_used_at', label: t('workspaceBindings.table.lastUsed') },
           { key: 'actions', label: '', class: 'text-right' },
         ]"
         :loading="loading"
         :row-key="(row) => row.workspace_binding_id as number"
-        empty-title="No workspace bindings"
-        empty-description="Bindings appear when applications access workspaces."
+        :empty-title="t('workspaceBindings.empty.title')"
+        :empty-description="t('workspaceBindings.empty.description')"
       >
         <template #cell-id="{ row }">
           <span class="font-mono text-sm text-(--ui-text-highlighted)">
@@ -227,7 +273,9 @@ onMounted(() => void load())
         <template #cell-identity="{ row }">
           <div class="min-w-0">
             <div class="text-sm text-(--ui-text-highlighted)">
-              App #{{ row.application_id }}
+              {{ t('workspaceBindings.identity.application') }} #{{
+                row.application_id
+              }}
             </div>
             <div class="truncate text-xs text-(--ui-text-muted)">
               {{ row.external_user_id }}
@@ -265,7 +313,7 @@ onMounted(() => void load())
               variant="ghost"
               color="neutral"
               size="sm"
-              aria-label="Archive workspace"
+              :aria-label="t('workspaceBindings.actions.archive')"
               @click="
                 confirmAction(
                   row as unknown as WorkspaceBindingResponse,
@@ -279,7 +327,7 @@ onMounted(() => void load())
               variant="ghost"
               color="neutral"
               size="sm"
-              aria-label="Restore workspace"
+              :aria-label="t('workspaceBindings.actions.restore')"
               @click="
                 confirmAction(
                   row as unknown as WorkspaceBindingResponse,
@@ -292,7 +340,7 @@ onMounted(() => void load())
               variant="ghost"
               color="error"
               size="sm"
-              aria-label="Reset workspace"
+              :aria-label="t('workspaceBindings.actions.reset')"
               @click="
                 confirmAction(
                   row as unknown as WorkspaceBindingResponse,
@@ -309,7 +357,7 @@ onMounted(() => void load())
         class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
       >
         <span class="text-sm text-(--ui-text-muted)">
-          Page {{ page }} of {{ totalPages }}
+          {{ t('workspaceBindings.pagination', { page, totalPages }) }}
         </span>
         <UPagination
           v-model:page="page"
@@ -322,17 +370,9 @@ onMounted(() => void load())
 
     <ConfirmModal
       v-model:open="actionModalOpen"
-      :title="
-        actionTarget
-          ? `${actionTarget.action[0].toUpperCase()}${actionTarget.action.slice(1)} workspace`
-          : ''
-      "
+      :title="actionTitle"
       :description="actionDescription"
-      :confirm-label="
-        actionTarget
-          ? `${actionTarget.action[0].toUpperCase()}${actionTarget.action.slice(1)}`
-          : 'Confirm'
-      "
+      :confirm-label="actionConfirmLabel"
       :confirm-color="actionTarget?.action === 'reset' ? 'error' : 'primary'"
       :loading="acting"
       @confirm="runAction"

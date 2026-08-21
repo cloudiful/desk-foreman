@@ -1,4 +1,5 @@
 import { computed, reactive, ref } from 'vue'
+import { i18n } from '../i18n'
 
 export function useAsyncData<T>(loader: () => Promise<T>) {
   const data = ref<T | null>(null) as { value: T | null }
@@ -15,7 +16,10 @@ export function useAsyncData<T>(loader: () => Promise<T>) {
       if (sequence === requestSequence) data.value = result
     } catch (err) {
       if (sequence === requestSequence) {
-        error.value = err instanceof Error ? err.message : 'Request failed'
+        error.value =
+          err instanceof Error
+            ? err.message
+            : i18n.global.t('shared.requestFailed')
       }
     } finally {
       if (sequence === requestSequence) loading.value = false

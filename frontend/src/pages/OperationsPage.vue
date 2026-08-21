@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   getAdminOperationsSummary,
   listAdminRunnerSessions,
@@ -17,6 +18,7 @@ import type {
 } from '../generated/openapi/types.gen'
 
 const { error: notifyError } = useNotify()
+const { t } = useI18n()
 
 const runners = ref<WorkspaceRunnerResponse[]>([])
 const runnerTotal = ref(0)
@@ -90,10 +92,10 @@ async function load(manual = true): Promise<void> {
     summary.value = summaryData
   } catch (err) {
     error.value =
-      err instanceof Error ? err.message : 'Failed to load runner status'
+      err instanceof Error ? err.message : t('operations.errors.load')
     if (manual) {
       notifyError(
-        'Failed to refresh operations',
+        t('operations.errors.refresh'),
         err instanceof Error ? err.message : undefined,
       )
     }
@@ -153,10 +155,7 @@ onUnmounted(() => {
 
 <template>
   <div class="space-y-6">
-    <PageHeader
-      title="Operations"
-      description="Workspace runners and execution sessions"
-    >
+    <PageHeader>
       <template #actions>
         <div class="flex items-center gap-2">
           <span
@@ -169,11 +168,12 @@ onUnmounted(() => {
               "
               class="size-4"
             />
-            Auto-refresh
+            {{ t('operations.autoRefresh') }}
           </span>
           <USwitch
             v-model="autoRefresh"
             size="sm"
+            :aria-label="t('operations.autoRefresh')"
             @update:model-value="toggleAutoRefresh"
           />
           <UButton
@@ -181,6 +181,7 @@ onUnmounted(() => {
             variant="outline"
             color="neutral"
             :loading="loading"
+            :aria-label="t('operations.actions.refresh')"
             @click="() => load()"
           />
         </div>
@@ -189,17 +190,17 @@ onUnmounted(() => {
 
     <div class="grid gap-4 sm:grid-cols-3">
       <StatCard
-        title="Active sessions"
+        :title="t('operations.stats.activeSessions')"
         :value="summary?.active_sessions ?? 0"
         icon="i-lucide-terminal-square"
       />
       <StatCard
-        title="Running runners"
+        :title="t('operations.stats.runningRunners')"
         :value="summary?.active_runners ?? 0"
         icon="i-lucide-play-circle"
       />
       <StatCard
-        title="Failed operations"
+        :title="t('operations.stats.failedOperations')"
         :value="summary?.failed_operations ?? 0"
         icon="i-lucide-triangle-alert"
       />
@@ -212,12 +213,12 @@ onUnmounted(() => {
         v-model="activeTab"
         :items="[
           {
-            label: `Runners (${runnerTotal})`,
+            label: t('operations.tabs.runners', { count: runnerTotal }),
             value: 'runners',
             slot: 'runners',
           },
           {
-            label: `Sessions (${sessionTotal})`,
+            label: t('operations.tabs.sessions', { count: sessionTotal }),
             value: 'sessions',
             slot: 'sessions',
           },
@@ -228,16 +229,19 @@ onUnmounted(() => {
           <DataTable
             :rows="runners"
             :columns="[
-              { key: 'name', label: 'Runner' },
-              { key: 'owner', label: 'Owner' },
-              { key: 'status', label: 'Status' },
-              { key: 'last_active_at', label: 'Last active' },
+              { key: 'name', label: t('operations.runners.table.runner') },
+              { key: 'owner', label: t('operations.runners.table.owner') },
+              { key: 'status', label: t('operations.runners.table.status') },
+              {
+                key: 'last_active_at',
+                label: t('operations.runners.table.lastActive'),
+              },
               { key: 'actions', label: '', class: 'text-right' },
             ]"
             :loading="loading"
             :row-key="(row) => row.runner_id as number"
-            empty-title="No runners"
-            empty-description="Runners appear once a workspace command has been executed."
+            :empty-title="t('operations.runners.emptyTitle')"
+            :empty-description="t('operations.runners.emptyDescription')"
           >
             <template #cell-name="{ row }">
               <div class="min-w-0">
@@ -274,7 +278,7 @@ onUnmounted(() => {
                   variant="ghost"
                   color="neutral"
                   size="sm"
-                  aria-label="Runner details"
+                  :aria-label="t('operations.runners.detailsAriaLabel')"
                   @click="
                     () => {
                       runnerDetail = row as unknown as WorkspaceRunnerResponse
@@ -290,7 +294,12 @@ onUnmounted(() => {
             class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
           >
             <span class="text-sm text-(--ui-text-muted)">
-              Page {{ runnersPage }} of {{ runnersTotalPages }}
+              {{
+                t('operations.pagination', {
+                  page: runnersPage,
+                  totalPages: runnersTotalPages,
+                })
+              }}
             </span>
             <UPagination
               v-model:page="runnersPage"
@@ -306,17 +315,20 @@ onUnmounted(() => {
           <DataTable
             :rows="sessions"
             :columns="[
-              { key: 'session', label: 'Session' },
-              { key: 'owner', label: 'Owner' },
-              { key: 'state', label: 'State' },
-              { key: 'exit_code', label: 'Exit' },
-              { key: 'duration', label: 'Duration' },
+              { key: 'session', label: t('operations.sessions.table.session') },
+              { key: 'owner', label: t('operations.sessions.table.owner') },
+              { key: 'state', label: t('operations.sessions.table.state') },
+              { key: 'exit_code', label: t('operations.sessions.table.exit') },
+              {
+                key: 'duration',
+                label: t('operations.sessions.table.duration'),
+              },
               { key: 'actions', label: '', class: 'text-right' },
             ]"
             :loading="loading"
             :row-key="(row) => row.session_id as number"
-            empty-title="No sessions"
-            empty-description="Sessions appear once a workspace command has run."
+            :empty-title="t('operations.sessions.emptyTitle')"
+            :empty-description="t('operations.sessions.emptyDescription')"
           >
             <template #cell-session="{ row }">
               <span class="font-mono text-sm text-(--ui-text-highlighted)">
@@ -355,7 +367,7 @@ onUnmounted(() => {
                     variant="subtle"
                     class="ml-1"
                   >
-                    timeout
+                    {{ t('operations.timeout') }}
                   </UBadge>
                 </template>
               </span>
@@ -367,7 +379,7 @@ onUnmounted(() => {
                   variant="ghost"
                   color="neutral"
                   size="sm"
-                  aria-label="Session details"
+                  :aria-label="t('operations.sessions.detailsAriaLabel')"
                   @click="
                     () => {
                       sessionDetail = row as unknown as RunnerSessionResponse
@@ -383,7 +395,12 @@ onUnmounted(() => {
             class="flex items-center justify-between border-t border-(--ui-border) px-4 py-3"
           >
             <span class="text-sm text-(--ui-text-muted)">
-              Page {{ sessionsPage }} of {{ sessionsTotalPages }}
+              {{
+                t('operations.pagination', {
+                  page: sessionsPage,
+                  totalPages: sessionsTotalPages,
+                })
+              }}
             </span>
             <UPagination
               v-model:page="sessionsPage"
@@ -399,53 +416,71 @@ onUnmounted(() => {
     <!-- Runner detail drawer -->
     <UDrawer
       v-model:open="runnerDetailOpen"
-      title="Runner details"
+      :title="t('operations.runners.detailsTitle')"
       :close="true"
     >
       <template #body>
         <dl v-if="runnerDetail" class="space-y-3 text-sm">
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Container</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.runners.details.container') }}
+            </dt>
             <dd class="max-w-[55%] truncate font-mono text-right">
               {{ runnerDetail.container_name }}
             </dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Container ID</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.runners.details.containerId') }}
+            </dt>
             <dd class="max-w-[55%] break-all font-mono text-right">
               {{ runnerDetail.container_id ?? '—' }}
             </dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Runner manager</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.runners.details.runnerManager') }}
+            </dt>
             <dd>{{ runnerDetail.runner_manager_id ?? '—' }}</dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Status</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.runners.details.status') }}
+            </dt>
             <dd><StatusBadge :status="runnerDetail.status" /></dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Runtime</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.runners.details.runtime') }}
+            </dt>
             <dd>{{ runnerDetail.runtime }}</dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Image</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.runners.details.image') }}
+            </dt>
             <dd class="max-w-[55%] truncate font-mono text-right">
               {{ runnerDetail.image_name }}
             </dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Workspace root</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.runners.details.workspaceRoot') }}
+            </dt>
             <dd class="max-w-[55%] truncate font-mono text-right">
               {{ runnerDetail.workspace_root }}
             </dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Last active</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.runners.details.lastActive') }}
+            </dt>
             <dd>{{ formatDateTime(runnerDetail.last_active_at) }}</dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Last observed</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.runners.details.lastObserved') }}
+            </dt>
             <dd>{{ formatDateTime(runnerDetail.last_observed_at) }}</dd>
           </div>
           <div
@@ -455,7 +490,7 @@ onUnmounted(() => {
             <dt
               class="mb-1 text-xs font-semibold uppercase tracking-wide text-(--ui-text-error)"
             >
-              Last error
+              {{ t('operations.runners.details.lastError') }}
             </dt>
             <dd
               class="whitespace-pre-wrap font-mono text-xs text-(--ui-text-muted)"
@@ -470,42 +505,62 @@ onUnmounted(() => {
     <!-- Session detail drawer -->
     <UDrawer
       v-model:open="sessionDetailOpen"
-      title="Session details"
+      :title="t('operations.sessions.detailsTitle')"
       :close="true"
     >
       <template #body>
         <dl v-if="sessionDetail" class="space-y-3 text-sm">
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Session ID</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.sessions.details.sessionId') }}
+            </dt>
             <dd class="font-mono">{{ sessionDetail.session_id }}</dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Session key</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.sessions.details.sessionKey') }}
+            </dt>
             <dd class="max-w-[55%] truncate font-mono text-right">
               {{ sessionDetail.session_key ?? '—' }}
             </dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Owner</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.sessions.details.owner') }}
+            </dt>
             <dd>
               {{ sessionDetail.owner_kind }} #{{ sessionDetail.owner_id }}
             </dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">State</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.sessions.details.state') }}
+            </dt>
             <dd><StatusBadge :status="sessionDetail.state" /></dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Exit code</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.sessions.details.exitCode') }}
+            </dt>
             <dd class="font-mono">{{ sessionDetail.exit_code ?? '—' }}</dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Wall time</dt>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.sessions.details.wallTime') }}
+            </dt>
             <dd>{{ formatDuration(sessionDetail.wall_time_seconds) }}</dd>
           </div>
           <div class="flex justify-between gap-4">
-            <dt class="text-(--ui-text-muted)">Timed out</dt>
-            <dd>{{ sessionDetail.timed_out ? 'Yes' : 'No' }}</dd>
+            <dt class="text-(--ui-text-muted)">
+              {{ t('operations.sessions.details.timedOut') }}
+            </dt>
+            <dd>
+              {{
+                sessionDetail.timed_out
+                  ? t('operations.yes')
+                  : t('operations.no')
+              }}
+            </dd>
           </div>
         </dl>
       </template>

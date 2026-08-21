@@ -3,7 +3,10 @@ import type { ApplicationsMessages } from './applications'
 import type { AuditMessages } from './audit'
 import type { AuthMessages } from './auth'
 import type { DashboardMessages } from './dashboard'
+import type { OperationsMessages } from './operations'
+import type { RunnerManagersMessages } from './runnerManagers'
 import type { UsersMessages } from './users'
+import type { WorkspaceBindingsMessages } from './workspaceBindings'
 
 export interface MessageSchema {
   app: {
@@ -45,7 +48,16 @@ export interface MessageSchema {
   approval: ApprovalMessages
   users: UsersMessages
   applications: ApplicationsMessages
+  runnerManagers: RunnerManagersMessages
+  operations: OperationsMessages
+  workspaceBindings: WorkspaceBindingsMessages
   shared: {
+    requestFailed: string
+    duration: {
+      seconds: string
+      minutes: string
+      hours: string
+    }
     confirm: {
       cancel: string
       confirm: string
@@ -86,6 +98,30 @@ export interface MessageSchema {
     notifications: {
       copied: string
       copyFailed: string
+    }
+    status: {
+      online: string
+      offline: string
+      active: string
+      inactive: string
+      disabled: string
+      success: string
+      failure: string
+      failed: string
+      error: string
+      running: string
+      pending: string
+      idle: string
+      stale: string
+      archived: string
+      cleanup_failed: string
+      removed: string
+      cancelled: string
+      timed_out: string
+      exited: string
+      resetting: string
+      ready: string
+      unknown: string
     }
   }
 }

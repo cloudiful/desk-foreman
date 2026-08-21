@@ -4,7 +4,10 @@ import approval from './approval'
 import audit from './audit'
 import auth from './auth'
 import dashboard from './dashboard'
+import operations from './operations'
+import runnerManagers from './runnerManagers'
 import users from './users'
+import workspaceBindings from './workspaceBindings'
 
 const enUS = {
   app: {
@@ -46,7 +49,16 @@ const enUS = {
   approval,
   users,
   applications,
+  runnerManagers,
+  operations,
+  workspaceBindings,
   shared: {
+    requestFailed: 'Request failed',
+    duration: {
+      seconds: '{value}s',
+      minutes: '{value}m',
+      hours: '{value}h',
+    },
     confirm: {
       cancel: 'Cancel',
       confirm: 'Confirm',
@@ -88,6 +100,30 @@ const enUS = {
     notifications: {
       copied: 'Copied',
       copyFailed: 'Copy failed',
+    },
+    status: {
+      online: 'Online',
+      offline: 'Offline',
+      active: 'Active',
+      inactive: 'Inactive',
+      disabled: 'Disabled',
+      success: 'Success',
+      failure: 'Failure',
+      failed: 'Failed',
+      error: 'Error',
+      running: 'Running',
+      pending: 'Pending',
+      idle: 'Idle',
+      stale: 'Stale',
+      archived: 'Archived',
+      cleanup_failed: 'Cleanup failed',
+      removed: 'Removed',
+      cancelled: 'Cancelled',
+      timed_out: 'Timed out',
+      exited: 'Exited',
+      resetting: 'Resetting',
+      ready: 'Ready',
+      unknown: 'Unknown',
     },
   },
 } satisfies MessageSchema
