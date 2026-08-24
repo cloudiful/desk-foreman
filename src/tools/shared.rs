@@ -2,8 +2,7 @@ use std::time::Instant;
 
 use desk_foreman_approval::ReviewRequest;
 use desk_foreman_workspace_sdk::{
-    ApplyPatchSummary, ExactEditError, ExactEditRequest, ExactEditResult, PatchOperation,
-    WorkspaceFileTools, WorkspaceSdkError, parse_patch,
+    ApplyPatchSummary, PatchOperation, WorkspaceFileTools, WorkspaceSdkError, parse_patch,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -19,8 +18,7 @@ use crate::{
             validate_shell_binary, validate_shell_command, validate_workspace_path,
         },
         params::{
-            ApplyPatchParams, EditParams, GlobParams, GrepParams, ReadParams, ShellParams,
-            WriteStdinParams,
+            ApplyPatchParams, GlobParams, GrepParams, ReadParams, ShellParams, WriteStdinParams,
         },
         readonly::{
             data::{glob_output_in_runner, read_output, stat_path_output},
@@ -59,17 +57,6 @@ pub struct ApplyPatchChangeOutput {
 #[derive(Clone, Debug, Serialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
-pub struct EditOutput {
-    pub path: String,
-    pub replacements: usize,
-    pub added_lines: usize,
-    pub deleted_lines: usize,
-    pub sha256: String,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema, ToSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct CancelSessionOutput {
     pub session_id: u64,
     pub state: String,
@@ -96,18 +83,6 @@ impl From<ApplyPatchSummary> for ApplyPatchOutput {
                     deleted_lines: change.deleted_lines,
                 })
                 .collect(),
-        }
-    }
-}
-
-impl From<ExactEditResult> for EditOutput {
-    fn from(result: ExactEditResult) -> Self {
-        Self {
-            path: result.path,
-            replacements: result.replacements,
-            added_lines: result.added_lines,
-            deleted_lines: result.deleted_lines,
-            sha256: result.sha256,
         }
     }
 }
@@ -362,50 +337,6 @@ pub async fn apply_patch(
     Ok(summary.into())
 }
 
-pub async fn edit(
-    state: &AppState,
-    actor: &ActorContext,
-    params: &EditParams,
-) -> Result<EditOutput, ToolError> {
-    let started = Instant::now();
-    ensure_scope(state, actor, crate::policy::WORKSPACE_PATCH)?;
-    actor.ensure_write_access().map_err(ToolError::Forbidden)?;
-    let request = ExactEditRequest {
-        path: params.path.clone(),
-        old_text: params.old_text.clone(),
-        new_text: params.new_text.clone(),
-        replace_all: params.replace_all,
-    };
-    let tools = workspace_tools(actor)?;
-    let review_request = ReviewRequest::edit(
-        &request.path,
-        json!({
-            "old_text": request.old_text,
-            "new_text": request.new_text,
-            "replace_all": request.replace_all,
-            "workspace_scoped": true,
-        }),
-    );
-    review::ensure_review(state, actor, &review_request).await?;
-    let output = tools
-        .edit_text_with_limit(&request, actor.policy.limits.max_file_bytes)
-        .map_err(map_exact_edit_error)?;
-    let output: EditOutput = output.into();
-    spawn_tool_audit(
-        state,
-        actor,
-        "tool.edit",
-        json!({
-            "path_sha256": sha256_hex(&output.path),
-            "replacements": output.replacements,
-            "added_lines": output.added_lines,
-            "deleted_lines": output.deleted_lines,
-            "duration_ms": started.elapsed().as_millis(),
-        }),
-    );
-    Ok(output)
-}
-
 pub fn read(
     state: &AppState,
     actor: &ActorContext,
@@ -534,24 +465,6 @@ fn classify_shell_error(error: anyhow::Error) -> ToolError {
 
 fn map_apply_patch_error(error: WorkspaceSdkError) -> ToolError {
     map_workspace_sdk_error(error)
-}
-
-fn map_exact_edit_error(error: ExactEditError) -> ToolError {
-    let message = error.to_string();
-    match error {
-        ExactEditError::Workspace(other) => map_workspace_sdk_error(other),
-        ExactEditError::OldTextEmpty
-        | ExactEditError::NoOp
-        | ExactEditError::FileTooLarge { .. }
-        | ExactEditError::InputTooLarge { .. }
-        | ExactEditError::NotUtf8 { .. }
-        | ExactEditError::ContextNotFound { .. }
-        | ExactEditError::Ambiguous { .. } => ToolError::InvalidInput(error.to_string()),
-        ExactEditError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
-            ToolError::NotFound(message)
-        }
-        ExactEditError::Io { .. } => ToolError::Internal(error.into()),
-    }
 }
 
 fn map_workspace_sdk_error(error: WorkspaceSdkError) -> ToolError {

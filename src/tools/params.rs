@@ -89,29 +89,6 @@ pub struct ApplyPatchParams {
 #[derive(Debug, Deserialize, JsonSchema, ToSchema, Validate)]
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
-pub struct EditParams {
-    #[schemars(
-        description = "Workspace-relative file path to edit.",
-        example = "src/lib.rs"
-    )]
-    #[validate(custom(function = "validate_non_blank"))]
-    pub path: String,
-    #[schemars(
-        description = "Exact text to replace. It must occur exactly once unless replace_all is true."
-    )]
-    pub old_text: String,
-    #[schemars(description = "Replacement text. It must differ from old_text.")]
-    pub new_text: String,
-    #[serde(default)]
-    #[schemars(
-        description = "Replace every exact occurrence instead of requiring a unique match."
-    )]
-    pub replace_all: bool,
-}
-
-#[derive(Debug, Deserialize, JsonSchema, ToSchema, Validate)]
-#[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 #[validate(schema(function = "validate_read_file_params"))]
 pub struct ReadParams {
     #[serde(rename = "filePath")]

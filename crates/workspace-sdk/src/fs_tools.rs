@@ -7,11 +7,10 @@ use std::{
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ApplyPatchSummary, DirectoryEntry, ExactEditError, ExactEditRequest, ExactEditResult,
-    FileFingerprint, ListDirectoryPageOutput, ListDirectoryPageParams, PathKind,
-    ReadFilePageOutput, ReadFilePageParams, StatPathOutput, StatPathParams,
-    WalkWorkspacePageOutput, WalkWorkspacePageParams, WorkspaceSdkError, patch::apply_patch,
-    resolve_workspace_path, workspace_relative_display,
+    ApplyPatchSummary, DirectoryEntry, FileFingerprint, ListDirectoryPageOutput,
+    ListDirectoryPageParams, PathKind, ReadFilePageOutput, ReadFilePageParams, StatPathOutput,
+    StatPathParams, WalkWorkspacePageOutput, WalkWorkspacePageParams, WorkspaceSdkError,
+    patch::apply_patch, resolve_workspace_path, workspace_relative_display,
 };
 
 pub struct WorkspaceFileTools {
@@ -45,18 +44,6 @@ impl WorkspaceFileTools {
     pub fn apply_patch_text(&self, patch: &str) -> Result<ApplyPatchSummary, WorkspaceSdkError> {
         validate_patch_input(patch)?;
         apply_patch(&self.workspace_root, patch)
-    }
-
-    pub fn edit_text(&self, request: &ExactEditRequest) -> Result<ExactEditResult, ExactEditError> {
-        self.edit_text_with_limit(request, None)
-    }
-
-    pub fn edit_text_with_limit(
-        &self,
-        request: &ExactEditRequest,
-        max_file_bytes: Option<usize>,
-    ) -> Result<ExactEditResult, ExactEditError> {
-        crate::exact_edit::edit_file_with_limit(&self.workspace_root, request, max_file_bytes)
     }
 
     #[cfg(feature = "approval")]
@@ -340,34 +327,6 @@ where
             ));
         }
         self.tools.apply_patch_text(patch)
-    }
-
-    pub async fn edit_text(
-        &self,
-        request: &ExactEditRequest,
-    ) -> Result<ExactEditResult, ExactEditError> {
-        let decision = self
-            .reviewer
-            .review(&desk_foreman_approval::ReviewRequest::edit(
-                &request.path,
-                serde_json::json!({
-                    "old_text": request.old_text,
-                    "new_text": request.new_text,
-                    "replace_all": request.replace_all,
-                }),
-            ))
-            .await
-            .map_err(|error| ExactEditError::Io {
-                context: "approval reviewer failed".to_string(),
-                source: std::io::Error::other(error),
-            })?;
-        if !decision.permits_execution() {
-            return Err(ExactEditError::Io {
-                context: "approval denied".to_string(),
-                source: std::io::Error::other(decision.rationale),
-            });
-        }
-        self.tools.edit_text(request)
     }
 }
 

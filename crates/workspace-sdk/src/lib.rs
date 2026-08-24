@@ -1,5 +1,4 @@
 mod error;
-mod exact_edit;
 mod fs_tools;
 mod patch;
 mod path;
@@ -11,7 +10,6 @@ pub use desk_foreman_approval::{
     ReviewAction, ReviewDecision, ReviewDecisionKind, ReviewRequest, ReviewRisk,
 };
 pub use error::WorkspaceSdkError;
-pub use exact_edit::{ExactEditError, ExactEditRequest, ExactEditResult};
 #[cfg(feature = "approval")]
 pub use fs_tools::ReviewedWorkspaceFileTools;
 pub use fs_tools::WorkspaceFileTools;

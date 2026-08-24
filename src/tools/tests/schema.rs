@@ -62,19 +62,6 @@ async fn tool_schemas_match_expected_surface() {
       "session_id"
     ]
   },
-  "edit": {
-    "properties": [
-      "new_text",
-      "old_text",
-      "path",
-      "replace_all"
-    ],
-    "required": [
-      "path",
-      "old_text",
-      "new_text"
-    ]
-  },
   "glob": {
     "properties": [
       "path",
