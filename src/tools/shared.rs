@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use desk_foreman_approval::ReviewRequest;
 use desk_foreman_workspace_sdk::{
     ApplyPatchSummary, PatchOperation, WorkspaceFileTools, WorkspaceSdkError, parse_patch,
 };
@@ -25,7 +24,6 @@ use crate::{
             search::search_files_output_in_runner,
             types::{GlobOutput, GrepOutput, ReadOutput, StatPathOutput},
         },
-        review::{self, AuditedReviewer},
     },
 };
 use runner_protocol::{CancelSessionRequest, ExecRequest, InputRequest, ShellToolOutput};
@@ -125,20 +123,6 @@ pub async fn shell(
         .and_then(|application| application.default_shell.clone())
         .unwrap_or_else(|| state.config.default_shell.clone());
     validate_shell_binary(&shell)?;
-    review::ensure_review(
-        state,
-        actor,
-        &ReviewRequest::shell(
-            &params.command,
-            params.workdir.clone(),
-            json!({
-                "network_enabled": actor.policy.limits.network_enabled,
-                "timeout_ms": params.timeout.unwrap_or(DEFAULT_SHELL_TIMEOUT_MS),
-                "workspace_scoped": true,
-            }),
-        ),
-    )
-    .await?;
     let output = state
         .runner
         .exec_shell(ExecRequest {
@@ -190,18 +174,6 @@ pub async fn write_stdin(
     ensure_scope(state, actor, crate::policy::WORKSPACE_SHELL)?;
     if !params.chars.is_empty() {
         actor.ensure_write_access().map_err(ToolError::Forbidden)?;
-        review::ensure_review(
-            state,
-            actor,
-            &ReviewRequest::stdin(
-                &params.chars,
-                json!({
-                    "interactive_session": true,
-                    "workspace_scoped": true,
-                }),
-            ),
-        )
-        .await?;
     }
     let output = state
         .runner
@@ -305,20 +277,9 @@ pub async fn apply_patch(
         }
     }
     let tools = workspace_tools(actor)?;
-    let review_request =
-        ReviewRequest::patch(&params.patch_text, json!({ "workspace_scoped": true }));
-    let reviewer = review::reviewer_for_request(state, actor, &review_request).await?;
-    let summary = if let Some(reviewer) = reviewer {
-        tools
-            .with_reviewer(AuditedReviewer::new(reviewer, state, actor))
-            .apply_patch_text(&params.patch_text)
-            .await
-            .map_err(map_apply_patch_error)?
-    } else {
-        tools
-            .apply_patch_text(&params.patch_text)
-            .map_err(map_apply_patch_error)?
-    };
+    let summary = tools
+        .apply_patch_text(&params.patch_text)
+        .map_err(map_apply_patch_error)?;
     let summary_text = summary.summary.clone();
     let partial = summary.partial;
     let files = summary.changes.len();
@@ -475,10 +436,6 @@ fn map_workspace_sdk_error(error: WorkspaceSdkError) -> ToolError {
             ToolError::NotFound(message)
         }
         WorkspaceSdkError::Io { .. } => ToolError::Internal(error.into()),
-        WorkspaceSdkError::ApprovalDenied(message) => ToolError::Forbidden(message),
-        WorkspaceSdkError::ApprovalReviewer(_) => {
-            ToolError::Forbidden("approval reviewer unavailable".to_string())
-        }
     }
 }
 

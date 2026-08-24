@@ -1,4 +1,3 @@
-import type { ApprovalMessages } from './approval'
 import type { ApplicationsMessages } from './applications'
 import type { AuditMessages } from './audit'
 import type { AuthMessages } from './auth'
@@ -27,7 +26,6 @@ export interface MessageSchema {
       operations: string
       bindings: string
       audit: string
-      approval: string
     }
     changePassword: string
     signOut: string
@@ -45,7 +43,6 @@ export interface MessageSchema {
   auth: AuthMessages
   dashboard: DashboardMessages
   audit: AuditMessages
-  approval: ApprovalMessages
   users: UsersMessages
   applications: ApplicationsMessages
   runnerManagers: RunnerManagersMessages

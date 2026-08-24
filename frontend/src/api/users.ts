@@ -3,9 +3,6 @@ import {
   createApplicationToken,
   createMcpToken,
   createUser,
-  getApprovalSettings,
-  testApprovalSettings,
-  testApplicationApproval,
   deleteApplicationToken,
   deleteMcpToken,
   deleteUser,
@@ -25,7 +22,6 @@ import {
   updateMcpToken,
   resetUserPassword,
   updateApplication,
-  updateApprovalSettings,
   listRunnerManagers,
   createRunnerManager,
   updateRunnerManager,
@@ -64,13 +60,10 @@ import {
   type UpdateApplicationRequest,
   type UserResponse,
   type WorkspaceBindingResponse,
-  type ApprovalSettingsResponse,
-  type ApprovalTestResponse,
   type ListAuditLogsData,
   type OperationsSummary,
   type UpdateApplicationTokenRequest,
   type UpdateMcpTokenRequest,
-  type UpdateApprovalSettingsRequest,
   type RunnerManagerResponse,
   type CreateRunnerManagerRequest,
   type CreateRunnerManagerResponse,
@@ -213,44 +206,6 @@ export async function updateAdminApplication(
     body,
   })
   const fallback = i18n.global.t('applications.errors.save')
-  await requireOk(response, fallback)
-  if (!data) throw new Error(fallback)
-  return data
-}
-
-export async function getAdminApprovalSettings(): Promise<ApprovalSettingsResponse> {
-  const { data, response } = await getApprovalSettings()
-  const fallback = i18n.global.t('approval.errors.load')
-  await requireOk(response, fallback)
-  if (!data) throw new Error(fallback)
-  return data
-}
-
-export async function updateAdminApprovalSettings(
-  body: UpdateApprovalSettingsRequest,
-): Promise<ApprovalSettingsResponse> {
-  const { data, response } = await updateApprovalSettings({ body })
-  const fallback = i18n.global.t('approval.errors.update')
-  await requireOk(response, fallback)
-  if (!data) throw new Error(fallback)
-  return data
-}
-
-export async function testAdminApprovalSettings(): Promise<ApprovalTestResponse> {
-  const { data, response } = await testApprovalSettings()
-  const fallback = i18n.global.t('approval.errors.test')
-  await requireOk(response, fallback)
-  if (!data) throw new Error(fallback)
-  return data
-}
-
-export async function testAdminApplicationApproval(
-  application_id: number,
-): Promise<ApprovalTestResponse> {
-  const { data, response } = await testApplicationApproval({
-    path: { application_id },
-  })
-  const fallback = i18n.global.t('applications.errors.test')
   await requireOk(response, fallback)
   if (!data) throw new Error(fallback)
   return data

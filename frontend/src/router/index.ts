@@ -47,11 +47,6 @@ const router = createRouter({
           meta: { requiresAdmin: true },
         },
         {
-          path: 'admin/approval',
-          component: () => import('../pages/ApprovalSettingsPage.vue'),
-          meta: { requiresAdmin: true },
-        },
-        {
           path: 'admin/runner-managers',
           component: () => import('../pages/RunnerManagersPage.vue'),
           meta: { requiresAdmin: true },

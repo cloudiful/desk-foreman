@@ -1,6 +1,5 @@
 import type { MessageSchema } from './schema'
 import applications from './applications'
-import approval from './approval'
 import audit from './audit'
 import auth from './auth'
 import dashboard from './dashboard'
@@ -28,7 +27,6 @@ const enUS = {
       operations: 'Operations',
       bindings: 'Bindings',
       audit: 'Audit log',
-      approval: 'Approval',
     },
     changePassword: 'Change password',
     signOut: 'Sign out',
@@ -46,7 +44,6 @@ const enUS = {
   auth,
   dashboard,
   audit,
-  approval,
   users,
   applications,
   runnerManagers,

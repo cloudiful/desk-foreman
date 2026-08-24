@@ -7,7 +7,6 @@ import {
   deleteAdminApplicationToken,
   listAdminApplicationTokens,
   listAdminApplications,
-  testAdminApplicationApproval,
   updateAdminApplication,
 } from '../api/users'
 import { useNotify } from '../composables/useNotify'
@@ -22,7 +21,6 @@ import type {
   ApplicationResponse,
   ApplicationTokenResponse,
   CreateApplicationTokenResponse,
-  ApprovalTestResponse,
   ListApplicationsData,
 } from '../generated/openapi/types.gen'
 
@@ -46,21 +44,8 @@ function unknownScopes(scopes: string[]): string[] {
   )
 }
 
-const APPROVAL_MODES = [
-  { key: 'inherit', value: 'inherit' },
-  { key: 'disabled', value: 'disabled' },
-  { key: 'enabled', value: 'enabled' },
-] as const
-
 const { success, error: notifyError } = useNotify()
 const { t } = useI18n()
-
-const approvalModes = computed(() =>
-  APPROVAL_MODES.map(({ key, value }) => ({
-    label: t(`applications.approvalModes.${key}`),
-    value,
-  })),
-)
 
 const rows = ref<ApplicationResponse[]>([])
 const total = ref(0)
@@ -128,16 +113,6 @@ interface ApplicationForm {
   max_sessions: number | string
   network_enabled: boolean
   is_active: boolean
-  approval_mode: string
-  approval_endpoint: string
-  approval_model: string
-  approval_timeout_ms: number | string
-  approval_max_input_bytes: number | string
-  approval_max_concurrent: number | string
-  approval_max_output_tokens: number | string
-  approval_api_key: string
-  approval_api_key_configured: boolean
-  clear_approval_api_key: boolean
 }
 
 const editing = ref<ApplicationForm | null>(null)
@@ -145,8 +120,6 @@ const editingUnknownScopes = ref<string[]>([])
 const drawerOpen = ref(false)
 const saving = ref(false)
 const formError = ref('')
-const approvalTesting = ref(false)
-const approvalTestResult = ref<ApprovalTestResponse | null>(null)
 let loadSequence = 0
 
 function toNumberOrNull(
@@ -170,22 +143,11 @@ function blankForm(): ApplicationForm {
     max_sessions: '',
     network_enabled: true,
     is_active: true,
-    approval_mode: 'inherit',
-    approval_endpoint: '',
-    approval_model: '',
-    approval_timeout_ms: '',
-    approval_max_input_bytes: '',
-    approval_max_concurrent: '',
-    approval_max_output_tokens: '',
-    approval_api_key: '',
-    approval_api_key_configured: false,
-    clear_approval_api_key: false,
   }
 }
 
 function startCreate(): void {
   formError.value = ''
-  approvalTestResult.value = null
   editingUnknownScopes.value = []
   editing.value = blankForm()
   drawerOpen.value = true
@@ -205,19 +167,8 @@ function startEdit(row: ApplicationResponse): void {
     max_sessions: row.max_sessions ?? '',
     network_enabled: row.network_enabled,
     is_active: row.is_active,
-    approval_mode: row.approval_mode,
-    approval_endpoint: row.approval_endpoint ?? '',
-    approval_model: row.approval_model ?? '',
-    approval_timeout_ms: row.approval_timeout_ms ?? '',
-    approval_max_input_bytes: row.approval_max_input_bytes ?? '',
-    approval_max_concurrent: row.approval_max_concurrent ?? '',
-    approval_max_output_tokens: row.approval_max_output_tokens ?? '',
-    approval_api_key: '',
-    approval_api_key_configured: row.approval_api_key_configured,
-    clear_approval_api_key: false,
   }
   editingUnknownScopes.value = unknownScopes(row.default_scopes)
-  approvalTestResult.value = null
   drawerOpen.value = true
 }
 
@@ -226,7 +177,6 @@ function handleApplicationDrawerOpen(open: boolean): void {
     editing.value = null
     editingUnknownScopes.value = []
     formError.value = ''
-    approvalTestResult.value = null
   }
 }
 
@@ -251,21 +201,6 @@ async function save(): Promise<void> {
     max_file_bytes: toNumberOrNull(editing.value.max_file_bytes),
     max_sessions: toNumberOrNull(editing.value.max_sessions),
     network_enabled: editing.value.network_enabled,
-    approval_mode: editing.value.approval_mode,
-    approval_endpoint: editing.value.approval_endpoint.trim() || null,
-    approval_model: editing.value.approval_model.trim() || null,
-    approval_timeout_ms: toNumberOrNull(editing.value.approval_timeout_ms),
-    approval_max_input_bytes: toNumberOrNull(
-      editing.value.approval_max_input_bytes,
-    ),
-    approval_max_concurrent: toNumberOrNull(
-      editing.value.approval_max_concurrent,
-    ),
-    approval_max_output_tokens: toNumberOrNull(
-      editing.value.approval_max_output_tokens,
-    ),
-    approval_api_key: editing.value.approval_api_key.trim() || null,
-    clear_approval_api_key: editing.value.clear_approval_api_key,
   }
   try {
     if (editing.value.application_id === 0) {
@@ -287,33 +222,6 @@ async function save(): Promise<void> {
   } finally {
     saving.value = false
   }
-}
-
-async function testApplicationApproval(): Promise<void> {
-  if (
-    !editing.value ||
-    editing.value.application_id === 0 ||
-    approvalTesting.value
-  )
-    return
-  approvalTesting.value = true
-  formError.value = ''
-  try {
-    approvalTestResult.value = await testAdminApplicationApproval(
-      editing.value.application_id,
-    )
-  } catch (err) {
-    formError.value =
-      err instanceof Error ? err.message : t('applications.errors.test')
-  } finally {
-    approvalTesting.value = false
-  }
-}
-
-function clearApplicationKey(): void {
-  if (!editing.value) return
-  editing.value.approval_api_key = ''
-  editing.value.clear_approval_api_key = true
 }
 
 // ----- tokens -----
@@ -729,134 +637,6 @@ onMounted(() => void load())
               </div>
               <USwitch v-model="editing.is_active" />
             </div>
-          </div>
-
-          <div class="space-y-4">
-            <div
-              class="text-xs font-semibold uppercase tracking-wide text-(--ui-text-muted)"
-            >
-              {{ t('applications.sections.approvalReviewer') }}
-            </div>
-            <UFormField :label="t('applications.fields.mode')">
-              <USelect
-                v-model="editing.approval_mode"
-                :items="
-                  approvalModes as unknown as {
-                    label: string
-                    value: string
-                  }[]
-                "
-                class="w-full"
-              />
-            </UFormField>
-            <template v-if="editing.approval_mode === 'enabled'">
-              <UFormField :label="t('applications.fields.endpoint')">
-                <UInput
-                  v-model="editing.approval_endpoint"
-                  :placeholder="t('applications.placeholders.endpoint')"
-                />
-              </UFormField>
-              <UFormField :label="t('applications.fields.model')">
-                <UInput
-                  v-model="editing.approval_model"
-                  :placeholder="t('applications.placeholders.model')"
-                />
-              </UFormField>
-              <UFormField
-                :label="t('applications.fields.apiKey')"
-                :hint="t('applications.hints.apiKey')"
-              >
-                <div class="flex gap-2">
-                  <UInput
-                    v-model="editing.approval_api_key"
-                    type="password"
-                    autocomplete="new-password"
-                    :placeholder="t('applications.placeholders.apiKey')"
-                    class="min-w-0 flex-1"
-                    @input="editing.clear_approval_api_key = false"
-                  />
-                  <UButton
-                    v-if="editing.approval_api_key_configured"
-                    type="button"
-                    icon="i-lucide-trash-2"
-                    variant="outline"
-                    color="error"
-                    :aria-label="t('applications.actions.clearApiKey')"
-                    @click="clearApplicationKey"
-                  />
-                </div>
-              </UFormField>
-              <div class="grid gap-4 sm:grid-cols-3">
-                <UFormField :label="t('applications.fields.timeout')">
-                  <UInput
-                    v-model.number="editing.approval_timeout_ms"
-                    type="number"
-                    min="100"
-                    max="30000"
-                    :placeholder="t('applications.placeholders.globalDefault')"
-                  />
-                </UFormField>
-                <UFormField :label="t('applications.fields.maxInput')">
-                  <UInput
-                    v-model.number="editing.approval_max_input_bytes"
-                    type="number"
-                    min="1"
-                    max="524288"
-                    :placeholder="t('applications.placeholders.globalDefault')"
-                  />
-                </UFormField>
-                <UFormField :label="t('applications.fields.concurrentReviews')">
-                  <UInput
-                    v-model.number="editing.approval_max_concurrent"
-                    type="number"
-                    min="1"
-                    max="64"
-                    :placeholder="t('applications.placeholders.globalDefault')"
-                  />
-                </UFormField>
-                <UFormField :label="t('applications.fields.maxOutputTokens')">
-                  <UInput
-                    v-model.number="editing.approval_max_output_tokens"
-                    type="number"
-                    min="256"
-                    max="8192"
-                    :placeholder="t('applications.placeholders.globalDefault')"
-                  />
-                </UFormField>
-              </div>
-              <div class="flex flex-wrap items-center gap-2">
-                <UButton
-                  v-if="editing.application_id !== 0"
-                  type="button"
-                  icon="i-lucide-plug-zap"
-                  variant="outline"
-                  color="neutral"
-                  :loading="approvalTesting"
-                  @click="testApplicationApproval"
-                >
-                  {{ t('applications.actions.testReviewer') }}
-                </UButton>
-                <span class="text-xs text-(--ui-text-muted)">
-                  {{ t('applications.hints.testReviewer') }}
-                </span>
-              </div>
-              <UAlert
-                v-if="approvalTestResult"
-                :title="
-                  approvalTestResult.ok
-                    ? t('applications.approvalTest.passed')
-                    : t('applications.approvalTest.failed')
-                "
-                :description="
-                  t('applications.approvalTest.description', {
-                    message: approvalTestResult.message,
-                    latency: approvalTestResult.latency_ms,
-                  })
-                "
-                :color="approvalTestResult.ok ? 'success' : 'error'"
-                variant="subtle"
-              />
-            </template>
           </div>
 
           <UAlert

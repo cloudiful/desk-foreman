@@ -59,11 +59,6 @@ const nav = computed(() => [
           label: t('shell.navigation.audit'),
           icon: 'i-lucide-scroll-text',
         },
-        {
-          path: '/admin/approval',
-          label: t('shell.navigation.approval'),
-          icon: 'i-lucide-shield-check',
-        },
       ]
     : []),
 ])

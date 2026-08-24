@@ -22,7 +22,6 @@ services:
       - "8080:80"
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://desk_foreman:change-me-local-only@postgres:5432/desk_foreman}
-      DESK_FOREMAN_SECRET_MASTER_KEY: ${DESK_FOREMAN_SECRET_MASTER_KEY:-}
     volumes:
       - .:/workspace
     working_dir: /workspace

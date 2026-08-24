@@ -4,12 +4,11 @@ use sqlx::PgPool;
 
 use crate::db::types::{
     ApplicationResponse, ApplicationTokenResponse, CreateApplicationRequest,
-    CreateApplicationTokenRequest, CreateMcpTokenRequest, ListApplicationsParams,
-    ListApplicationTokensParams, ListMcpTokensParams, McpTokenResponse, Page,
-    UpdateApplicationRequest, UpdateApplicationTokenRequest, UpdateMcpTokenRequest,
+    CreateApplicationTokenRequest, CreateMcpTokenRequest, ListApplicationTokensParams,
+    ListApplicationsParams, ListMcpTokensParams, McpTokenResponse, Page, UpdateApplicationRequest,
+    UpdateApplicationTokenRequest, UpdateMcpTokenRequest,
 };
 use crate::policy::ALL_SCOPES;
-use crate::secrets::EncryptedSecret;
 
 pub async fn list_mcp_tokens(
     pool: &PgPool,
@@ -112,14 +111,15 @@ pub async fn list_applications(
         .bind(params.is_active)
         .fetch_one(pool)
         .await?;
-    let items = sqlx::query_as::<_, ApplicationResponse>(include_str!("../sql/list_applications.sql"))
-        .bind(&params.search)
-        .bind(params.is_active)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await
-        .context("failed to list applications")?;
+    let items =
+        sqlx::query_as::<_, ApplicationResponse>(include_str!("../sql/list_applications.sql"))
+            .bind(&params.search)
+            .bind(params.is_active)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await
+            .context("failed to list applications")?;
     Ok(Page {
         items,
         total,
@@ -142,7 +142,6 @@ pub async fn find_application_by_id(
 pub async fn create_application(
     pool: &PgPool,
     request: &CreateApplicationRequest,
-    secret: Option<&EncryptedSecret>,
 ) -> anyhow::Result<ApplicationResponse> {
     sqlx::query_as::<_, ApplicationResponse>(include_str!("../sql/create_application.sql"))
         .bind(&request.name)
@@ -154,16 +153,6 @@ pub async fn create_application(
         .bind(request.max_file_bytes)
         .bind(request.max_sessions)
         .bind(request.network_enabled.unwrap_or(true))
-        .bind(request.approval_mode.as_deref())
-        .bind(&request.approval_endpoint)
-        .bind(&request.approval_model)
-        .bind(request.approval_timeout_ms)
-        .bind(request.approval_max_input_bytes)
-        .bind(request.approval_max_concurrent)
-        .bind(request.approval_max_output_tokens)
-        .bind(secret.map(|value| value.ciphertext.clone()))
-        .bind(secret.map(|value| value.nonce.clone()))
-        .bind(secret.map(|value| value.key_version))
         .fetch_one(pool)
         .await
         .map_err(Into::into)
@@ -173,7 +162,6 @@ pub async fn update_application(
     pool: &PgPool,
     application_id: i64,
     request: &UpdateApplicationRequest,
-    secret: Option<&EncryptedSecret>,
 ) -> anyhow::Result<Option<ApplicationResponse>> {
     sqlx::query_as::<_, ApplicationResponse>(include_str!("../sql/update_application.sql"))
         .bind(application_id)
@@ -187,16 +175,6 @@ pub async fn update_application(
         .bind(request.max_file_bytes)
         .bind(request.max_sessions)
         .bind(request.network_enabled.unwrap_or(true))
-        .bind(&request.approval_mode)
-        .bind(&request.approval_endpoint)
-        .bind(&request.approval_model)
-        .bind(request.approval_timeout_ms)
-        .bind(request.approval_max_input_bytes)
-        .bind(request.approval_max_concurrent)
-        .bind(request.approval_max_output_tokens)
-        .bind(secret.map(|value| value.ciphertext.clone()))
-        .bind(secret.map(|value| value.nonce.clone()))
-        .bind(secret.map(|value| value.key_version))
         .fetch_optional(pool)
         .await
         .map_err(Into::into)

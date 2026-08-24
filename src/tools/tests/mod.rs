@@ -217,7 +217,6 @@ impl RunnerService for FakeRunnerService {
 
 fn app_state(root: PathBuf) -> AppState {
     AppState {
-        approval: Arc::new(crate::approval::ApprovalService::disabled()),
         config: Arc::new(AppConfig {
             bind_addr: "127.0.0.1:0".to_string(),
             mcp_allowed_hosts: Vec::new(),

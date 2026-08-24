@@ -11,14 +11,13 @@ use crate::{
     api::validation::{ValidatedJson, ValidatedQuery},
     db::types::{
         ApplicationResponse, ApplicationTokenResponse, CreateApplicationRequest,
-        CreateApplicationTokenRequest, CreateApplicationTokenResponse, ListApplicationsParams,
-        ListApplicationTokensParams, Page, UpdateApplicationRequest, UpdateApplicationTokenRequest,
+        CreateApplicationTokenRequest, CreateApplicationTokenResponse, ListApplicationTokensParams,
+        ListApplicationsParams, Page, UpdateApplicationRequest, UpdateApplicationTokenRequest,
     },
     error::AppError,
 };
 
 use super::{
-    application_approval::{resolve_application_secret, validate_approval_override},
     shared::{map_db_conflict, record_admin_audit},
     users::require_admin,
 };
@@ -60,36 +59,10 @@ pub async fn list_applications(
 pub async fn create_application(
     State(state): State<AppState>,
     jar: CookieJar,
-    ValidatedJson(mut request): ValidatedJson<CreateApplicationRequest>,
+    ValidatedJson(request): ValidatedJson<CreateApplicationRequest>,
 ) -> Result<(StatusCode, Json<ApplicationResponse>), AppError> {
     let admin = require_admin(&state, &jar).await?;
-    normalize_approval_override(
-        &mut request.approval_mode,
-        &mut request.approval_endpoint,
-        &mut request.approval_model,
-    );
-    let has_api_key = !request.clear_approval_api_key
-        && request
-            .approval_api_key
-            .as_deref()
-            .is_some_and(|value| !value.trim().is_empty());
-    validate_approval_override(
-        request.approval_mode.as_deref(),
-        request.approval_endpoint.as_deref(),
-        request.approval_model.as_deref(),
-        request.approval_timeout_ms,
-        request.approval_max_input_bytes,
-        request.approval_max_concurrent,
-        request.approval_max_output_tokens,
-        has_api_key,
-    )?;
-    let secret = resolve_application_secret(
-        &state,
-        request.approval_api_key.take(),
-        request.clear_approval_api_key,
-        None,
-    )?;
-    let application = crate::db::queries::create_application(&state.db, &request, secret.as_ref())
+    let application = crate::db::queries::create_application(&state.db, &request)
         .await
         .map_err(map_db_conflict)?;
     record_admin_audit(
@@ -122,56 +95,13 @@ pub async fn update_application(
     State(state): State<AppState>,
     jar: CookieJar,
     Path(application_id): Path<i64>,
-    ValidatedJson(mut request): ValidatedJson<UpdateApplicationRequest>,
+    ValidatedJson(request): ValidatedJson<UpdateApplicationRequest>,
 ) -> Result<Json<ApplicationResponse>, AppError> {
     let admin = require_admin(&state, &jar).await?;
-    normalize_approval_override(
-        &mut request.approval_mode,
-        &mut request.approval_endpoint,
-        &mut request.approval_model,
-    );
-    let existing_secret =
-        crate::db::queries::get_application_approval_secret(&state.db, application_id).await?;
-    let existing_secret = existing_secret
-        .map(|secret| {
-            crate::approval::encrypted_secret_from_database(
-                secret.api_key_ciphertext,
-                secret.api_key_nonce,
-                secret.api_key_key_version,
-            )
-        })
-        .transpose()?
-        .flatten();
-    let has_api_key = !request.clear_approval_api_key
-        && (request
-            .approval_api_key
-            .as_deref()
-            .is_some_and(|value| !value.trim().is_empty())
-            || existing_secret.is_some());
-    validate_approval_override(
-        request.approval_mode.as_deref(),
-        request.approval_endpoint.as_deref(),
-        request.approval_model.as_deref(),
-        request.approval_timeout_ms,
-        request.approval_max_input_bytes,
-        request.approval_max_concurrent,
-        request.approval_max_output_tokens,
-        has_api_key,
-    )?;
-    let secret = resolve_application_secret(
-        &state,
-        request.approval_api_key.take(),
-        request.clear_approval_api_key,
-        existing_secret,
-    )?;
-    let Some(application) = crate::db::queries::update_application(
-        &state.db,
-        application_id,
-        &request,
-        secret.as_ref(),
-    )
-    .await
-    .map_err(map_db_conflict)?
+    let Some(application) =
+        crate::db::queries::update_application(&state.db, application_id, &request)
+            .await
+            .map_err(map_db_conflict)?
     else {
         return Err(AppError::not_found("application not found"));
     };
@@ -185,19 +115,6 @@ pub async fn update_application(
     )
     .await?;
     Ok(Json(application))
-}
-
-fn normalize_approval_override(
-    mode: &mut Option<String>,
-    endpoint: &mut Option<String>,
-    model: &mut Option<String>,
-) {
-    for value in [mode, endpoint, model] {
-        *value = value.take().and_then(|value| {
-            let value = value.trim().to_string();
-            (!value.is_empty()).then_some(value)
-        });
-    }
 }
 
 #[utoipa::path(

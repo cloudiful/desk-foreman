@@ -12,12 +12,6 @@ pub enum WorkspaceSdkError {
         #[source]
         source: io::Error,
     },
-    #[cfg(feature = "approval")]
-    #[error("approval denied: {0}")]
-    ApprovalDenied(String),
-    #[cfg(feature = "approval")]
-    #[error("approval reviewer failed: {0}")]
-    ApprovalReviewer(#[source] desk_foreman_approval::ApprovalError),
 }
 
 impl WorkspaceSdkError {

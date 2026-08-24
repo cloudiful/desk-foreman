@@ -17,12 +17,6 @@ pub struct WorkspaceFileTools {
     workspace_root: PathBuf,
 }
 
-#[cfg(feature = "approval")]
-pub struct ReviewedWorkspaceFileTools<R> {
-    tools: WorkspaceFileTools,
-    reviewer: R,
-}
-
 impl WorkspaceFileTools {
     pub fn new(workspace_root: impl AsRef<Path>) -> Result<Self, WorkspaceSdkError> {
         let workspace_root = workspace_root.as_ref().canonicalize().map_err(|error| {
@@ -44,17 +38,6 @@ impl WorkspaceFileTools {
     pub fn apply_patch_text(&self, patch: &str) -> Result<ApplyPatchSummary, WorkspaceSdkError> {
         validate_patch_input(patch)?;
         apply_patch(&self.workspace_root, patch)
-    }
-
-    #[cfg(feature = "approval")]
-    pub fn with_reviewer<R>(self, reviewer: R) -> ReviewedWorkspaceFileTools<R>
-    where
-        R: desk_foreman_approval::ApprovalReviewer,
-    {
-        ReviewedWorkspaceFileTools {
-            tools: self,
-            reviewer,
-        }
     }
 
     pub fn read_file_page(
@@ -295,38 +278,6 @@ impl WorkspaceFileTools {
             }
         }
         Ok(output.len() >= max_entries)
-    }
-}
-
-#[cfg(feature = "approval")]
-impl<R> ReviewedWorkspaceFileTools<R>
-where
-    R: desk_foreman_approval::ApprovalReviewer,
-{
-    pub fn workspace_root(&self) -> &Path {
-        self.tools.workspace_root()
-    }
-
-    pub async fn apply_patch_text(
-        &self,
-        patch: &str,
-    ) -> Result<ApplyPatchSummary, WorkspaceSdkError> {
-        validate_patch_input(patch)?;
-        crate::parse_patch(patch)?;
-        let decision = self
-            .reviewer
-            .review(&desk_foreman_approval::ReviewRequest::patch(
-                patch,
-                serde_json::Value::Null,
-            ))
-            .await
-            .map_err(WorkspaceSdkError::ApprovalReviewer)?;
-        if !decision.permits_execution() {
-            return Err(WorkspaceSdkError::ApprovalDenied(
-                decision.rationale.clone(),
-            ));
-        }
-        self.tools.apply_patch_text(patch)
     }
 }
 

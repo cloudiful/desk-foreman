@@ -200,14 +200,6 @@ pub struct ApplicationResponse {
     pub max_file_bytes: Option<i64>,
     pub max_sessions: Option<i64>,
     pub network_enabled: bool,
-    pub approval_mode: String,
-    pub approval_endpoint: Option<String>,
-    pub approval_model: Option<String>,
-    pub approval_timeout_ms: Option<i64>,
-    pub approval_max_input_bytes: Option<i64>,
-    pub approval_max_concurrent: Option<i64>,
-    pub approval_max_output_tokens: Option<i64>,
-    pub approval_api_key_configured: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
@@ -228,24 +220,6 @@ pub struct CreateApplicationRequest {
     pub max_sessions: Option<i64>,
     #[serde(default)]
     pub network_enabled: Option<bool>,
-    #[serde(default)]
-    pub approval_mode: Option<String>,
-    #[serde(default)]
-    pub approval_endpoint: Option<String>,
-    #[serde(default)]
-    pub approval_model: Option<String>,
-    #[serde(default)]
-    pub approval_timeout_ms: Option<i64>,
-    #[serde(default)]
-    pub approval_max_input_bytes: Option<i64>,
-    #[serde(default)]
-    pub approval_max_concurrent: Option<i64>,
-    #[serde(default)]
-    pub approval_max_output_tokens: Option<i64>,
-    #[serde(default)]
-    pub approval_api_key: Option<String>,
-    #[serde(default)]
-    pub clear_approval_api_key: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
@@ -267,104 +241,6 @@ pub struct UpdateApplicationRequest {
     pub max_sessions: Option<i64>,
     #[serde(default)]
     pub network_enabled: Option<bool>,
-    #[serde(default)]
-    pub approval_mode: Option<String>,
-    #[serde(default)]
-    pub approval_endpoint: Option<String>,
-    #[serde(default)]
-    pub approval_model: Option<String>,
-    #[serde(default)]
-    pub approval_timeout_ms: Option<i64>,
-    #[serde(default)]
-    pub approval_max_input_bytes: Option<i64>,
-    #[serde(default)]
-    pub approval_max_concurrent: Option<i64>,
-    #[serde(default)]
-    pub approval_max_output_tokens: Option<i64>,
-    #[serde(default)]
-    pub approval_api_key: Option<String>,
-    #[serde(default)]
-    pub clear_approval_api_key: bool,
-}
-
-#[derive(Clone, Debug, FromRow)]
-pub struct ApprovalSettingsRecord {
-    pub settings_id: i16,
-    pub enabled: bool,
-    pub endpoint: Option<String>,
-    pub model: Option<String>,
-    pub timeout_ms: i64,
-    pub max_input_bytes: i64,
-    pub max_concurrent: i64,
-    pub max_output_tokens: i64,
-    pub api_key_ciphertext: Option<Vec<u8>>,
-    pub api_key_nonce: Option<Vec<u8>>,
-    pub api_key_key_version: Option<i16>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Clone, Debug, FromRow)]
-pub struct ApplicationApprovalSecretRecord {
-    pub api_key_ciphertext: Option<Vec<u8>>,
-    pub api_key_nonce: Option<Vec<u8>>,
-    pub api_key_key_version: Option<i16>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
-pub struct ApprovalSettingsResponse {
-    pub enabled: bool,
-    pub endpoint: Option<String>,
-    pub model: Option<String>,
-    pub timeout_ms: i64,
-    pub max_input_bytes: i64,
-    pub max_concurrent: i64,
-    pub max_output_tokens: i64,
-    pub configured: bool,
-    pub api_key_configured: bool,
-    pub api_key_source: String,
-    pub secret_storage_ready: bool,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
-pub struct UpdateApprovalSettingsRequest {
-    #[serde(default = "default_approval_enabled")]
-    pub enabled: bool,
-    pub endpoint: Option<String>,
-    pub model: Option<String>,
-    #[validate(range(min = 100, max = 30_000))]
-    pub timeout_ms: i64,
-    #[validate(range(min = 1, max = 524_288))]
-    pub max_input_bytes: i64,
-    #[validate(range(min = 1, max = 64))]
-    pub max_concurrent: i64,
-    #[serde(default = "default_approval_output_tokens")]
-    #[validate(range(min = 256, max = 8_192))]
-    pub max_output_tokens: i64,
-    #[serde(default)]
-    pub api_key: Option<String>,
-    #[serde(default)]
-    pub clear_api_key: bool,
-}
-
-fn default_approval_enabled() -> bool {
-    true
-}
-
-fn default_approval_output_tokens() -> i64 {
-    1024
-}
-
-#[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct ApprovalTestResponse {
-    pub ok: bool,
-    pub stage: String,
-    pub message: String,
-    pub latency_ms: u64,
-    pub model: Option<String>,
-    pub decision: Option<String>,
-    pub risk: Option<String>,
-    pub reason_code: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, FromRow)]
@@ -785,14 +661,6 @@ pub struct ApplicationTokenRecord {
     pub app_max_file_bytes: Option<i64>,
     pub app_max_sessions: Option<i64>,
     pub app_network_enabled: bool,
-    pub app_approval_mode: String,
-    pub app_approval_endpoint: Option<String>,
-    pub app_approval_model: Option<String>,
-    pub app_approval_timeout_ms: Option<i64>,
-    pub app_approval_max_input_bytes: Option<i64>,
-    pub app_approval_max_concurrent: Option<i64>,
-    pub app_approval_max_output_tokens: Option<i64>,
-    pub app_approval_api_key_configured: bool,
     pub expires_at: Option<DateTime<Utc>>,
     pub scopes: Vec<String>,
     pub max_timeout_ms: Option<i64>,

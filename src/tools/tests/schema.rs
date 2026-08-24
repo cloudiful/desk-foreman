@@ -194,9 +194,6 @@ fn openapi_includes_http_tool_paths() {
         "/api/admin/users/{user_id}/tools/glob",
         "/api/admin/users/{user_id}/tools/grep",
         "/api/admin/users/{user_id}/tools/stat",
-        "/api/admin/approval-settings",
-        "/api/admin/approval-settings/test",
-        "/api/admin/applications/{application_id}/approval-test",
     ] {
         assert!(paths.contains_key(path), "missing OpenAPI path {path}");
     }
@@ -212,29 +209,4 @@ fn openapi_includes_http_tool_paths() {
             "legacy OpenAPI path remains: {path}"
         );
     }
-
-    assert!(
-        document
-            .components
-            .as_ref()
-            .expect("OpenAPI components should be present")
-            .schemas
-            .contains_key("ApprovalSettingsResponse")
-    );
-    assert!(
-        document
-            .components
-            .as_ref()
-            .expect("OpenAPI components should be present")
-            .schemas
-            .contains_key("UpdateApprovalSettingsRequest")
-    );
-    assert!(
-        document
-            .components
-            .as_ref()
-            .expect("OpenAPI components should be present")
-            .schemas
-            .contains_key("ApprovalTestResponse")
-    );
 }

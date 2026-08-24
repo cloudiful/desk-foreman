@@ -36,7 +36,7 @@ Shell execution always runs through `runner-manager`. The standard request does 
 
 Workspace paths are checked for traversal, symlink escapes, protected credentials, and workspace boundaries. Dangerous host-oriented commands and Docker socket access are denied before execution. These checks are policy guards, not the isolation boundary: Docker and workspace mounts provide the runtime boundary. Tool audit records store actor/workspace/tool metadata, hashes, status, duration/size fields where available, and bounded previews; full commands, patches, stdin, and shell output are not persisted by default.
 
-Desk Foreman can optionally review side-effecting operations with an OpenAI Responses-compatible reviewer before execution. Configure the global reviewer endpoint and model from the admin Approval page; application bindings can inherit, disable, or override that reviewer. Set `APPROVAL_API_KEY` (or `OPENAI_API_KEY`) only in the gateway environment. Reviewer failures deny execution, and reviewer requests do not persist command, stdin, patch, prompt, or model response contents.
+Tool audit records store actor/workspace/tool metadata, hashes, status, duration/size fields where available, and bounded previews; full commands, patches, stdin, and shell output are not persisted by default.
 
 ## Endpoints
 
@@ -60,7 +60,6 @@ Desk Foreman can optionally review side-effecting operations with an OpenAI Resp
 - `GET /api/admin/workspace-runners`
 - `GET /api/admin/runner-sessions`
 - `GET /api/admin/operations/summary`
-- `GET|PATCH /api/admin/approval-settings`
 - `GET|POST /api/admin/runner-managers`
 - `PATCH /api/admin/runner-managers/{runner_manager_id}`
 - `POST /api/admin/workspace-bindings/{binding_id}/archive|restore|reset`
@@ -98,12 +97,8 @@ Desk Foreman can optionally review side-effecting operations with an OpenAI Resp
 - `MAX_SESSIONS` optional server-wide policy cap
 - `SERVER_SCOPES` optional comma-separated server scope allowlist
 - `NETWORK_ENABLED` default `true` for policy calculation; Docker runner network remains separately controlled
-- `APPROVAL_API_KEY` optional gateway secret for the configured approval reviewer; `OPENAI_API_KEY` is accepted as a fallback
-- `DESK_FOREMAN_SECRET_MASTER_KEY` optional base64-encoded 32-byte initial seed for the application master secret; it is used only when the PostgreSQL `app_secret` row does not exist
 - `WORKSPACE_RETENTION_DAYS` default `30`, archived workspace retention before janitor deletion
 - `FRONTEND_DIST` default `frontend/dist`
-
-Approval reviewer settings are managed from the admin UI. Global settings apply to applications using `inherit`; applications using `enabled` have their own endpoint, model, API key, and reviewer limits. API keys are never returned by the API. The application master secret is generated once in the `app_secret` table and must be included in PostgreSQL backups. Deleting it makes stored reviewer keys unrecoverable. Changing the optional environment seed after initialization has no effect.
 
 ## Frontend
 

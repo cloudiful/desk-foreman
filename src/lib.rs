@@ -1,6 +1,5 @@
 pub mod actor;
 pub mod api;
-pub mod approval;
 pub mod auth;
 pub mod config;
 pub mod db;
@@ -9,7 +8,6 @@ pub mod lifecycle;
 pub mod pathing;
 pub mod policy;
 pub mod runner;
-pub mod secrets;
 pub mod shell;
 pub mod tools;
 pub mod workspace;
@@ -36,7 +34,6 @@ use tower_http::services::{ServeDir, ServeFile};
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<AppConfig>,
-    pub approval: Arc<approval::ApprovalService>,
     pub runner: Arc<dyn RunnerService>,
     pub runner_broker: Arc<RunnerBroker>,
     pub db: sqlx::PgPool,
@@ -53,7 +50,6 @@ pub async fn run() -> anyhow::Result<()> {
 
     let state = AppState {
         config: Arc::clone(&config),
-        approval: Arc::new(approval::ApprovalService::from_env_or_database(&db).await?),
         runner,
         runner_broker,
         db,

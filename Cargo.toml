@@ -1,7 +1,6 @@
 [workspace]
 members = [
     ".",
-    "crates/approval",
     "crates/runner-manager",
     "crates/runner-protocol",
     "crates/workspace-sdk",
@@ -14,12 +13,9 @@ edition = "2024"
 
 [workspace.dependencies]
 anyhow = "1.0.102"
-async-openai = { version = "0.41.3", default-features = false, features = ["byot", "middleware", "responses", "rustls"] }
 argon2 = "0.5.3"
-base64 = "0.22.1"
 axum = { version = "0.8.9", features = ["http1", "json", "tokio", "tracing"] }
 axum-extra = { version = "0.12.6", features = ["cookie"] }
-chacha20poly1305 = "0.11.0"
 chrono = { version = "0.4.45", features = ["serde"] }
 pty-process = { version = "0.5.3", features = ["async"] }
 rand = "0.10.1"
@@ -41,7 +37,6 @@ utoipa = { version = "5.5.0", features = ["chrono", "uuid"] }
 uuid = { version = "1.23.3", features = ["serde", "v4"] }
 validator = { version = "0.21.0", features = ["derive"] }
 runner-protocol = { package = "desk-foreman-runner-protocol", path = "crates/runner-protocol" }
-desk-foreman-approval = { path = "crates/approval" }
 desk-foreman-workspace-sdk = { path = "crates/workspace-sdk" }
 
 [package]
@@ -54,16 +49,12 @@ description = "Workspace-scoped MCP coding service with isolated runners"
 
 [dependencies]
 anyhow.workspace = true
-desk-foreman-approval.workspace = true
 argon2.workspace = true
-base64.workspace = true
 axum.workspace = true
 axum-extra.workspace = true
 chrono.workspace = true
-chacha20poly1305.workspace = true
 pty-process.workspace = true
 rand.workspace = true
-reqwest.workspace = true
 rmcp.workspace = true
 schemars.workspace = true
 serde.workspace = true
@@ -81,4 +72,4 @@ utoipa.workspace = true
 uuid.workspace = true
 validator.workspace = true
 runner-protocol.workspace = true
-desk-foreman-workspace-sdk = { workspace = true, features = ["approval"] }
+desk-foreman-workspace-sdk.workspace = true

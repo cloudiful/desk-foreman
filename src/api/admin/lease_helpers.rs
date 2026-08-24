@@ -189,7 +189,6 @@ mod tests {
 
     pub(super) fn fake_state(runner: Arc<FakeRunnerService>) -> AppState {
         AppState {
-            approval: Arc::new(crate::approval::ApprovalService::disabled()),
             config: Arc::new(AppConfig {
                 bind_addr: "127.0.0.1:0".to_string(),
                 mcp_allowed_hosts: Vec::new(),

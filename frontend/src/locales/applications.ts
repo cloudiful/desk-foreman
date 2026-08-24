@@ -4,8 +4,6 @@ export interface ApplicationsMessages {
     create: string
     edit: string
     tokens: string
-    testReviewer: string
-    clearApiKey: string
     saveChanges: string
   }
   searchPlaceholder: string
@@ -44,7 +42,6 @@ export interface ApplicationsMessages {
   sections: {
     general: string
     resourceLimits: string
-    approvalReviewer: string
   }
   fields: {
     name: string
@@ -56,42 +53,18 @@ export interface ApplicationsMessages {
     maxSessions: string
     networkAccess: string
     active: string
-    mode: string
-    endpoint: string
-    model: string
-    apiKey: string
-    timeout: string
-    maxInput: string
-    concurrentReviews: string
-    maxOutputTokens: string
   }
   hints: {
     workspaceTemplate: string
     networkAccess: string
     active: string
-    apiKey: string
-    testReviewer: string
   }
   placeholders: {
     name: string
     workspaceTemplate: string
     defaultShell: string
     unlimited: string
-    endpoint: string
-    model: string
-    apiKey: string
-    globalDefault: string
     tokenName: string
-  }
-  approvalModes: {
-    inherit: string
-    disabled: string
-    enabled: string
-  }
-  approvalTest: {
-    passed: string
-    failed: string
-    description: string
   }
   validation: {
     nameRequired: string
@@ -103,7 +76,6 @@ export interface ApplicationsMessages {
   errors: {
     load: string
     save: string
-    test: string
     loadTokens: string
     createToken: string
     revokeToken: string
@@ -124,8 +96,6 @@ const applications: ApplicationsMessages = {
     create: 'Create application',
     edit: 'Edit application',
     tokens: 'Application tokens',
-    testReviewer: 'Test application reviewer',
-    clearApiKey: 'Clear application reviewer API key',
     saveChanges: 'Save changes',
   },
   searchPlaceholder: 'Search applications…',
@@ -164,7 +134,6 @@ const applications: ApplicationsMessages = {
   sections: {
     general: 'General',
     resourceLimits: 'Resource limits',
-    approvalReviewer: 'Approval reviewer',
   },
   fields: {
     name: 'Name',
@@ -176,43 +145,18 @@ const applications: ApplicationsMessages = {
     maxSessions: 'Max sessions',
     networkAccess: 'Network access',
     active: 'Active',
-    mode: 'Mode',
-    endpoint: 'Responses API base URL',
-    model: 'Model',
-    apiKey: 'API key',
-    timeout: 'Timeout (ms)',
-    maxInput: 'Max input (bytes)',
-    concurrentReviews: 'Concurrent reviews',
-    maxOutputTokens: 'Max output tokens',
   },
   hints: {
     workspaceTemplate: 'Optional template directory copied into new workspaces',
     networkAccess: 'Allow outbound network for sessions',
     active: 'Inactive applications cannot authenticate',
-    apiKey: 'Leave blank to keep the stored key',
-    testReviewer:
-      'Tests the saved application configuration without executing a tool.',
   },
   placeholders: {
     name: 'e.g. code-agent',
     workspaceTemplate: 'e.g. web-app-template',
     defaultShell: '/bin/bash',
     unlimited: 'Unlimited',
-    endpoint: 'https://api.openai.com/v1',
-    model: 'Reviewer model',
-    apiKey: 'Enter an application reviewer key',
-    globalDefault: 'Global default',
     tokenName: 'e.g. ci-agent',
-  },
-  approvalModes: {
-    inherit: 'Inherit global settings',
-    disabled: 'Disabled',
-    enabled: 'Use application reviewer',
-  },
-  approvalTest: {
-    passed: 'Reviewer test passed',
-    failed: 'Reviewer test failed',
-    description: '{message} ({latency} ms)',
   },
   validation: {
     nameRequired: 'Name is required',
@@ -224,7 +168,6 @@ const applications: ApplicationsMessages = {
   errors: {
     load: 'Failed to load applications',
     save: 'Failed to save application',
-    test: 'Failed to test application reviewer',
     loadTokens: 'Failed to load application tokens',
     createToken: 'Failed to create token',
     revokeToken: 'Failed to revoke token',
@@ -246,8 +189,6 @@ export const zhCN: ApplicationsMessages = {
     create: '创建应用',
     edit: '编辑应用',
     tokens: '应用令牌',
-    testReviewer: '测试应用审查器',
-    clearApiKey: '清除应用审查器 API 密钥',
     saveChanges: '保存更改',
   },
   searchPlaceholder: '搜索应用…',
@@ -286,7 +227,6 @@ export const zhCN: ApplicationsMessages = {
   sections: {
     general: '常规',
     resourceLimits: '资源限制',
-    approvalReviewer: '审批审查器',
   },
   fields: {
     name: '名称',
@@ -298,42 +238,18 @@ export const zhCN: ApplicationsMessages = {
     maxSessions: '最大会话数',
     networkAccess: '网络访问',
     active: '启用',
-    mode: '模式',
-    endpoint: 'Responses API 基础 URL',
-    model: '模型',
-    apiKey: 'API 密钥',
-    timeout: '超时（毫秒）',
-    maxInput: '最大输入（字节）',
-    concurrentReviews: '并发审查数',
-    maxOutputTokens: '最大输出令牌数',
   },
   hints: {
     workspaceTemplate: '可选的模板目录，会复制到新工作区中',
     networkAccess: '允许会话访问出站网络',
     active: '未启用的应用无法进行身份验证',
-    apiKey: '留空以保留已存储的密钥',
-    testReviewer: '测试已保存的应用配置，不会执行工具。',
   },
   placeholders: {
     name: '例如 code-agent',
     workspaceTemplate: '例如 web-app-template',
     defaultShell: '/bin/bash',
     unlimited: '不限',
-    endpoint: 'https://api.openai.com/v1',
-    model: '审查模型',
-    apiKey: '输入应用审查器密钥',
-    globalDefault: '全局默认值',
     tokenName: '例如 ci-agent',
-  },
-  approvalModes: {
-    inherit: '继承全局设置',
-    disabled: '禁用',
-    enabled: '使用应用审查器',
-  },
-  approvalTest: {
-    passed: '审查器测试通过',
-    failed: '审查器测试失败',
-    description: '{message}（{latency} 毫秒）',
   },
   validation: {
     nameRequired: '名称为必填项',
@@ -345,7 +261,6 @@ export const zhCN: ApplicationsMessages = {
   errors: {
     load: '加载应用失败',
     save: '保存应用失败',
-    test: '测试应用审查器失败',
     loadTokens: '加载应用令牌失败',
     createToken: '创建令牌失败',
     revokeToken: '撤销令牌失败',

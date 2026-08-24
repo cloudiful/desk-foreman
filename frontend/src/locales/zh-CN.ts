@@ -1,6 +1,5 @@
 import type { MessageSchema } from './schema'
 import { zhCN as applications } from './applications'
-import { zhCN as approval } from './approval'
 import { zhCN as audit } from './audit'
 import { zhCN as auth } from './auth'
 import { zhCN as dashboard } from './dashboard'
@@ -28,7 +27,6 @@ const zhCN = {
       operations: '操作',
       bindings: '绑定',
       audit: '审计日志',
-      approval: '审批',
     },
     changePassword: '修改密码',
     signOut: '退出登录',
@@ -46,7 +44,6 @@ const zhCN = {
   auth,
   dashboard,
   audit,
-  approval,
   users,
   applications,
   runnerManagers,
