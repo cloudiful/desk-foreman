@@ -39,12 +39,14 @@ const config = computed(() => {
     <template #leading>
       <span v-if="config.dot" class="size-1.5 rounded-full bg-current" />
     </template>
-    {{
-      status
-        ? te(`shared.status.${status}`)
-          ? t(`shared.status.${status}`)
-          : status
-        : t('shared.status.unknown')
-    }}
+    <span class="whitespace-nowrap">
+      {{
+        status
+          ? te(`shared.status.${status}`)
+            ? t(`shared.status.${status}`)
+            : status
+          : t('shared.status.unknown')
+      }}
+    </span>
   </UBadge>
 </template>

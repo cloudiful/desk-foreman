@@ -67,7 +67,7 @@ function toggleSort(column: DataColumn): void {
             v-for="column in columns"
             :key="column.key"
             :class="[
-              'px-4 py-2.5 text-left font-medium text-(--ui-text-muted)',
+              'whitespace-nowrap px-4 py-2.5 text-left font-medium text-(--ui-text-muted)',
               column.class,
             ]"
           >

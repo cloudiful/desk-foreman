@@ -7,7 +7,7 @@ import {
 } from '../api/users'
 import { useNotify } from '../composables/useNotify'
 import { formatDateTime } from '../utils/format'
-import { PAGE_SIZE, pageCount, pageOffset } from '../utils/pagination'
+import { pageCount, pageOffset } from '../utils/pagination'
 import type {
   ListWorkspaceBindingsData,
   WorkspaceBindingResponse,
@@ -15,6 +15,10 @@ import type {
 
 type LifecycleFilter = 'all' | 'active' | 'archived' | 'resetting'
 type BindingAction = 'archive' | 'restore' | 'reset'
+
+// Bindings use a smaller page size so the existing pagination is visible
+// for normal datasets without changing the shared admin page size.
+const BINDING_PAGE_SIZE = 20
 
 const { success, error: notifyError } = useNotify()
 const { t } = useI18n()
@@ -40,7 +44,7 @@ const actionTarget = ref<{
 const acting = ref(false)
 let loadSequence = 0
 
-const totalPages = computed(() => pageCount(total.value, PAGE_SIZE))
+const totalPages = computed(() => pageCount(total.value, BINDING_PAGE_SIZE))
 
 async function load(): Promise<void> {
   const sequence = ++loadSequence
@@ -48,8 +52,8 @@ async function load(): Promise<void> {
   error.value = ''
   try {
     const query: NonNullable<ListWorkspaceBindingsData['query']> = {
-      limit: PAGE_SIZE,
-      offset: pageOffset(page.value, PAGE_SIZE),
+      limit: BINDING_PAGE_SIZE,
+      offset: pageOffset(page.value, BINDING_PAGE_SIZE),
       application_id: parseApplicationId(applicationId.value),
       external_user_id: externalUserId.value.trim() || undefined,
       workspace_key: workspaceKey.value.trim() || undefined,
@@ -362,7 +366,7 @@ onMounted(() => void load())
         <UPagination
           v-model:page="page"
           :total="total"
-          :items-per-page="PAGE_SIZE"
+          :items-per-page="BINDING_PAGE_SIZE"
           @update:page="onPageChange"
         />
       </div>
