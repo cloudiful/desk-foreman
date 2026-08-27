@@ -14,4 +14,5 @@ WHERE (
             ELSE wr.status
            END = $1
       )
-  AND ($2::TEXT IS NULL OR wr.owner_kind = $2);
+  AND ($2::TEXT IS NULL OR wr.owner_kind = $2)
+  AND ($1::TEXT IS NOT NULL OR wr.status <> 'removed');
