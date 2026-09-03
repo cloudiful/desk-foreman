@@ -216,6 +216,10 @@ impl RunnerService for FakeRunnerService {
 }
 
 fn app_state(root: PathBuf) -> AppState {
+    app_state_with_runner(root, FakeRunnerService::new() as Arc<dyn RunnerService>)
+}
+
+fn app_state_with_runner(root: PathBuf, runner: Arc<dyn RunnerService>) -> AppState {
     AppState {
         config: Arc::new(AppConfig {
             bind_addr: "127.0.0.1:0".to_string(),
@@ -248,7 +252,7 @@ fn app_state(root: PathBuf) -> AppState {
             frontend_dist: root.join("frontend/dist"),
             build_started_at: SystemTime::now(),
         }),
-        runner: FakeRunnerService::new() as Arc<dyn RunnerService>,
+        runner,
         runner_broker: crate::runner::RunnerBroker::new(
             PgPoolOptions::new()
                 .connect_lazy("postgres://example.invalid/test")
@@ -257,6 +261,50 @@ fn app_state(root: PathBuf) -> AppState {
         db: PgPoolOptions::new()
             .connect_lazy("postgres://example.invalid/test")
             .expect("lazy pool"),
+    }
+}
+
+pub(crate) struct StaticCommandRunner(pub CommandOutput);
+
+impl RunnerService for StaticCommandRunner {
+    fn exec_shell<'a>(
+        &'a self,
+        _request: ExecRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<ShellToolOutput>> {
+        Box::pin(async move { anyhow::bail!("unsupported") })
+    }
+
+    fn write_stdin<'a>(
+        &'a self,
+        _request: InputRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<ShellToolOutput>> {
+        Box::pin(async move { anyhow::bail!("unsupported") })
+    }
+
+    fn run_command<'a>(
+        &'a self,
+        _request: RunnerCommandRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<CommandOutput>> {
+        let output = self.0.clone();
+        Box::pin(async move { Ok(output) })
+    }
+
+    fn cancel_session<'a>(
+        &'a self,
+        _request: CancelSessionRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<RunnerSessionStatus>> {
+        Box::pin(async move { anyhow::bail!("unsupported") })
+    }
+
+    fn list_sessions<'a>(&'a self) -> RunnerFuture<'a, anyhow::Result<Vec<RunnerSessionStatus>>> {
+        Box::pin(async move { Ok(Vec::new()) })
+    }
+
+    fn cleanup_runner_owner<'a>(
+        &'a self,
+        _owner: RunnerOwner,
+    ) -> RunnerFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move { Ok(()) })
     }
 }
 

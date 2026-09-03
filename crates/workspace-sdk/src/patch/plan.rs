@@ -116,7 +116,7 @@ pub(crate) fn plan_patch(
                 })?;
                 let (updated, added_lines, deleted_lines) =
                     apply_hunks(&document, hunks).map_err(|message| {
-                        WorkspaceSdkError::invalid_input(format!(
+                        WorkspaceSdkError::patch_context_not_found(format!(
                             "failed to apply hunks to {path}: {message}"
                         ))
                     })?;

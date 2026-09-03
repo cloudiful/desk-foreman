@@ -23,6 +23,7 @@ pub(super) fn router() -> Router<AppState> {
 fn map_tool_error(error: ToolError) -> AppError {
     match error {
         ToolError::InvalidInput(message) => AppError::bad_request(message),
+        ToolError::PatchContextNotFound(message) => AppError::bad_request(message),
         ToolError::NotFound(message) => AppError::not_found(message),
         ToolError::Forbidden(message) => AppError::forbidden(message),
         ToolError::Internal(error) => AppError::internal(error),

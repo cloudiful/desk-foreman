@@ -125,7 +125,7 @@ pub(crate) async fn glob_output_in_runner(
     let output = run_command_in_runner(state, actor, search_root.clone(), "rg", args).await?;
     const LIMIT: usize = 100;
     let mut matches = output
-        .output
+        .stdout
         .lines()
         .map(|path| workspace_relative_display(&actor.workspace_root, &search_root.join(path)))
         .take(LIMIT)
@@ -134,7 +134,7 @@ pub(crate) async fn glob_output_in_runner(
     Ok(GlobOutput {
         path: workspace_relative_display(&actor.workspace_root, &search_root),
         pattern: params.pattern.clone(),
-        truncated: output.truncated || output.output.lines().nth(LIMIT).is_some(),
+        truncated: output.truncated || output.stdout.lines().nth(LIMIT).is_some(),
         matches,
     })
 }
@@ -160,6 +160,9 @@ fn map_readonly_sdk_error(error: WorkspaceSdkError) -> ToolError {
     let message = error.to_string();
     match error {
         WorkspaceSdkError::InvalidInput(message) => ToolError::InvalidInput(message),
+        WorkspaceSdkError::PatchContextNotFound(message) => {
+            ToolError::PatchContextNotFound(message)
+        }
         WorkspaceSdkError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
             ToolError::NotFound(message)
         }

@@ -88,6 +88,9 @@ impl From<ApplyPatchSummary> for ApplyPatchOutput {
 fn workspace_tools(actor: &ActorContext) -> Result<WorkspaceFileTools, ToolError> {
     WorkspaceFileTools::new(&actor.workspace_root).map_err(|error| match error {
         WorkspaceSdkError::InvalidInput(message) => ToolError::InvalidInput(message),
+        WorkspaceSdkError::PatchContextNotFound(message) => {
+            ToolError::PatchContextNotFound(message)
+        }
         other => ToolError::Internal(other.into()),
     })
 }
@@ -432,6 +435,9 @@ fn map_workspace_sdk_error(error: WorkspaceSdkError) -> ToolError {
     let message = error.to_string();
     match error {
         WorkspaceSdkError::InvalidInput(message) => ToolError::InvalidInput(message),
+        WorkspaceSdkError::PatchContextNotFound(message) => {
+            ToolError::PatchContextNotFound(message)
+        }
         WorkspaceSdkError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
             ToolError::NotFound(message)
         }

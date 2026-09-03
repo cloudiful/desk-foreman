@@ -228,3 +228,42 @@ fn update_rejects_non_utf8_content() {
     let patch = "*** Begin Patch\n*** Update File: binary.bin\n@@\n-x\n+y\n*** End Patch";
     assert!(apply_patch(temp.path(), patch).is_err());
 }
+
+#[test]
+fn patch_context_not_found_has_stable_code() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("a.txt"), "hello\nworld\n").expect("seed");
+    let patch = "*** Begin Patch\n*** Update File: a.txt\n@@\n-missing\n+new\n*** End Patch";
+    let error = apply_patch(temp.path(), patch).expect_err("context mismatch should fail");
+    assert_eq!(error.code(), "patch_context_not_found");
+    let message = error.to_string();
+    assert!(
+        message.contains("unable to find patch context")
+            || message.contains("failed to apply hunks"),
+        "message should indicate context failure, got {message}"
+    );
+    match error {
+        crate::WorkspaceSdkError::PatchContextNotFound(_) => {}
+        other => panic!("expected PatchContextNotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn patch_context_ambiguous_has_stable_code() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("a.txt"), "same\nsame\n").expect("seed");
+    let patch = "*** Begin Patch\n*** Update File: a.txt\n@@\n-same\n+changed\n*** End Patch";
+    let error = apply_patch(temp.path(), patch).expect_err("ambiguous should fail");
+    assert_eq!(error.code(), "patch_context_not_found");
+    assert!(matches!(
+        error,
+        crate::WorkspaceSdkError::PatchContextNotFound(_)
+    ));
+}
+
+#[test]
+fn generic_invalid_input_remains_generic_code() {
+    let error = parse_patch("*** Begin Patch\n*** End Patch\n").expect_err("empty patch");
+    assert_eq!(error.code(), "invalid_input");
+    assert!(matches!(error, crate::WorkspaceSdkError::InvalidInput(_)));
+}

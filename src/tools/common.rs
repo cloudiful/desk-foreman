@@ -29,6 +29,8 @@ pub enum ToolError {
     #[error("{0}")]
     InvalidInput(String),
     #[error("{0}")]
+    PatchContextNotFound(String),
+    #[error("{0}")]
     NotFound(String),
     #[error("{0}")]
     Forbidden(String),
@@ -271,6 +273,13 @@ pub(super) fn tool_error_result(error: ToolError) -> Result<CallToolResult, rmcp
             message,
             true,
             "fix_arguments_and_retry",
+        ),
+        ToolError::PatchContextNotFound(message) => (
+            "patch_context_not_found",
+            "tool_input",
+            message,
+            true,
+            "read_current_contents_and_regenerate_patch",
         ),
         ToolError::NotFound(message) => (
             "not_found",

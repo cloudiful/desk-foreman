@@ -86,11 +86,35 @@ pub(crate) async fn search_files_output_in_runner(
     }
     args.push(params.pattern.clone());
     let output = run_command_in_runner(state, actor, search_root.clone(), "rg", args).await?;
+    match output.exit_code {
+        Some(0) | Some(1) => {}
+        Some(code) => {
+            let stderr = output.stderr.trim();
+            let message = if stderr.is_empty() {
+                format!("rg failed with exit code {code}")
+            } else {
+                format!("rg failed with exit code {code}: {stderr}")
+            };
+            return Err(tool_internal(anyhow::anyhow!(message)));
+        }
+        None => {
+            if output.timed_out {
+                return Err(tool_internal(anyhow::anyhow!("rg timed out")));
+            }
+            let stderr = output.stderr.trim();
+            let message = if stderr.is_empty() {
+                "rg failed: no exit code".to_string()
+            } else {
+                format!("rg failed: {stderr}")
+            };
+            return Err(tool_internal(anyhow::anyhow!(message)));
+        }
+    }
     parse_search_output(
         &actor.workspace_root,
         &search_root,
         &params.pattern,
-        output.output.lines(),
+        output.stdout.lines(),
     )
 }
 
