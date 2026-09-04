@@ -1,13 +1,22 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
-use runner_protocol::CommandOutput;
+use runner_protocol::{
+    CancelSessionRequest, CommandOutput, ExecRequest, InputRequest, RunnerCommandRequest,
+    RunnerOwner, RunnerSessionStatus, ShellToolOutput,
+};
 use serde_json::json;
 use tempfile::tempdir;
+use tokio::sync::Mutex;
 
-use crate::tools::{
-    ToolError, common,
-    params::{ApplyPatchParams, GlobParams, GrepParams, ReadParams, ShellParams, WriteStdinParams},
-    readonly, shared,
+use crate::{
+    runner::{RunnerFuture, RunnerService},
+    tools::{
+        ToolError, common,
+        params::{
+            ApplyPatchParams, GlobParams, GrepParams, ReadParams, ShellParams, WriteStdinParams,
+        },
+        readonly, shared,
+    },
 };
 
 use super::{
@@ -551,5 +560,189 @@ async fn patch_partial_semantics_preserved() {
     assert_eq!(
         std::fs::read_to_string(temp.path().join("second.txt")).unwrap(),
         "changed\n"
+    );
+}
+
+struct CapturingCommandRunner {
+    requests: Mutex<Vec<RunnerCommandRequest>>,
+    output: CommandOutput,
+}
+
+impl CapturingCommandRunner {
+    fn new(output: CommandOutput) -> Arc<Self> {
+        Arc::new(Self {
+            requests: Mutex::new(Vec::new()),
+            output,
+        })
+    }
+
+    async fn last_request(&self) -> RunnerCommandRequest {
+        self.requests
+            .lock()
+            .await
+            .last()
+            .expect("runner should receive a command")
+            .clone()
+    }
+}
+
+impl RunnerService for CapturingCommandRunner {
+    fn exec_shell<'a>(
+        &'a self,
+        _request: ExecRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<ShellToolOutput>> {
+        Box::pin(async move { anyhow::bail!("unsupported") })
+    }
+
+    fn write_stdin<'a>(
+        &'a self,
+        _request: InputRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<ShellToolOutput>> {
+        Box::pin(async move { anyhow::bail!("unsupported") })
+    }
+
+    fn run_command<'a>(
+        &'a self,
+        request: RunnerCommandRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<CommandOutput>> {
+        Box::pin(async move {
+            self.requests.lock().await.push(request);
+            Ok(self.output.clone())
+        })
+    }
+
+    fn cancel_session<'a>(
+        &'a self,
+        _request: CancelSessionRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<RunnerSessionStatus>> {
+        Box::pin(async move { anyhow::bail!("unsupported") })
+    }
+
+    fn list_sessions<'a>(&'a self) -> RunnerFuture<'a, anyhow::Result<Vec<RunnerSessionStatus>>> {
+        Box::pin(async move { Ok(Vec::new()) })
+    }
+
+    fn cleanup_runner_owner<'a>(
+        &'a self,
+        _owner: RunnerOwner,
+    ) -> RunnerFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+fn rg_match_output(path: &str, line: &str, line_number: u64) -> CommandOutput {
+    let stdout = format!(
+        "{{\"type\":\"match\",\"data\":{{\"path\":{{\"text\":\"{path}\"}},\"lines\":{{\"text\":\"{line}\\n\"}},\"line_number\":{line_number}}}}}\n"
+    );
+    CommandOutput {
+        output: stdout.clone(),
+        stdout: stdout.clone(),
+        stdout_bytes: stdout.len(),
+        stderr: String::new(),
+        stderr_bytes: 0,
+        exit_code: Some(0),
+        truncated: false,
+        timed_out: false,
+        wall_time_seconds: 0.01,
+    }
+}
+
+#[tokio::test]
+async fn grep_file_path_uses_parent_as_workdir() {
+    let temp = tempdir().expect("tempdir");
+    std::fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+    std::fs::write(temp.path().join("src/lib.rs"), "market\n").expect("seed");
+    let actor = test_actor(temp.path(), 10);
+    let runner = CapturingCommandRunner::new(rg_match_output("lib.rs", "market", 1));
+    let state = app_state_with_runner(temp.path().to_path_buf(), runner.clone());
+
+    let search = shared::grep(
+        &state,
+        &actor,
+        &parse_params::<GrepParams>(json!({
+            "pattern": "market",
+            "path": "src/lib.rs"
+        }))
+        .expect("params"),
+    )
+    .await
+    .expect("file grep should succeed");
+
+    let request = runner.last_request().await;
+    let expected_workdir: PathBuf = actor.workspace_root.join("src");
+    assert_eq!(request.working_dir, expected_workdir);
+    assert_eq!(request.program, "rg");
+    assert!(
+        request.args.iter().any(|arg| arg == "market"),
+        "pattern should be in rg args: {:?}",
+        request.args
+    );
+    assert_eq!(
+        request.args.last().map(String::as_str),
+        Some("lib.rs"),
+        "file name should be the explicit rg target: {:?}",
+        request.args
+    );
+    assert_eq!(search.matches.len(), 1);
+    assert_eq!(search.matches[0].path, "src/lib.rs");
+    assert_eq!(search.path, "src/lib.rs");
+}
+
+#[tokio::test]
+async fn grep_directory_path_keeps_directory_as_workdir() {
+    let temp = tempdir().expect("tempdir");
+    std::fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+    std::fs::write(temp.path().join("src/lib.rs"), "market\n").expect("seed");
+    let actor = test_actor(temp.path(), 10);
+    let runner = CapturingCommandRunner::new(rg_match_output("lib.rs", "market", 1));
+    let state = app_state_with_runner(temp.path().to_path_buf(), runner.clone());
+
+    let search = shared::grep(
+        &state,
+        &actor,
+        &parse_params::<GrepParams>(json!({
+            "pattern": "market",
+            "path": "src"
+        }))
+        .expect("params"),
+    )
+    .await
+    .expect("directory grep should succeed");
+
+    let request = runner.last_request().await;
+    let expected_workdir: PathBuf = actor.workspace_root.join("src");
+    assert_eq!(request.working_dir, expected_workdir);
+    assert_eq!(
+        request.args.last().map(String::as_str),
+        Some("market"),
+        "directory search should not add an explicit file target: {:?}",
+        request.args
+    );
+    assert_eq!(search.matches.len(), 1);
+    assert_eq!(search.matches[0].path, "src/lib.rs");
+    assert_eq!(search.path, "src");
+}
+
+#[tokio::test]
+async fn grep_missing_path_returns_not_found() {
+    let temp = tempdir().expect("tempdir");
+    let actor = test_actor(temp.path(), 10);
+    let runner = CapturingCommandRunner::new(rg_match_output("missing.txt", "market", 1));
+    let state = app_state_with_runner(temp.path().to_path_buf(), runner);
+
+    let error = shared::grep(
+        &state,
+        &actor,
+        &parse_params::<GrepParams>(json!({
+            "pattern": "market",
+            "path": "missing.txt"
+        }))
+        .expect("params"),
+    )
+    .await
+    .expect_err("missing path should fail");
+    assert!(
+        matches!(error, ToolError::NotFound(_)),
+        "expected not_found, got {error:?}"
     );
 }

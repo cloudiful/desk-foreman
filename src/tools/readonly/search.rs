@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -26,13 +26,72 @@ use crate::tools::readonly::data::protected_rg_args;
 
 const MAX_SEARCH_MATCHES: usize = 100;
 
+struct GrepTarget {
+    workdir: PathBuf,
+    join_base: PathBuf,
+    display_target: PathBuf,
+    file_arg: Option<String>,
+}
+
+fn resolve_grep_target(workspace_root: &Path, input: &str) -> Result<GrepTarget, ToolError> {
+    let target = resolve_workspace_path(workspace_root, input).map_err(tool_invalid_input)?;
+    match std::fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.is_dir() => Ok(GrepTarget {
+            workdir: target.clone(),
+            join_base: target.clone(),
+            display_target: target,
+            file_arg: None,
+        }),
+        Ok(metadata) if metadata.is_file() => {
+            let parent = target
+                .parent()
+                .map(Path::to_path_buf)
+                .ok_or_else(|| tool_invalid_input(anyhow::anyhow!("invalid grep path")))?;
+            let file_name = target
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| tool_invalid_input(anyhow::anyhow!("invalid grep path")))?
+                .to_string();
+            Ok(GrepTarget {
+                workdir: parent.clone(),
+                join_base: parent,
+                display_target: target,
+                file_arg: Some(file_name),
+            })
+        }
+        Ok(_) => Err(tool_invalid_input(anyhow::anyhow!(
+            "grep path must be a file or directory"
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(ToolError::NotFound(format!("grep path not found: {input}")))
+        }
+        Err(error) => Err(tool_internal(error)),
+    }
+}
+
+fn grep_base_args(params: &GrepParams) -> Vec<String> {
+    let mut args = vec![
+        "-n".to_string(),
+        "--json".to_string(),
+        "--color".to_string(),
+        "never".to_string(),
+    ];
+    args.extend(protected_rg_args_owned());
+    if let Some(include) = &params.include {
+        args.extend(["--glob".to_string(), include.clone()]);
+    }
+    args.push(params.pattern.clone());
+    args
+}
+
 #[cfg(test)]
 pub(crate) async fn search_files_output(
     root: &Path,
     params: &GrepParams,
 ) -> Result<GrepOutput, ToolError> {
-    let search_root = resolve_workspace_path(root, &params.path).map_err(tool_invalid_input)?;
-    let output = Command::new("rg")
+    let target = resolve_grep_target(root, &params.path)?;
+    let mut command = Command::new("rg");
+    command
         .arg("-n")
         .arg("--json")
         .arg("--color")
@@ -46,8 +105,12 @@ pub(crate) async fn search_files_output(
                 .into_iter()
                 .flatten(),
         )
-        .arg(&params.pattern)
-        .current_dir(&search_root)
+        .arg(&params.pattern);
+    if let Some(file_arg) = &target.file_arg {
+        command.arg(file_arg);
+    }
+    let output = command
+        .current_dir(&target.workdir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -61,7 +124,8 @@ pub(crate) async fn search_files_output(
     }
     parse_search_output(
         root,
-        &search_root,
+        &target.join_base,
+        &target.display_target,
         &params.pattern,
         String::from_utf8_lossy(&output.stdout).lines(),
     )
@@ -72,20 +136,12 @@ pub(crate) async fn search_files_output_in_runner(
     actor: &ActorContext,
     params: &GrepParams,
 ) -> Result<GrepOutput, ToolError> {
-    let search_root =
-        resolve_workspace_path(&actor.workspace_root, &params.path).map_err(tool_invalid_input)?;
-    let mut args = vec![
-        "-n".to_string(),
-        "--json".to_string(),
-        "--color".to_string(),
-        "never".to_string(),
-    ];
-    args.extend(protected_rg_args_owned());
-    if let Some(include) = &params.include {
-        args.extend(["--glob".to_string(), include.clone()]);
+    let target = resolve_grep_target(&actor.workspace_root, &params.path)?;
+    let mut args = grep_base_args(params);
+    if let Some(file_arg) = &target.file_arg {
+        args.push(file_arg.clone());
     }
-    args.push(params.pattern.clone());
-    let output = run_command_in_runner(state, actor, search_root.clone(), "rg", args).await?;
+    let output = run_command_in_runner(state, actor, target.workdir.clone(), "rg", args).await?;
     match output.exit_code {
         Some(0) | Some(1) => {}
         Some(code) => {
@@ -112,7 +168,8 @@ pub(crate) async fn search_files_output_in_runner(
     }
     parse_search_output(
         &actor.workspace_root,
-        &search_root,
+        &target.join_base,
+        &target.display_target,
         &params.pattern,
         output.stdout.lines(),
     )
@@ -120,7 +177,8 @@ pub(crate) async fn search_files_output_in_runner(
 
 fn parse_search_output<'a, I>(
     workspace_root: &Path,
-    search_root: &Path,
+    join_base: &Path,
+    display_target: &Path,
     pattern: &str,
     lines: I,
 ) -> Result<GrepOutput, ToolError>
@@ -142,16 +200,13 @@ where
             break;
         }
         matches.push(SearchMatch {
-            path: workspace_relative_display(
-                workspace_root,
-                &search_root.join(relative_path(data)),
-            ),
+            path: workspace_relative_display(workspace_root, &join_base.join(relative_path(data))),
             line_number: line_number(data)?,
             line: line_text(data),
         });
     }
     Ok(GrepOutput {
-        path: workspace_relative_display(workspace_root, search_root),
+        path: workspace_relative_display(workspace_root, display_target),
         pattern: pattern.to_string(),
         matches,
         truncated,

@@ -119,7 +119,7 @@ pub struct GrepParams {
     #[validate(custom(function = "validate_non_blank"))]
     pub pattern: String,
     #[serde(default = "default_dot")]
-    #[schemars(description = "Workspace-relative directory to search under. Defaults to `.`.", default = "default_dot", example = &".")]
+    #[schemars(description = "Workspace-relative file or directory to search. Defaults to `.`.", default = "default_dot", example = &".")]
     #[validate(custom(function = "validate_non_blank"))]
     pub path: String,
     #[serde(default)]
