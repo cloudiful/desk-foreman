@@ -12,6 +12,7 @@
 
 pub(super) mod application;
 pub(super) mod lease;
+pub(super) mod lease_audit;
 pub(super) mod runner_manager;
 pub(super) mod shared;
 

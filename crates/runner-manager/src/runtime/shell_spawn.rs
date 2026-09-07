@@ -26,6 +26,11 @@ pub fn build_command(target: &ProcessSpawnTarget) -> Command {
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
+    // Fresh process group so `terminate_child` can SIGKILL the whole
+    // subtree (parent bash plus background grandchildren) via
+    // `kill -KILL -- -<pgid>`. Without this only the direct bash dies and
+    // orphans keep writing after takeover. See `process_termination`.
+    super::process_termination::configure_process_group(&mut cmd);
     cmd
 }
 
@@ -37,6 +42,11 @@ pub fn build_pty_command(target: &ProcessSpawnTarget) -> PtyCommand {
     for (key, value) in &target.env {
         cmd = cmd.env(key, value);
     }
+    // PTY children are already session leaders via `pty-process`
+    // (`setsid` in `spawn_impl`), so PID==PGID and the group kill in
+    // `process_termination::terminate_child` covers their descendants.
+    // Arm kill-on-drop as a second layer for abandoned handles.
+    cmd = cmd.kill_on_drop(true);
     cmd
 }
 

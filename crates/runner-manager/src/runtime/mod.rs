@@ -8,11 +8,14 @@ mod docker_lifecycle;
 mod docker_tests;
 mod janitor;
 mod local_service;
+pub(crate) mod process_termination;
 mod reporter;
 pub(crate) mod session_gate;
 mod shell_manager;
 mod shell_session;
 mod shell_spawn;
+#[cfg(test)]
+mod takeover_termination_tests;
 
 pub use backend::{ProcessSpawnTarget, RunnerBackend};
 pub use direct::DirectRunnerBackend;

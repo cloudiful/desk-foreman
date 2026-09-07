@@ -342,12 +342,23 @@ pub struct WorkspaceLeaseReleaseRequest {
 /// compare-and-swap guard. `new_owner` is the value that will be assigned if
 /// the takeover (or same-owner idempotent renew) succeeds. The granted TTL
 /// is a server constant and is not client-controlled.
+///
+/// `force` is an explicit, backward-compatible opt-in for user-confirmed
+/// takeover of a live (non-stale) lease. When `false` (the default, also used
+/// when the field is omitted) a foreign lease is eligible only after the
+/// stale threshold. When `true` the stale window is bypassed but the
+/// `expected_owner` CAS is still enforced: the takeover succeeds only when
+/// the current lease owner equals `expected_owner`. Callers must set `force`
+/// only from an explicit user confirmation; it must never be set
+/// automatically by AI retry logic.
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
 pub struct WorkspaceLeaseTakeoverRequest {
     #[validate(custom(function = "validate_non_blank"))]
     pub expected_owner: String,
     #[validate(custom(function = "validate_non_blank"))]
     pub new_owner: String,
+    #[serde(default)]
+    pub force: bool,
 }
 
 /// Row produced by `SELECT ... FOR UPDATE` on the workspace binding during
@@ -426,9 +437,14 @@ pub struct WorkspaceLeaseTakeoverResponse {
     pub cancellation: WorkspaceLeaseCancellationOutcome,
 }
 
-/// Best-effort outcome of cancelling runner sessions scoped to the binding.
-/// Cancellation errors never roll back the lease transfer; they are recorded
-/// here and in the audit log.
+/// Outcome of cancelling runner sessions scoped to the binding.
+///
+/// On foreign takeovers cancellation runs while the takeover transaction
+/// still holds the binding row lock, and the lease transfer commits only
+/// when `succeeded` is true. A failed outcome rolls the takeover back
+/// with no lease change: the caller must not resume the new run and may
+/// retry the identical request. Every committed foreign takeover therefore
+/// carries a successful outcome here.
 #[derive(Clone, Debug, Serialize, ToSchema, Default)]
 pub struct WorkspaceLeaseCancellationOutcome {
     pub attempted: bool,
@@ -991,6 +1007,9 @@ mod tests {
             serde_json::from_value(json!({ "expected_owner": "a", "new_owner": "b" }))
                 .expect("parse");
         assert!(valid.validate().is_ok());
+        // Backward compatibility: omitted `force` defaults to stale-only
+        // behavior.
+        assert!(!valid.force);
 
         let blank_expected: super::WorkspaceLeaseTakeoverRequest =
             serde_json::from_value(json!({ "expected_owner": "  ", "new_owner": "b" }))
@@ -1007,6 +1026,30 @@ mod tests {
             blank_new.validate().is_err(),
             "blank new_owner should fail validation"
         );
+    }
+
+    #[test]
+    fn takeover_request_force_defaults_false_and_parses_true() {
+        use validator::Validate;
+
+        let stale: super::WorkspaceLeaseTakeoverRequest =
+            serde_json::from_value(json!({ "expected_owner": "a", "new_owner": "b" }))
+                .expect("parse");
+        assert!(!stale.force);
+        assert!(stale.validate().is_ok());
+
+        let forced: super::WorkspaceLeaseTakeoverRequest = serde_json::from_value(
+            json!({ "expected_owner": "a", "new_owner": "b", "force": true }),
+        )
+        .expect("parse");
+        assert!(forced.force);
+        assert!(forced.validate().is_ok());
+
+        let explicit_stale: super::WorkspaceLeaseTakeoverRequest = serde_json::from_value(
+            json!({ "expected_owner": "a", "new_owner": "b", "force": false }),
+        )
+        .expect("parse");
+        assert!(!explicit_stale.force);
     }
 
     #[test]

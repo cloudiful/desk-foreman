@@ -109,7 +109,6 @@ pub async fn sync_resource_workspace_git(
             "workspace binding does not match resource path",
         ));
     }
-    actor.ensure_write_access().map_err(AppError::forbidden)?;
     if !actor.policy.allows(crate::policy::WORKSPACE_SHELL) {
         return Err(AppError::forbidden(
             "workspace.shell scope is required for git sync",
@@ -120,6 +119,25 @@ pub async fn sync_resource_workspace_git(
             "network access is required for git sync",
         ));
     }
+    // Fenced write admission, same contract as the MCP mutating tools:
+    // lock the binding row and validate the locked fresh row (never the
+    // authentication snapshot alone), holding the lock for the whole sync
+    // so a concurrent force takeover serializes against it instead of
+    // committing mid-sync. Dropping the transaction on any error path
+    // below rolls the lock back.
+    let (tx, fresh) = crate::db::queries::lock_workspace_binding_for_write(
+        &state.db,
+        binding.workspace_binding_id,
+    )
+    .await
+    .map_err(AppError::internal)?;
+    let Some(fresh) = fresh else {
+        return Err(AppError::forbidden(
+            "workspace is read-only: no write lease held by this session. Acquire the write lease (or take it over) before running mutating commands",
+        ));
+    };
+    crate::actor::admit_fenced_write(Some(&fresh), actor.lease_owner.as_deref())
+        .map_err(AppError::forbidden)?;
     let remote_url = validate_git_remote_url(&request.remote_url)?;
     let needs_initialization = !actor.workspace_root.join(".git").is_dir();
     if needs_initialization
@@ -213,6 +231,12 @@ pub async fn sync_resource_workspace_git(
         ],
     )
     .await?;
+    // The fence was held across every runner command above; release it
+    // only after the sync fully succeeded so no takeover can interleave
+    // mid-sync.
+    tx.commit()
+        .await
+        .map_err(|error| AppError::internal(error.into()))?;
     Ok(Json(crate::db::types::GitWorkspaceSyncResponse {
         status: "ready".to_string(),
         cloned: needs_initialization,
@@ -276,4 +300,48 @@ fn redact_git_output(value: &str) -> String {
         .map(|line| line.replace("Authorization:", "Authorization:[redacted]"))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, Utc};
+
+    use crate::db::types::WorkspaceBindingResponse;
+
+    fn resource_binding_with_lease(
+        lease_owner: &str,
+        now: chrono::DateTime<Utc>,
+    ) -> WorkspaceBindingResponse {
+        WorkspaceBindingResponse {
+            workspace_binding_id: 7,
+            application_id: 1,
+            external_user_id: "__resource__".to_string(),
+            workspace_key: "code_project:abc".to_string(),
+            external_user_hash: "hash".to_string(),
+            workspace_root: "/tmp/ws".to_string(),
+            is_active: true,
+            last_used_at: now,
+            created_at: now,
+            updated_at: now,
+            lifecycle_state: "active".to_string(),
+            archived_at: None,
+            resource_kind: Some("code_project".to_string()),
+            resource_id: Some("abc".to_string()),
+            write_lease_owner: Some(lease_owner.to_string()),
+            write_lease_acquired_at: Some(now),
+            write_lease_expires_at: Some(now + Duration::minutes(10)),
+        }
+    }
+
+    #[test]
+    fn git_sync_fenced_gate_denies_displaced_owner_after_handover() {
+        // Pins the git-sync admission contract to the same locked-row
+        // fence as the MCP mutating tools: the sync handler validates the
+        // locked fresh row, so an already-admitted old owner cannot cross
+        // a force takeover mid-sync.
+        let now = Utc::now();
+        let fresh = resource_binding_with_lease("conversation:2", now);
+        assert!(crate::actor::admit_fenced_write(Some(&fresh), Some("conversation:1")).is_err());
+        assert!(crate::actor::admit_fenced_write(Some(&fresh), Some("conversation:2")).is_ok());
+    }
 }

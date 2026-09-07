@@ -4,6 +4,14 @@
 //! ordinary acquire/release endpoints that share the same resource binding
 //! scope. The takeover handler drives the transaction-based atomic state
 //! machine in [`crate::db::workspace_bindings::acquire_workspace_write_lease_takeover`].
+//!
+//! Takeover supports an explicit user-confirmed `force` flag that bypasses
+//! the stale window while still enforcing the `expected_owner`
+//! compare-and-swap. Foreign takeovers cancel and verify quiescence of
+//! binding-scoped runner sessions while still holding the row lock and
+//! commit only afterwards; quiescence failure rolls back with no lease
+//! change and surfaces as a retry-safe 503, so the new run never resumes
+//! alongside old execution and the identical request may be retried.
 
 use axum::{
     Json,
@@ -12,6 +20,8 @@ use axum::{
 };
 use axum_extra::extract::cookie::CookieJar;
 use serde_json::json;
+
+use super::lease_audit::{record_takeover_audit, record_takeover_quiescence_failure};
 
 use crate::{
     AppState,
@@ -30,10 +40,9 @@ use crate::{
     db::{
         queries::{self, TakeoverOutcome},
         types::{
-            WorkspaceBindingResponse, WorkspaceLeaseCancellationOutcome,
-            WorkspaceLeaseReleaseRequest, WorkspaceLeaseRequest, WorkspaceLeaseStatusResponse,
-            WorkspaceLeaseTakeoverConflict, WorkspaceLeaseTakeoverRequest,
-            WorkspaceLeaseTakeoverResponse,
+            WorkspaceBindingResponse, WorkspaceLeaseReleaseRequest, WorkspaceLeaseRequest,
+            WorkspaceLeaseStatusResponse, WorkspaceLeaseTakeoverConflict,
+            WorkspaceLeaseTakeoverRequest, WorkspaceLeaseTakeoverResponse,
         },
     },
     error::AppError,
@@ -225,7 +234,8 @@ pub async fn release_resource_workspace_lease(
         (status = 401, body = crate::error::ErrorResponse),
         (status = 403, body = crate::error::ErrorResponse),
         (status = 404, body = crate::error::ErrorResponse),
-        (status = 409, body = WorkspaceLeaseTakeoverConflict)
+        (status = 409, body = WorkspaceLeaseTakeoverConflict),
+        (status = 503, body = crate::error::ErrorResponse)
     )
 )]
 pub async fn takeover_resource_workspace_lease(
@@ -252,6 +262,8 @@ pub async fn takeover_resource_workspace_lease(
         LEASE_TAKEOVER_GRANTED_TTL_SECONDS,
         &request.expected_owner,
         LEASE_TAKEOVER_STALE_THRESHOLD_SECONDS,
+        request.force,
+        cancel_binding_sessions_best_effort(&state, binding_id),
     )
     .await?;
 
@@ -262,12 +274,12 @@ pub async fn takeover_resource_workspace_lease(
             previous_acquired_at,
             previous_expires_at,
             took_over_foreign,
+            cancellation,
         } => {
-            let cancellation = if took_over_foreign {
-                cancel_binding_sessions_best_effort(&state, binding_id).await
-            } else {
-                WorkspaceLeaseCancellationOutcome::default()
-            };
+            // Quiescence already held at commit time for foreign
+            // takeovers: `cancellation.succeeded` is guaranteed here, so
+            // every 200 response is safe to resume. Failures surface as
+            // 503 with no lease change (see below), never as success.
             let response = WorkspaceLeaseTakeoverResponse {
                 binding,
                 previous_owner,
@@ -280,6 +292,30 @@ pub async fn takeover_resource_workspace_lease(
             };
             record_takeover_audit(&state, application_id, binding_id, &request, &response).await?;
             Ok(Json(response))
+        }
+        TakeoverOutcome::QuiescenceFailed {
+            current,
+            cancellation,
+        } => {
+            // No lease change was committed: the row still reflects the
+            // previous owner, so retrying the identical request is safe
+            // once old execution drains. The new run must not resume.
+            record_takeover_quiescence_failure(
+                &state,
+                application_id,
+                binding_id,
+                &request,
+                &current,
+                &cancellation,
+            )
+            .await?;
+            let detail = cancellation
+                .error
+                .clone()
+                .unwrap_or_else(|| "failed to cancel old runner sessions".to_string());
+            Err(AppError::service_unavailable(format!(
+                "lease takeover quiescence failed; no lease change was committed and the new run must not resume; safe to retry the identical takeover request once old execution drains: {detail}"
+            )))
         }
         TakeoverOutcome::Conflict { reason, current } => {
             let reason_str = reason.as_str().to_string();
@@ -351,46 +387,11 @@ fn conflict_message(reason: crate::db::types::TakeoverConflictReason) -> String 
     }
 }
 
-async fn record_takeover_audit(
-    state: &AppState,
-    application_id: i64,
-    binding_id: i64,
-    request: &WorkspaceLeaseTakeoverRequest,
-    response: &WorkspaceLeaseTakeoverResponse,
-) -> Result<(), AppError> {
-    queries::record_audit(
-        &state.db,
-        crate::db::audit::AuditLogEntry {
-            actor_user_id: None,
-            actor_application_id: Some(application_id),
-            actor_type: "application",
-            action: "workspace.lease.takeover",
-            target_type: "workspace_binding",
-            target_id: &binding_id.to_string(),
-            workspace_binding_id: Some(binding_id),
-            external_user_id: None,
-            payload: json!({
-                "previous_owner": response.previous_owner,
-                "previous_acquired_at": response.previous_acquired_at,
-                "previous_expires_at": response.previous_expires_at,
-                "new_owner": request.new_owner,
-                "expected_owner": request.expected_owner,
-                "took_over_foreign": response.took_over_foreign,
-                "granted_ttl_seconds": response.granted_ttl_seconds,
-                "stale_threshold_seconds": response.stale_threshold_seconds,
-                "cancellation": {
-                    "attempted": response.cancellation.attempted,
-                    "succeeded": response.cancellation.succeeded,
-                    "sessions_cancelled": response.cancellation.sessions_cancelled,
-                    "error": response.cancellation.error,
-                }
-            }),
-            request_id: None,
-            session_id: None,
-            duration_ms: None,
-            status: Some("success"),
-        },
-    )
-    .await
-    .map_err(AppError::internal)
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn takeover_constants_stay_deterministic_for_stock_callers() {
+        assert_eq!(super::LEASE_TAKEOVER_STALE_THRESHOLD_SECONDS, 180);
+        assert_eq!(super::LEASE_TAKEOVER_GRANTED_TTL_SECONDS, 600);
+    }
 }

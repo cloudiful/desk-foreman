@@ -15,7 +15,7 @@ use runner_protocol::{
 
 use crate::{
     db,
-    runner::{RunnerFuture, RunnerService},
+    runner::{RunnerFuture, RunnerService, pull_cancellation::should_skip_abandoned_queued_job},
 };
 
 struct QueuedJob {
@@ -210,6 +210,27 @@ impl RunnerBroker {
                                 .send(Err(anyhow::anyhow!("runner manager disconnected")));
                         }
                     }
+                }
+                // Prune queued-not-yet-dispatched jobs whose caller dropped
+                // (outer takeover timeout): their oneshot sender reads closed.
+                // Already-dispatched jobs are left to complete (send ignored).
+                // This prevents late dispatch from running cancel/container
+                // side effects after the transaction rolled back. Late
+                // dispatched work that already started is retry-safe via
+                // session-id targeting plus the manager active-operation
+                // check (see pull_cancellation docs).
+                let abandoned: Vec<String> = pending
+                    .iter()
+                    .filter(|(_, job)| {
+                        should_skip_abandoned_queued_job(
+                            job.sender.is_closed(),
+                            job.manager_id.is_some(),
+                        )
+                    })
+                    .map(|(job_id, _)| job_id.clone())
+                    .collect();
+                for job_id in abandoned {
+                    pending.remove(&job_id);
                 }
                 let mut jobs = self.jobs.lock().await;
                 jobs.retain(|queued| pending.contains_key(&queued.job.job_id));

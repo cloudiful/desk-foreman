@@ -5,3 +5,4 @@ pub use super::sessions::*;
 pub use super::users::*;
 pub use super::workspace_bindings::*;
 pub use super::workspace_runners::*;
+pub use super::workspace_takeover::*;

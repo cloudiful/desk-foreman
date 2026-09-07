@@ -1,8 +1,11 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
-use chrono::Utc;
 use rmcp::service::RequestContext;
+
+mod write_lease;
+
+pub use write_lease::{admit_fenced_write, check_write_lease};
 
 use crate::{
     AppState,
@@ -44,26 +47,18 @@ impl ActorContext {
     /// Resource-owned workspaces (shared across users) require an active write
     /// lease held by this actor's lease owner. Per-user workspaces are
     /// unaffected.
+    ///
+    /// This is a request-time snapshot check against the binding captured at
+    /// authentication time. Mutating tool entry points must not rely on it
+    /// alone: they admit the write under the binding row lock (see
+    /// [`crate::tools::shared::admit_workspace_write`] and
+    /// [`admit_fenced_write`]) so an already-admitted old write cannot
+    /// cross a lease handover.
     pub fn ensure_write_access(&self) -> Result<(), String> {
         let Some(binding) = &self.workspace_binding else {
             return Ok(());
         };
-        if binding.resource_kind.is_none() {
-            return Ok(());
-        }
-        let lease_owner = self.lease_owner.as_deref().unwrap_or_default();
-        let holds_lease = binding.write_lease_owner.as_deref() == Some(lease_owner)
-            && !lease_owner.is_empty()
-            && binding
-                .write_lease_expires_at
-                .is_some_and(|expires| expires > Utc::now());
-        if holds_lease {
-            return Ok(());
-        }
-        Err(
-            "workspace is read-only: no write lease held by this session. Acquire the write lease (or take it over) before running mutating commands"
-                .to_string(),
-        )
+        check_write_lease(binding, self.lease_owner.as_deref())
     }
 }
 

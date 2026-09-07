@@ -37,6 +37,13 @@ pub(super) struct ShellSession {
     pub(super) id: u64,
     pub(super) writer: Mutex<Box<dyn AsyncWrite + Send + Unpin>>,
     pub(super) child: Mutex<Child>,
+    /// Original process-group id captured at spawn (PID==PGID via
+    /// `process_group(0)` / PTY `setsid`). Retained so orphan grandchildren
+    /// can still be signalled after the parent exits and `child.id()`
+    /// becomes `None` via `try_wait` reaping. Without this the
+    /// `try_wait`-is-Some fast path would skip the group kill and leave
+    /// orphans writing after handover (review 4152 P1).
+    pub(super) pgid: Option<u32>,
     pub(super) state: Mutex<SessionState>,
     pub(super) max_output_bytes: usize,
     pub(super) output_is_combined: bool,
@@ -46,14 +53,18 @@ impl ShellSession {
     pub(super) fn new(
         id: u64,
         writer: Box<dyn AsyncWrite + Send + Unpin>,
-        child: Child,
+        mut child: Child,
         max_output_bytes: usize,
         output_is_combined: bool,
     ) -> Self {
+        // Capture before the move into the mutex: after `try_wait` reaps,
+        // `child.id()` becomes `None` and the orphan group would be lost.
+        let pgid = child.id();
         Self {
             id,
             writer: Mutex::new(writer),
             child: Mutex::new(child),
+            pgid,
             state: Mutex::new(SessionState {
                 started_at: Instant::now(),
                 last_activity: Instant::now(),
@@ -180,33 +191,76 @@ impl ShellSession {
         self.state.lock().await.last_activity
     }
 
+    /// Best-effort orphan-group kill for a naturally-exited parent.
+    ///
+    /// Called before the manager removes a completed session so
+    /// backgrounded grandchildren cannot outlive the map entry and later
+    /// write after handover. Uses the spawn-captured PGID, never
+    /// `child.id()` (which is `None` after reap).
+    pub(super) async fn reap_orphan_group(&self) {
+        if let Err(error) = super::process_termination::kill_orphan_group(self.pgid).await {
+            tracing::warn!(pgid = ?self.pgid, error = %error, "orphan group kill failed after parent exit");
+        }
+    }
+
     pub(super) async fn kill(&self) -> anyhow::Result<()> {
+        let pgid = self.pgid;
         let mut child = self.child.lock().await;
-        child.kill().await.context("failed to kill expired session")
+        // Group-aware termination (parent plus descendants) with bounded
+        // reap. Verified tokio 1.53.1 semantics: `Child::kill().await` is
+        // `start_kill()` (SIGKILL, direct child only) + `wait()` (reap);
+        // neither reaches grandchildren, hence `terminate_child` with the
+        // spawn-captured PGID (survives `try_wait` reaping).
+        super::process_termination::terminate_child_with_timeout(
+            &mut child,
+            pgid,
+            super::process_termination::SESSION_TERMINATE_WAIT,
+        )
+        .await
+        .context("failed to kill expired session")
     }
 
     pub(super) async fn kill_timed_out(&self) -> anyhow::Result<()> {
-        let mut child = self.child.lock().await;
-        if child.try_wait()?.is_some() {
-            return Ok(());
-        }
         {
-            let mut state = self.state.lock().await;
-            state.timed_out = true;
-        }
-        child
-            .kill()
+            let pgid = self.pgid;
+            let mut child = self.child.lock().await;
+            // Always group-kill via the stored PGID, even when the parent
+            // already exited: orphans keep the PGID after reparenting.
+            super::process_termination::terminate_child_with_timeout(
+                &mut child,
+                pgid,
+                super::process_termination::SESSION_TERMINATE_WAIT,
+            )
             .await
-            .context("failed to kill timed out session")
+            .context("failed to kill timed out session")?;
+        }
+        // Mark only after successful termination so a failed kill keeps
+        // reporting `running` instead of lying about `timed_out`.
+        self.state.lock().await.timed_out = true;
+        Ok(())
     }
 
     pub(super) async fn cancel(&self) -> anyhow::Result<()> {
-        self.state.lock().await.cancelled = true;
-        let mut child = self.child.lock().await;
-        if child.try_wait()?.is_some() {
-            return Ok(());
+        {
+            let pgid = self.pgid;
+            let mut child = self.child.lock().await;
+            // Always group-kill via the stored PGID, even when the parent
+            // already exited: orphans keep the PGID after reparenting.
+            // `terminate_child_with_timeout` skips the direct SIGKILL+wait
+            // internally when already reaped, but never skips the group.
+            super::process_termination::terminate_child_with_timeout(
+                &mut child,
+                pgid,
+                super::process_termination::SESSION_TERMINATE_WAIT,
+            )
+            .await
+            .context("failed to cancel session")?;
         }
-        child.kill().await.context("failed to cancel session")
+        // Mark only after the group is dead and reaped; a failed
+        // termination retains `running` so retries and quiescence checks
+        // cannot mistake a live session for `cancelled`.
+        self.state.lock().await.cancelled = true;
+        Ok(())
     }
 
     pub(super) async fn snapshot(

@@ -13,6 +13,7 @@ use tokio::process::Command;
 use crate::config::{RunnerManagerConfig, SharedRunnerManagerConfig};
 
 use super::{RunnerLifecycleReporter, docker_command::ensure_docker_command_succeeded};
+use tokio::time::{Duration, timeout};
 
 pub struct DockerRunnerBackend {
     pub(super) config: SharedRunnerManagerConfig,
@@ -187,6 +188,42 @@ impl DockerRunnerBackend {
 
         let output = self.docker_output_owned(args, None, None).await?;
         ensure_docker_command_succeeded("create runner container", &output)
+    }
+
+    /// Bounded container termination for lease-takeover quiescence.
+    ///
+    /// Stops and removes the task-owned runner container (`docker stop` +
+    /// `docker rm`, with `rm -f` fallback inside `stop_and_remove`). This
+    /// is the real Docker execution stop: killing the local `docker exec`
+    /// CLI alone leaves the exec'd shell running inside the container, so
+    /// takeover must remove the container to guarantee no old-owner writes
+    /// survive. Workspace files are preserved because the workspace is a
+    /// host bind mount; only container processes and writable layers go
+    /// away. The next `ensure_runner` recreates the container on demand,
+    /// so retry after a successful takeover is safe. Missing containers
+    /// map to `Ok` (already quiescent); any other failure is `Err` so the
+    /// caller fails closed instead of reporting false quiescence. The wait
+    /// is bounded so a wedged daemon cannot pin the takeover row lock.
+    pub(crate) async fn terminate_container_for_takeover(
+        &self,
+        container_name: &str,
+    ) -> anyhow::Result<()> {
+        self.terminate_container_for_takeover_with_timeout(container_name, Duration::from_secs(20))
+            .await
+    }
+
+    pub(crate) async fn terminate_container_for_takeover_with_timeout(
+        &self,
+        container_name: &str,
+        timeout_duration: Duration,
+    ) -> anyhow::Result<()> {
+        match timeout(timeout_duration, self.stop_and_remove(container_name)).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(error),
+            Err(_) => anyhow::bail!(
+                "timed out after {timeout_duration:?} terminating container {container_name} for takeover"
+            ),
+        }
     }
 
     pub(super) async fn docker_status<const N: usize>(

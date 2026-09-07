@@ -7,6 +7,9 @@ pub mod types;
 pub mod users;
 pub mod workspace_bindings;
 pub mod workspace_runners;
+pub mod workspace_takeover;
+#[cfg(test)]
+mod workspace_takeover_tests;
 
 use anyhow::Context;
 use sqlx::postgres::PgPoolOptions;

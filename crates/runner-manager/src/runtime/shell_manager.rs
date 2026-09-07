@@ -108,6 +108,13 @@ impl ShellManager {
             }
         };
         if output.session_id.is_none() {
+            // Parent exited naturally: still SIGKILL the spawn-captured PGID
+            // before dropping the map entry, otherwise backgrounded
+            // grandchildren survive with no session to cancel and later
+            // write after handover while Direct cleanup (no-op) claims
+            // quiescence. Best-effort; takeover re-list plus container stop
+            // remains authoritative.
+            session.reap_orphan_group().await;
             self.sessions.lock().await.remove(&session_id);
         }
         Ok(output)
@@ -159,6 +166,9 @@ impl ShellManager {
             }
         };
         if output.session_id.is_none() {
+            // Same orphan-group reap as `exec`: a naturally-exited parent
+            // must not leave grandchildren with no map entry to cancel.
+            session.session.reap_orphan_group().await;
             self.sessions.lock().await.remove(&request.session_id);
         }
         Ok(output)
@@ -168,8 +178,13 @@ impl ShellManager {
         &self,
         request: CancelSessionRequest,
     ) -> anyhow::Result<RunnerSessionStatus> {
+        // Retain-on-failure: look up without removing so a failed
+        // termination keeps the entry and later `list_sessions`
+        // quiescence checks still observe the live session. Removing
+        // before `cancel()` succeeds lets a retry report zero sessions
+        // while the old process (or its descendants) still run.
         let managed = {
-            let mut sessions = self.sessions.lock().await;
+            let sessions = self.sessions.lock().await;
             let managed = sessions
                 .get(&request.session_id)
                 .cloned()
@@ -177,10 +192,18 @@ impl ShellManager {
             if managed.owner != request.owner || managed.session_key != request.session_key {
                 anyhow::bail!("session does not belong to current user");
             }
-            sessions.remove(&request.session_id);
             managed
         };
+        // Group-aware kill plus bounded reap; Err retains the map entry.
+        // For Docker this reaps the local `docker exec` CLI; the in-container
+        // shell is stopped by the takeover helper's `cleanup_runner_owner`
+        // container removal (see `docker.rs`). Per-session container removal
+        // is intentionally not done here to preserve concurrent sessions.
         managed.session.cancel().await?;
+        // Only unlink after successful termination, so success implies
+        // map removal plus a dead local group. Docker quiescence additionally
+        // requires the helper-level container stop.
+        self.sessions.lock().await.remove(&request.session_id);
         managed.status().await
     }
 
@@ -211,13 +234,21 @@ impl ShellManager {
             }
         }
 
-        let mut sessions = self.sessions.lock().await;
+        // Retain-on-failure like `cancel_session`: only unlink after the
+        // group kill succeeds so a failed idle reap stays visible for the
+        // next cleanup pass instead of leaking a live process.
         for id in expired_ids {
-            if let Some(session) = sessions.remove(&id) {
-                let _ = session.session.kill().await;
+            let session = {
+                let sessions = self.sessions.lock().await;
+                sessions.get(&id).cloned()
+            };
+            let Some(session) = session else {
+                continue;
+            };
+            if session.session.kill().await.is_ok() {
+                self.sessions.lock().await.remove(&id);
             }
         }
-        drop(sessions);
     }
 }
 

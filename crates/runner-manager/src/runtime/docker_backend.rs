@@ -108,7 +108,12 @@ impl RunnerBackend for DockerRunnerBackend {
                 anyhow::bail!("runner owner {} has active operations", owner.stable_key());
             }
             let container_name = owner.container_name();
-            match self.stop_and_remove(&container_name).await {
+            // Bounded real container stop (not just local CLI kill): the
+            // workspace bind mount preserves files while all exec
+            // processes inside die with the container. Fail closed so a
+            // wedged daemon blocks takeover instead of reporting false
+            // quiescence.
+            match self.terminate_container_for_takeover(&container_name).await {
                 Ok(()) => self.report_removed(&container_name),
                 Err(error) => {
                     self.report_cleanup_failed(&container_name, &error);

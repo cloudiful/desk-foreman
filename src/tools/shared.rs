@@ -8,6 +8,8 @@ use serde::Serialize;
 use serde_json::json;
 use utoipa::ToSchema;
 
+pub use super::fenced_write::{FencedWrite, admit_workspace_write};
+
 use crate::{
     AppState,
     actor::ActorContext,
@@ -102,7 +104,6 @@ pub async fn shell(
 ) -> Result<ShellToolOutput, ToolError> {
     let started = Instant::now();
     ensure_scope(state, actor, crate::policy::WORKSPACE_SHELL)?;
-    actor.ensure_write_access().map_err(ToolError::Forbidden)?;
     if let Some(limit) = actor.policy.limits.max_sessions {
         let active = state
             .runner
@@ -126,6 +127,9 @@ pub async fn shell(
         .and_then(|application| application.default_shell.clone())
         .unwrap_or_else(|| state.config.default_shell.clone());
     validate_shell_binary(&shell)?;
+    // Admit under the row lock immediately before dispatch and hold the
+    // fence across it, so a concurrent takeover cannot commit in between.
+    let fence = admit_workspace_write(state, actor).await?;
     let output = state
         .runner
         .exec_shell(ExecRequest {
@@ -150,6 +154,7 @@ pub async fn shell(
         })
         .await
         .map_err(classify_shell_error)?;
+    fence.commit().await?;
     spawn_tool_audit(
         state,
         actor,
@@ -175,9 +180,15 @@ pub async fn write_stdin(
 ) -> Result<ShellToolOutput, ToolError> {
     let started = Instant::now();
     ensure_scope(state, actor, crate::policy::WORKSPACE_SHELL)?;
-    if !params.chars.is_empty() {
-        actor.ensure_write_access().map_err(ToolError::Forbidden)?;
-    }
+    let needs_fence = !params.chars.is_empty();
+    // Admit under the row lock immediately before dispatch and hold the
+    // fence across it, so a concurrent takeover cannot commit in between.
+    // Empty polls only observe the session and stay unfenced.
+    let fence = if needs_fence {
+        admit_workspace_write(state, actor).await?
+    } else {
+        FencedWrite { tx: None }
+    };
     let output = state
         .runner
         .write_stdin(InputRequest {
@@ -199,6 +210,7 @@ pub async fn write_stdin(
         })
         .await
         .map_err(classify_shell_error)?;
+    fence.commit().await?;
     spawn_tool_audit(
         state,
         actor,
@@ -254,7 +266,11 @@ pub async fn apply_patch(
 ) -> Result<ApplyPatchOutput, ToolError> {
     let started = Instant::now();
     ensure_scope(state, actor, crate::policy::WORKSPACE_PATCH)?;
-    actor.ensure_write_access().map_err(ToolError::Forbidden)?;
+    // Fenced admission covers direct workspace-SDK file writes as well as
+    // runner-backed writes. Validation runs first so invalid patches never
+    // take the row lock; admission then holds the lock across the
+    // filesystem write so a request admitted under an old owner cannot
+    // cross a handover.
     if actor
         .policy
         .limits
@@ -279,10 +295,12 @@ pub async fn apply_patch(
             }
         }
     }
+    let fence = admit_workspace_write(state, actor).await?;
     let tools = workspace_tools(actor)?;
     let summary = tools
         .apply_patch_text(&params.patch_text)
         .map_err(map_apply_patch_error)?;
+    fence.commit().await?;
     let summary_text = summary.summary.clone();
     let partial = summary.partial;
     let files = summary.changes.len();
