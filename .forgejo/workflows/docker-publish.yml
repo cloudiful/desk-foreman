@@ -3,8 +3,6 @@ run-name: Docker Publish by ${{ github.actor }}
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
   workflow_dispatch:
