@@ -10,7 +10,8 @@ use std::{
 
 use chrono::Utc;
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use serde_json::{Value, json};
+use tempfile::tempdir;
 use tokio::sync::Mutex;
 use validator::Validate;
 
@@ -18,7 +19,7 @@ use crate::{
     AppState,
     actor::{ActorContext, ActorMode},
     config::AppConfig,
-    db::types::UserRecord,
+    db::types::{UserRecord, WorkspaceBindingResponse},
     policy::{ALL_SCOPES, AccessPolicy, ResourceLimits},
     runner::{RunnerFuture, RunnerService},
 };
@@ -363,4 +364,75 @@ fn test_actor(root: &Path, user_id: i64) -> ActorContext {
         ),
         lease_owner: None,
     }
+}
+
+/// Application actor bound to a shared `code_project` resource workspace that
+/// currently holds no write lease, mirroring a caller that sends no
+/// `X-DF-Lease-Owner` header.
+fn resource_workspace_actor(root: &Path, lease_owner: Option<&str>) -> ActorContext {
+    let mut actor = test_actor(root, 10);
+    actor.mode = ActorMode::ApplicationSubject;
+    actor.user = None;
+    actor.external_user_id = Some("__resource__".to_string());
+    actor.workspace_binding = Some(WorkspaceBindingResponse {
+        workspace_binding_id: 1,
+        application_id: 1,
+        external_user_id: "__resource__".to_string(),
+        workspace_key: "code_project:abc".to_string(),
+        external_user_hash: "hash".to_string(),
+        workspace_root: "/tmp/ws".to_string(),
+        is_active: true,
+        last_used_at: Utc::now(),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        lifecycle_state: "active".to_string(),
+        archived_at: None,
+        resource_kind: Some("code_project".to_string()),
+        resource_id: Some("abc".to_string()),
+        write_lease_owner: None,
+        write_lease_acquired_at: None,
+        write_lease_expires_at: None,
+    });
+    actor.lease_owner = lease_owner.map(str::to_string);
+    actor
+}
+
+#[tokio::test]
+async fn resource_workspace_reads_are_lease_free_and_writes_stay_lease_gated() {
+    let temp = tempdir().expect("tempdir");
+    std::fs::write(temp.path().join("notes.txt"), "alpha\n").expect("seed");
+    let state = app_state(temp.path().to_path_buf());
+    let actor = resource_workspace_actor(temp.path(), None);
+    let params = parse_params::<crate::tools::params::ReadParams>(json!({
+        "filePath": "notes.txt"
+    }))
+    .expect("params");
+
+    // Read-only tools never consult the write lease: a shared resource
+    // workspace without any X-DF-Lease-Owner still reads successfully.
+    let output = crate::tools::shared::read(&state, &actor, &params)
+        .expect("read must not require a write lease");
+    assert_eq!(output.content.as_deref(), Some("alpha\n"));
+
+    // Mutating tools admit every resource-workspace write through
+    // admit_fenced_write over the locked fresh row; the same gate denies a
+    // lease-less caller with the takeover guidance contract ...
+    let binding = actor.workspace_binding.as_ref().expect("resource binding");
+    let denied = crate::actor::admit_fenced_write(Some(binding), None)
+        .expect_err("mutating admission must deny a lease-less caller");
+    assert!(
+        denied.contains("read-only") && denied.contains("take it over"),
+        "denial must carry the takeover guidance, got: {denied}"
+    );
+
+    // ... and admits the matching lease holder.
+    let now = Utc::now();
+    let leased = WorkspaceBindingResponse {
+        write_lease_owner: Some("conversation:1".to_string()),
+        write_lease_acquired_at: Some(now),
+        write_lease_expires_at: Some(now + chrono::Duration::minutes(10)),
+        ..binding.clone()
+    };
+    crate::actor::admit_fenced_write(Some(&leased), Some("conversation:1"))
+        .expect("matching lease holder must be admitted");
 }
