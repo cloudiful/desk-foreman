@@ -11,9 +11,12 @@ mod tests;
 pub use common::ToolError;
 
 use rmcp::{
-    ServerHandler,
+    ErrorData, RoleServer, ServerHandler,
     handler::server::router::tool::ToolRouter,
-    model::{Implementation, ServerCapabilities, ServerInfo},
+    model::{
+        Implementation, InitializeRequestParams, InitializeResult, ServerCapabilities, ServerInfo,
+    },
+    service::RequestContext,
     tool_handler,
 };
 
@@ -43,6 +46,15 @@ impl DeskForemanService {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for DeskForemanService {
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, ErrorData> {
+        context.peer.set_peer_info(request.clone());
+        self.negotiate_initialize(&request)
+    }
+
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(
