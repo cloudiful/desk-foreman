@@ -12,29 +12,29 @@ version = "0.2.1"
 edition = "2024"
 
 [workspace.dependencies]
-anyhow = "1.0.102"
+anyhow = "1.0.104"
 argon2 = "0.5.3"
 axum = { version = "0.8.9", features = ["http1", "json", "tokio", "tracing"] }
 axum-extra = { version = "0.12.6", features = ["cookie"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 pty-process = { version = "0.5.3", features = ["async"] }
-rand = "0.10.1"
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
-rmcp = { version = "3.1.2", features = ["macros", "schemars", "server", "tower", "transport-streamable-http-server"] }
-schemars = "1.2.1"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
+rand = "0.10.2"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
+rmcp = { version = "3.1.4", features = ["macros", "schemars", "server", "tower", "transport-streamable-http-server"] }
+schemars = "1.2.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 sha2 = "0.11.0"
 sqlx = { version = "0.9.0", features = ["postgres", "runtime-tokio", "tls-rustls-ring-webpki", "uuid", "chrono"] }
 tempfile = "3.27.0"
-thiserror = "2.0.18"
+thiserror = "2.0.20"
 time = { version = "0.3.55", features = ["formatting", "macros", "parsing"] }
-tokio = { version = "1.52.3", features = ["full"] }
-tower-http = { version = "0.7.0", features = ["fs"] }
+tokio = { version = "1.52.4", features = ["full"] }
+tower-http = { version = "0.7.1", features = ["fs"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 utoipa = { version = "5.5.0", features = ["chrono", "uuid"] }
-uuid = { version = "1.23.3", features = ["serde", "v4"] }
+uuid = { version = "1.23.5", features = ["serde", "v4"] }
 validator = { version = "0.21.0", features = ["derive"] }
 runner-protocol = { package = "desk-foreman-runner-protocol", path = "crates/runner-protocol" }
 desk-foreman-workspace-sdk = { path = "crates/workspace-sdk" }
