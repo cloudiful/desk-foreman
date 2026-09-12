@@ -3,7 +3,7 @@ import ui from '@nuxt/ui/vite'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
-  plugins: [vue(), ui()],
+  plugins: [vue(), ui({ experimental: { componentDetection: true } })],
   server: {
     port: 5173,
     proxy: {
