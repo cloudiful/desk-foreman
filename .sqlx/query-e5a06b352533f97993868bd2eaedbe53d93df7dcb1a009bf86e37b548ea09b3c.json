@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Is one exact manager still usable as the task's original manager\n-- (issue 753 P2b)?\n--\n-- The manager identity is never reassigned, so preparation first binds to the\n-- task's original manager and only then checks that it is still enabled,\n-- online and recently seen. A disabled or offline original manager refuses the\n-- preparation; it never fails over to another manager.\nSELECT runner_manager_id\nFROM runner_managers\nWHERE runner_manager_id = $1\n  AND enabled = TRUE\n  AND status = 'online'\n  AND last_seen_at > NOW() - ($2::double precision * INTERVAL '1 second')\nLIMIT 1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "runner_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runner_managers",
+            "name": "runner_manager_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e5a06b352533f97993868bd2eaedbe53d93df7dcb1a009bf86e37b548ea09b3c"
+}

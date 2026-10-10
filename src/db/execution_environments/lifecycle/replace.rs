@@ -144,7 +144,7 @@ pub async fn replace_execution_environment(
     ))
 }
 
-fn proof_is_confirmed_stop(
+pub(crate) fn proof_is_confirmed_stop(
     proof: Option<&ExecutionEnvironmentJob>,
     manager_id: i64,
     proof_generation: i64,

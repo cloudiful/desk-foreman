@@ -5,10 +5,18 @@ use utoipa::ToSchema;
 
 pub mod execution_environment;
 pub mod service_relay;
+pub mod task_preparation;
+pub mod task_seed;
 
 pub use execution_environment::{
     EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest, StopExecutionEnvironmentAck,
     StopExecutionEnvironmentRequest,
+};
+pub use task_preparation::{NativeTaskPreparedResult, PrepareNativeTaskRequest};
+pub use task_seed::{
+    MAX_SEED_CONTENT_BYTES, MAX_SEED_ENTRIES, MAX_SEED_PATH_BYTES, MAX_SEED_TOTAL_BYTES,
+    SEED_MANIFEST_PREFIX, SeedBundle, SeedBundleError, SourceSeedSnapshotFile,
+    is_normalized_relative_posix, manifest_sha256, validate_seed_bundle,
 };
 pub const RUNNER_JOB_TIMEOUT_SECS: u64 = 3_660;
 pub const RUNNER_JOB_POLL_TIMEOUT_SECS: u64 = 10;

@@ -40,6 +40,7 @@ pub use types::{
 pub(crate) use dispatch::{
     DurableJobCompletion, claim_next_assigned_manager_environment_job,
     complete_assigned_manager_environment_job, encode_environment_job_wire_id,
-    is_environment_job_wire_id, parse_environment_job_wire_id,
+    find_execution_environment_job_by_id, is_environment_job_wire_id,
+    parse_environment_job_wire_id,
 };
 pub(crate) use resolution::{environment_job_owner, environment_job_wire_kind};

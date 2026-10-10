@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- The sealed snapshot header for one task (issue 753 P2a).\n--\n-- Owner scoping is the task id's own task row: the caller has already locked\n-- that task inside the same transaction and verified it belongs to the\n-- authenticated application and environment.\nSELECT\n    task_id,\n    manifest_sha256,\n    file_count,\n    total_bytes\nFROM execution_environment_task_seeds\nWHERE task_id = $1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_task_seeds",
+            "name": "task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "manifest_sha256",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_task_seeds",
+            "name": "manifest_sha256"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "file_count",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_task_seeds",
+            "name": "file_count"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "total_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_task_seeds",
+            "name": "total_bytes"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ec0b3b9e4dcd5f8ae6b0138a3af6ea925012de467e0a4e7878ce313a84097080"
+}

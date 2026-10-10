@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Lock one workspace binding row for archived-workspace cleanup\n-- (issue 753 P1).\n--\n-- The native-task guard is read AFTER this lock is granted, inside the same\n-- READ COMMITTED transaction, so a task admitted while cleanup waited for the\n-- row is visible. Held through the filesystem cleanup and the delete so an\n-- admitted task can never have its workspace removed underneath it.\nSELECT workspace_binding_id\nFROM workspace_bindings\nWHERE workspace_binding_id = $1\nFOR UPDATE;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "workspace_binding_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "workspace_bindings",
+            "name": "workspace_binding_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b8ad5162935c21cdd79d9aabc58d270cd2654dd43163c1bc5c6eb295a8723d2b"
+}

@@ -66,8 +66,11 @@ async fn main() -> anyhow::Result<()> {
     if config.read().await.control_plane_url.is_some() {
         let upstream_config = std::sync::Arc::clone(&config);
         let upstream_runner = handles.service.clone();
+        let upstream_backend = handles.backend.clone();
         tokio::spawn(async move {
-            if let Err(error) = upstream::run(upstream_config, upstream_runner).await {
+            if let Err(error) =
+                upstream::run(upstream_config, upstream_runner, upstream_backend).await
+            {
                 tracing::error!(error = %error, "runner upstream worker exited");
             }
         });

@@ -12,7 +12,7 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 /// Job kinds accepted by the store.
-pub const EXECUTION_ENVIRONMENT_JOB_KINDS: [&str; 2] = ["ensure", "stop"];
+pub const EXECUTION_ENVIRONMENT_JOB_KINDS: [&str; 3] = ["ensure", "stop", "prepare_native_task"];
 
 /// Checked job states.
 pub const EXECUTION_ENVIRONMENT_JOB_STATES: [&str; 6] = [
@@ -95,6 +95,11 @@ pub struct ExecutionEnvironmentJob {
     pub assigned_manager_id: i64,
     pub job_kind: String,
     pub target_generation: i64,
+    /// The native task this job serves, when it serves one.
+    ///
+    /// `None` for every legacy ensure/stop record; set (and required by a check
+    /// constraint) for a `prepare_native_task` record.
+    pub native_task_id: Option<Uuid>,
     pub state: String,
     pub claimed_at: Option<DateTime<Utc>>,
     pub deadline_at: DateTime<Utc>,

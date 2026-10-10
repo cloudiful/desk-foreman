@@ -17,6 +17,8 @@ use super::types::{ExecutionEnvironmentJob, ExecutionEnvironmentJobResult};
 pub(crate) const ENSURE_WIRE_KIND: &str = "ensure_execution_environment";
 /// Wire job kind the manager executes for a `stop` record.
 pub(crate) const STOP_WIRE_KIND: &str = "stop_execution_environment";
+/// Wire job kind the manager executes for a native-task preparation record.
+pub(crate) const PREPARE_WIRE_KIND: &str = "prepare_native_task";
 
 /// States a positive stop confirmation may report. `removed` is deliberately
 /// excluded: it is not a confirmed quiescence of the requested generation.
@@ -46,6 +48,7 @@ pub(crate) fn environment_job_wire_kind(
     match row.job_kind.as_str() {
         "ensure" => Ok(ENSURE_WIRE_KIND),
         "stop" => Ok(STOP_WIRE_KIND),
+        "prepare_native_task" => Ok(PREPARE_WIRE_KIND),
         other => anyhow::bail!("durable environment job has an unknown kind: {other}"),
     }
 }
@@ -153,10 +156,10 @@ fn owner_ack_matches(
 }
 
 fn uncertain_result_for_kind(job_kind: &str) -> ExecutionEnvironmentJobResult {
-    let outcome = if job_kind == "stop" {
-        "stop_uncertain"
-    } else {
-        "ensure_uncertain"
+    let outcome = match job_kind {
+        "stop" => "stop_uncertain",
+        "prepare_native_task" => "task_prepared_uncertain",
+        _ => "ensure_uncertain",
     };
     ExecutionEnvironmentJobResult {
         outcome: outcome.to_string(),

@@ -8,6 +8,7 @@ SELECT
     assigned_manager_id,
     job_kind,
     target_generation,
+    native_task_id,
     state,
     claimed_at,
     deadline_at,

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Lock one workspace binding row for an admin lifecycle transition\n-- (issue 753 P1).\n--\n-- The native-task guard is read AFTER this lock is granted, inside the same\n-- READ COMMITTED transaction, so a task admitted while the transition waited\n-- for the row is visible. Taken before any state change so the transition's\n-- decision and its commit are serialized against task admission.\nSELECT application_id\nFROM workspace_bindings\nWHERE workspace_binding_id = $1\nFOR UPDATE;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "application_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "workspace_bindings",
+            "name": "application_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "47a09553c1cbbafd40727bea3c38b9573900aa34ccbae179b396baa3d9b240f2"
+}

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Count durable jobs that reference one task (issue 753 P1).\n--\n-- A non-zero count means something was dispatched for this task, so a cancel\n-- cannot void it as never-started.\nSELECT COUNT(*) AS references\nFROM execution_environment_jobs\nWHERE native_task_id = $1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "references",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7b3984ccf889b060c3e7c0d82b47075fa2a5c3545dd68f6de24b96e90beed27f"
+}

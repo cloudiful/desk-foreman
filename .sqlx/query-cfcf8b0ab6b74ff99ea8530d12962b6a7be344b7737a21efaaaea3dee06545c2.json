@@ -1,0 +1,97 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Lock one preparation job after its environment, task and binding have been\n-- locked. The clock check is evaluated after those potentially waiting locks.\nSELECT\n    job_id,\n    native_task_id,\n    assigned_manager_id,\n    job_kind,\n    target_generation,\n    state,\n    deadline_at > clock_timestamp() AS deadline_valid\nFROM execution_environment_jobs\nWHERE job_id = $1\n  AND application_id = $2\n  AND environment_id = $3\nFOR UPDATE;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "native_task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "native_task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "assigned_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "assigned_manager_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "job_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "job_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "target_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "target_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "deadline_valid",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "cfcf8b0ab6b74ff99ea8530d12962b6a7be344b7737a21efaaaea3dee06545c2"
+}

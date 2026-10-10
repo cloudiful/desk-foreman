@@ -31,6 +31,7 @@ fn test_config() -> RunnerManagerConfig {
         docker_cli: "docker".to_string(),
         docker_host: None,
         runtime_class: None,
+        native_task_root: None,
     }
 }
 
@@ -40,6 +41,10 @@ fn backend() -> Arc<DockerRunnerBackend> {
         config,
         "test-manager".to_string(),
         crate::runtime::RunnerLifecycleReporter::noop(),
+        crate::runtime::NativeTaskStore::with_uid_source(
+            None,
+            crate::runtime::execution_environment::service::host_identity::UidSource::Fixed(1000),
+        ),
     )
 }
 
@@ -51,6 +56,10 @@ fn backend_with_docker_cli(docker_cli: &str) -> Arc<DockerRunnerBackend> {
         config,
         "test-manager".to_string(),
         crate::runtime::RunnerLifecycleReporter::noop(),
+        crate::runtime::NativeTaskStore::with_uid_source(
+            None,
+            crate::runtime::execution_environment::service::host_identity::UidSource::Fixed(1000),
+        ),
     )
 }
 

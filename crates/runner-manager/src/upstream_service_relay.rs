@@ -13,11 +13,11 @@ pub(crate) mod conn;
 pub(crate) mod conn_state;
 pub(crate) mod dispatch;
 #[cfg(test)]
-mod full_gateway_db;
+pub(crate) mod full_gateway_db;
 #[cfg(test)]
 mod full_gateway_relay;
 #[cfg(test)]
-mod full_gateway_support;
+pub(crate) mod full_gateway_support;
 pub(crate) mod respond;
 pub(crate) mod streams;
 #[cfg(test)]

@@ -8,6 +8,7 @@
 pub mod handlers;
 pub mod lifecycle;
 pub mod service;
+pub mod tasks;
 pub mod types;
 
 pub use handlers::{ensure_execution_environment, invalidate_execution_environment};
@@ -16,6 +17,11 @@ pub use lifecycle::{
     stop_execution_environment,
 };
 pub use service::service_route;
+pub use tasks::{
+    admit_native_task_handler, cancel_native_task_handler, find_native_task_handler,
+    find_native_task_preparation_handler, find_native_task_seed_handler,
+    prepare_native_task_handler, release_native_task_handler, seed_native_task_handler,
+};
 pub use types::{
     EnsureExecutionEnvironmentRequest, InvalidateExecutionEnvironmentRequest,
     ProvisionExecutionEnvironmentRequest, ReplaceExecutionEnvironmentRequest,

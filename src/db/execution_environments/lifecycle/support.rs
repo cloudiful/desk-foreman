@@ -55,14 +55,48 @@ pub(crate) async fn expire_overdue_jobs(
     application_id: i64,
     environment_id: Uuid,
 ) -> anyhow::Result<Vec<ExecutionEnvironmentJob>> {
-    Ok(sqlx::query_file_as!(
+    // Lifecycle callers invoke expiry before their later environment read. Take
+    // the owner lock here first so no job row is held while a task completion
+    // waits to acquire this environment.
+    let environment = sqlx::query_file_scalar!(
+        "src/sql/execution_environments/tasks/prepare/lock_environment_for_expiry.sql",
+        application_id,
+        environment_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    if environment.is_none() {
+        return Ok(Vec::new());
+    }
+
+    let expired = sqlx::query_file_as!(
         ExecutionEnvironmentJob,
         "src/sql/execution_environments/lifecycle/expire_lifecycle_jobs.sql",
         application_id,
         environment_id,
     )
     .fetch_all(&mut **tx)
-    .await?)
+    .await?;
+
+    // A preparation that expired retains its task as `uncertain` in the same
+    // transaction: the task keeps its exclusive environment and workspace
+    // anchors, is never released and is never re-dispatched. Expiry alone can
+    // never make an environment ready.
+    for job in &expired {
+        if job.job_kind == "prepare_native_task" {
+            if let Some(task_id) = job.native_task_id {
+                crate::db::execution_environments::tasks::prepare::mark_preparation_uncertain(
+                    tx,
+                    application_id,
+                    environment_id,
+                    task_id,
+                )
+                .await?;
+            }
+        }
+    }
+
+    Ok(expired)
 }
 
 /// All durable operation rows of one owned environment.

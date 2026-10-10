@@ -8,6 +8,7 @@
 pub mod lifecycle;
 pub mod service;
 pub mod store;
+pub mod tasks;
 pub mod types;
 
 #[cfg(test)]
@@ -24,6 +25,11 @@ pub use service::{ServiceEnvironment, find_execution_environment_for_service};
 pub use store::{
     EnsureOutcome, InvalidateOutcome, ensure_execution_environment, find_execution_environment,
     find_execution_environment_by_identity, invalidate_execution_environment,
+};
+pub use tasks::{
+    NATIVE_TASK_ACTIVE_STATES, NATIVE_TASK_STATES, NativeTask, NativeTaskError, NativeTaskRequest,
+    PreparationDescriptor, PrepareError, PrepareRequest, admit_native_task, cancel_native_task,
+    find_native_task, find_native_task_preparation, prepare_native_task, release_native_task,
 };
 pub use types::{
     EXECUTION_ENVIRONMENT_INITIAL_STATE, EXECUTION_ENVIRONMENT_INVALIDATED_STATE,

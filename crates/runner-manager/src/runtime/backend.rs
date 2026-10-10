@@ -3,8 +3,8 @@ use std::sync::Arc;
 use desk_foreman::runner::RunnerFuture;
 use runner_protocol::{
     CommandOutput, EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest,
-    RunnerCommandRequest, RunnerOwner, RunnerShellRequest, StopExecutionEnvironmentAck,
-    StopExecutionEnvironmentRequest,
+    NativeTaskPreparedResult, PrepareNativeTaskRequest, RunnerCommandRequest, RunnerOwner,
+    RunnerShellRequest, SeedBundle, StopExecutionEnvironmentAck, StopExecutionEnvironmentRequest,
 };
 
 pub trait RunnerBackend: Send + Sync {
@@ -44,6 +44,23 @@ pub trait RunnerBackend: Send + Sync {
     ) -> RunnerFuture<'a, anyhow::Result<StopExecutionEnvironmentAck>> {
         Box::pin(async move {
             anyhow::bail!("execution environments are not supported by this runner backend")
+        })
+    }
+
+    /// Materialize one task's private checkout from its validated seed.
+    ///
+    /// Default fails closed with a fixed unsupported failure, so a backend
+    /// that cannot prepare (a direct backend, or a manager with no trusted
+    /// root) never pretends to have materialized anything. The prepared
+    /// snapshot arrives already fetched and validated through the shared
+    /// protocol rules; only the filesystem work happens here.
+    fn prepare_native_task<'a>(
+        &'a self,
+        _request: PrepareNativeTaskRequest,
+        _seed: SeedBundle,
+    ) -> RunnerFuture<'a, anyhow::Result<NativeTaskPreparedResult>> {
+        Box::pin(async move {
+            anyhow::bail!("native task preparation is not configured on this runner backend")
         })
     }
 

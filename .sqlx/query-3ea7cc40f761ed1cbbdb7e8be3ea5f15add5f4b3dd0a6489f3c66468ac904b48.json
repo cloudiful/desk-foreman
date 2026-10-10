@@ -1,0 +1,172 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- The sealed seed of the task behind one preparation job (issue 753 P2b).\n--\n-- Manager-facing read: the caller has already verified the authenticated\n-- manager, the job's kind/state and its assigned manager. This returns only the\n-- task, its environment/generation and its binding, so the caller can apply the\n-- remaining state checks before any content is fetched.\nSELECT\n    task.task_id,\n    task.environment_id,\n    task.application_id,\n    task.workspace_binding_id,\n    task.state AS task_state,\n    task.target_generation AS task_generation,\n    task.assigned_manager_id AS task_manager_id,\n    env.generation AS environment_generation,\n    env.active_native_task_id,\n    job.job_kind,\n    job.state AS job_state,\n    job.assigned_manager_id,\n    job.target_generation AS job_generation\nFROM execution_environment_jobs AS job\nJOIN execution_environment_tasks AS task\n    ON task.task_id = job.native_task_id\nJOIN execution_environments AS env\n    ON env.environment_id = task.environment_id\n   AND env.application_id = task.application_id\nWHERE job.job_id = $1\n  AND job.deadline_at > NOW()\nLIMIT 1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "environment_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "environment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "application_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "application_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "workspace_binding_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "workspace_binding_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "task_state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "task_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "target_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "task_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "assigned_manager_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "environment_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "generation"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "active_native_task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "active_native_task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "job_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "job_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "job_state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "assigned_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "assigned_manager_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "job_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "target_generation"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3ea7cc40f761ed1cbbdb7e8be3ea5f15add5f4b3dd0a6489f3c66468ac904b48"
+}

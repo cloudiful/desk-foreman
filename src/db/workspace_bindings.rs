@@ -2,6 +2,13 @@
 //!
 //! Takeover handover logic lives in [`super::workspace_takeover`] (re-exported
 //! via `queries::`); this file stays under the 400-line cap.
+//!
+//! Every path that can write this workspace passes through
+//! [`native_task_guard`] first, so a durable native task and a legacy writer
+//! can never overlap. The guard is wiring only: each call site re-reads it
+//! after its own binding row lock, inside its own transaction.
+
+pub(crate) mod native_task_guard;
 
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
@@ -97,15 +104,35 @@ pub async fn acquire_workspace_write_lease(
     owner: &str,
     ttl_seconds: u64,
 ) -> anyhow::Result<Option<WorkspaceBindingResponse>> {
-    sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
+    // Same transaction for lock, guard and lease update: a native task that
+    // commits while we wait is seen here, and no expiry can slip a takeover
+    // past a task that already owns the workspace.
+    let mut tx = pool.begin().await?;
+    let locked = sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
+        "../sql/lock_workspace_binding_for_write.sql"
+    ))
+    .bind(workspace_binding_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if locked.is_none() {
+        return Ok(None);
+    }
+    if native_task_guard::native_task_holds_binding(&mut tx, workspace_binding_id)
+        .await?
+        .is_some()
+    {
+        return Ok(None);
+    }
+    let acquired = sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
         "../sql/acquire_workspace_write_lease.sql"
     ))
     .bind(owner)
     .bind(i64::try_from(ttl_seconds).unwrap_or(i64::MAX))
     .bind(workspace_binding_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(Into::into)
+    .fetch_optional(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(acquired)
 }
 
 pub async fn release_workspace_write_lease(
@@ -113,14 +140,36 @@ pub async fn release_workspace_write_lease(
     workspace_binding_id: i64,
     owner: &str,
 ) -> anyhow::Result<Option<WorkspaceBindingResponse>> {
-    sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
+    // Same shape as acquire: lock the binding row, re-read the native-task
+    // guard inside the same transaction, then run the release on that
+    // transaction. A native task owns this workspace outright, so its legacy
+    // lease state is not this caller's to clear; nothing here ever writes the
+    // native task table or the environment's active-task reference.
+    let mut tx = pool.begin().await?;
+    let locked = sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
+        "../sql/lock_workspace_binding_for_write.sql"
+    ))
+    .bind(workspace_binding_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if locked.is_none() {
+        return Ok(None);
+    }
+    if native_task_guard::native_task_holds_binding(&mut tx, workspace_binding_id)
+        .await?
+        .is_some()
+    {
+        return Ok(None);
+    }
+    let released = sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
         "../sql/release_workspace_write_lease.sql"
     ))
     .bind(workspace_binding_id)
     .bind(owner)
-    .fetch_optional(pool)
-    .await
-    .map_err(Into::into)
+    .fetch_optional(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(released)
 }
 
 /// Lock the workspace binding row for fenced write admission.
@@ -147,6 +196,15 @@ pub async fn lock_workspace_binding_for_write<'a>(
     .bind(workspace_binding_id)
     .fetch_optional(&mut *tx)
     .await?;
+    // Read the guard *after* the row lock was granted, in this same
+    // READ COMMITTED transaction. A task admitted while we waited on the lock
+    // is now visible; a snapshot taken before the lock would miss it.
+    if native_task_guard::native_task_holds_binding(&mut tx, workspace_binding_id)
+        .await?
+        .is_some()
+    {
+        return Ok((tx, None));
+    }
     Ok((tx, binding))
 }
 

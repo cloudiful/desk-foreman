@@ -47,6 +47,9 @@ pub(crate) fn build_app(state: RunnerManagerState) -> Router {
 
 pub(crate) struct RunnerServiceHandles {
     pub(crate) service: Arc<dyn RunnerService>,
+    /// The same backend instance the service drives, retained so the pull
+    /// dispatcher can reach `prepare_native_task` without a second backend.
+    pub(crate) backend: Arc<dyn RunnerBackend>,
     pub(crate) docker_backend: Option<Arc<DockerRunnerBackend>>,
 }
 
@@ -62,15 +65,22 @@ pub(crate) async fn build_runner_service(
                 (DirectRunnerBackend::new() as Arc<dyn RunnerBackend>, None)
             }
             RunnerBackendKind::Docker => {
-                let docker = DockerRunnerBackend::new(Arc::clone(&config), manager_id, reporter);
+                let native_tasks = crate::runtime::NativeTaskStore::from_config(&initial);
+                let docker = DockerRunnerBackend::new(
+                    Arc::clone(&config),
+                    manager_id,
+                    reporter,
+                    native_tasks,
+                );
                 (docker.clone() as Arc<dyn RunnerBackend>, Some(docker))
             }
         };
 
-    let service = LocalRunnerService::new(backend, config);
+    let service = LocalRunnerService::new(Arc::clone(&backend), config);
     service.reconcile().await?;
     Ok(RunnerServiceHandles {
         service: service as Arc<dyn RunnerService>,
+        backend,
         docker_backend,
     })
 }
@@ -295,6 +305,7 @@ mod tests {
             docker_cli: "docker".to_string(),
             docker_host: None,
             runtime_class: None,
+            native_task_root: None,
         }
     }
 

@@ -64,6 +64,14 @@ pub(crate) const APPLICATION_BEARER_SCHEME: &str = "application_bearer";
         super::internal::execution_environments::lifecycle::stop_execution_environment,
         super::internal::execution_environments::lifecycle::replace_execution_environment,
         super::internal::execution_environments::lifecycle::execution_environment_status,
+        super::internal::execution_environments::tasks::admit_native_task_handler,
+        super::internal::execution_environments::tasks::find_native_task_handler,
+        super::internal::execution_environments::tasks::cancel_native_task_handler,
+        super::internal::execution_environments::tasks::release_native_task_handler,
+        super::internal::execution_environments::tasks::seeds::seed_native_task_handler,
+        super::internal::execution_environments::tasks::seeds::find_native_task_seed_handler,
+        super::internal::execution_environments::tasks::prepare::prepare_native_task_handler,
+        super::internal::execution_environments::tasks::prepare::find_native_task_preparation_handler,
         super::internal::execution_environments::service::handler::execution_environment_service_get,
         super::internal::execution_environments::service::handler::execution_environment_service_post,
         super::internal::execution_environments::service::handler::execution_environment_service_put,
@@ -75,6 +83,7 @@ pub(crate) const APPLICATION_BEARER_SCHEME: &str = "application_bearer";
         super::internal::runner_manager::next_runner_job,
         super::internal::runner_manager::complete_runner_job,
         super::internal::runner_manager::report_workspace_runner,
+        super::internal::runner_manager_environment_jobs::task_seed_for_preparation_job,
         super::internal::runner_manager_service_relay::runner_manager_service_relay,
         super::admin::operations::list_audit_logs,
         super::admin::operations::list_workspace_runners,
@@ -129,6 +138,16 @@ pub(crate) const APPLICATION_BEARER_SCHEME: &str = "application_bearer";
             crate::api::internal::execution_environments::ProvisionExecutionEnvironmentRequest,
             crate::api::internal::execution_environments::StopExecutionEnvironmentRequest,
             crate::api::internal::execution_environments::ReplaceExecutionEnvironmentRequest,
+            crate::api::internal::execution_environments::tasks::types::AdmitNativeTaskRequest,
+            crate::api::internal::execution_environments::tasks::types::CancelNativeTaskRequest,
+            crate::api::internal::execution_environments::tasks::types::ReleaseNativeTaskRequest,
+            crate::api::internal::execution_environments::tasks::types::NativeTaskDescriptor,
+            crate::api::internal::execution_environments::tasks::seeds::types::SeedNativeTaskRequest,
+            crate::api::internal::execution_environments::tasks::seeds::types::SeedFileInput,
+            crate::api::internal::execution_environments::tasks::seeds::types::NativeTaskSeedDescriptor,
+            crate::api::internal::execution_environments::tasks::seeds::types::NativeTaskSeedContent,
+            crate::api::internal::execution_environments::tasks::prepare::types::PrepareNativeTaskRequestApi,
+            crate::api::internal::execution_environments::tasks::prepare::types::NativeTaskPreparationDescriptor,
             crate::db::execution_environments::EnvironmentOperationDescriptor,
             crate::db::execution_environments::OperationDescriptor,
             ExecutionEnvironment,
@@ -218,3 +237,7 @@ pub fn openapi_document() -> utoipa::openapi::OpenApi {
 #[cfg(test)]
 #[path = "openapi_security_tests.rs"]
 mod security_tests;
+
+#[cfg(test)]
+#[path = "openapi_security_expectations.rs"]
+mod security_expectations;

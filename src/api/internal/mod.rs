@@ -25,8 +25,11 @@ pub(super) use application::{application_capabilities, sync_resource_workspace_g
 use execution_environments::service_route;
 
 pub(super) use execution_environments::{
-    ensure_execution_environment, execution_environment_status, invalidate_execution_environment,
-    provision_execution_environment, replace_execution_environment, stop_execution_environment,
+    admit_native_task_handler, cancel_native_task_handler, ensure_execution_environment,
+    execution_environment_status, find_native_task_handler, find_native_task_preparation_handler,
+    find_native_task_seed_handler, invalidate_execution_environment, prepare_native_task_handler,
+    provision_execution_environment, release_native_task_handler, replace_execution_environment,
+    seed_native_task_handler, stop_execution_environment,
 };
 pub(super) use lease::{
     acquire_resource_workspace_lease, acquire_workspace_binding_lease,
@@ -36,6 +39,8 @@ pub(super) use lease::{
 pub(super) use runner_manager::{
     complete_runner_job, next_runner_job, report_workspace_runner, runner_manager_config,
 };
+
+pub(super) use runner_manager_environment_jobs::task_seed_for_preparation_job;
 pub(super) use runner_manager_service_relay::runner_manager_service_relay;
 
 pub(super) fn router() -> axum::Router<crate::AppState> {
@@ -55,6 +60,10 @@ pub(super) fn router() -> axum::Router<crate::AppState> {
         .route(
             "/api/internal/runner-manager/jobs/result",
             axum::routing::post(complete_runner_job),
+        )
+        .route(
+            "/api/internal/runner-managers/{manager_id}/environment-jobs/{job_id}/task-seed",
+            axum::routing::get(task_seed_for_preparation_job),
         )
         .route(
             "/api/internal/runner-manager/workspace-runners/report",
@@ -106,6 +115,31 @@ pub(super) fn router() -> axum::Router<crate::AppState> {
         .route(
             "/api/internal/execution-environments/{environment_id}/status",
             axum::routing::get(execution_environment_status),
+        )
+        .route(
+            "/api/internal/execution-environments/{environment_id}/tasks/admit",
+            axum::routing::post(admit_native_task_handler),
+        )
+        .route(
+            "/api/internal/execution-environments/{environment_id}/tasks/{task_id}",
+            axum::routing::get(find_native_task_handler),
+        )
+        .route(
+            "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/cancel",
+            axum::routing::post(cancel_native_task_handler),
+        )
+        .route(
+            "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/release",
+            axum::routing::post(release_native_task_handler),
+        )
+        .route(
+            "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/seed",
+            axum::routing::post(seed_native_task_handler).get(find_native_task_seed_handler),
+        )
+        .route(
+            "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/prepare",
+            axum::routing::post(prepare_native_task_handler)
+                .get(find_native_task_preparation_handler),
         )
         .route(
             "/api/internal/execution-environments/{environment_id}/service/{*path}",

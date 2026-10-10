@@ -19,7 +19,19 @@ use crate::{
 use runner_protocol::{CancelSessionRequest, RunnerOwner};
 use serde_json::json;
 
+pub(crate) mod native_task_guard;
+
+use native_task_guard::lock_binding_for_transition;
+
 use super::{shared::record_admin_audit, users::require_admin};
+
+/// Refusal for a transition that a durable native task forbids.
+///
+/// Names no task, binding state or workspace detail: an operator learns that
+/// a task owns this workspace, nothing about whose or what it is doing.
+fn native_task_owns_workspace() -> AppError {
+    AppError::conflict("a native task currently owns this workspace; resolve the task first")
+}
 
 #[utoipa::path(
     get,
@@ -112,13 +124,29 @@ pub async fn reset_workspace_binding(
     Path(binding_id): Path<i64>,
 ) -> Result<Json<WorkspaceBindingResponse>, AppError> {
     let admin = require_admin(&state, &jar).await?;
+    // The binding row lock is taken before the reset preflight and held
+    // through directory destruction and the final commit: without it, a task
+    // admitted mid-reset would be destroyed along with the workspace.
+    let mut guard = lock_binding_for_transition(&state.db, binding_id).await?;
+    if guard.is_native_task_conflict() {
+        return Err(native_task_owns_workspace());
+    }
+    if guard.is_absent() {
+        return Err(AppError::not_found("workspace binding not found"));
+    }
+    // The `resetting` transition runs on the guarded transaction, so nothing
+    // observes an unlocked workspace while the directory is about to be
+    // destroyed. It also proves the row still exists.
+    native_task_guard::set_lifecycle_state(guard.transaction_mut(), binding_id, "resetting")
+        .await?
+        .ok_or_else(|| AppError::not_found("workspace binding not found"))?;
+    // A plain read is safe for the columns reset consults: the row lock is
+    // held, and reset never rewrites `workspace_root` or `application_id`.
     let Some(binding) =
         crate::db::queries::find_workspace_binding_by_id(&state.db, binding_id).await?
     else {
         return Err(AppError::not_found("workspace binding not found"));
     };
-    let _ =
-        crate::db::queries::set_workspace_binding_state(&state.db, binding_id, "resetting").await?;
     cancel_binding_sessions(&state, binding_id).await?;
     let root = resolve_workspace_binding_root(&state.config.workspace_root, &binding)
         .map_err(AppError::internal)?;
@@ -131,9 +159,11 @@ pub async fn reset_workspace_binding(
         &root,
         application.workspace_template.as_deref(),
     )?;
-    let binding = crate::db::queries::set_workspace_binding_state(&state.db, binding_id, "active")
-        .await?
-        .ok_or_else(|| AppError::not_found("workspace binding not found"))?;
+    let binding =
+        native_task_guard::set_lifecycle_state(guard.transaction_mut(), binding_id, "active")
+            .await?
+            .ok_or_else(|| AppError::not_found("workspace binding not found"))?;
+    guard.commit().await?;
     record_admin_audit(
         &state,
         &admin,
@@ -153,12 +183,26 @@ async fn transition_workspace_binding(
     lifecycle_state: &str,
 ) -> Result<Json<WorkspaceBindingResponse>, AppError> {
     let admin = require_admin(state, jar).await?;
-    let Some(binding) =
-        crate::db::queries::set_workspace_binding_state(&state.db, binding_id, lifecycle_state)
-            .await?
+    // Lock the binding row, then read the native-task guard inside the same
+    // transaction: archiving or restoring a workspace a task owns would
+    // change the ground under that task's writer.
+    let mut guard = lock_binding_for_transition(&state.db, binding_id).await?;
+    if guard.is_native_task_conflict() {
+        return Err(native_task_owns_workspace());
+    }
+    if guard.is_absent() {
+        return Err(AppError::not_found("workspace binding not found"));
+    }
+    let Some(binding) = native_task_guard::set_lifecycle_state(
+        guard.transaction_mut(),
+        binding_id,
+        lifecycle_state,
+    )
+    .await?
     else {
         return Err(AppError::not_found("workspace binding not found"));
     };
+    guard.commit().await?;
     if lifecycle_state == "archived" {
         cancel_binding_sessions(state, binding_id).await?;
     }

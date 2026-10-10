@@ -12,7 +12,7 @@
 //! row is the authority, and the worker manager identity is checked before any
 //! evaluation. A malformed or inconsistent ack mutates no row.
 
-use runner_protocol::RunnerJobResult;
+use runner_protocol::{NativeTaskPreparedResult, RunnerJobResult};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -79,6 +79,44 @@ pub(crate) async fn claim_next_assigned_manager_environment_job(
     .map_err(Into::into)
 }
 
+/// Mark the linked task uncertain and the job uncertain after a failed or
+/// unconfirmed preparation. The task keeps its exclusive anchors and is never
+/// re-dispatched.
+async fn complete_preparation_failure(
+    pool: &PgPool,
+    row: &ExecutionEnvironmentJob,
+) -> anyhow::Result<DurableJobCompletion> {
+    let outcome =
+        crate::db::execution_environments::tasks::prepare::complete_native_task_preparation(
+            pool,
+            crate::db::execution_environments::tasks::prepare::PreparationCompletion {
+                manager_id: row.assigned_manager_id,
+                job_id: row.job_id,
+                result: None,
+                failed: true,
+            },
+        )
+        .await?;
+    Ok(match outcome {
+        crate::db::execution_environments::tasks::prepare::PreparationCompletionOutcome::Uncertain
+        | crate::db::execution_environments::tasks::prepare::PreparationCompletionOutcome::Prepared => {
+            DurableJobCompletion::Completed
+        }
+        crate::db::execution_environments::tasks::prepare::PreparationCompletionOutcome::Inconsistent(
+            reason,
+        ) => DurableJobCompletion::Inconsistent(reason),
+        crate::db::execution_environments::tasks::prepare::PreparationCompletionOutcome::NotFound => {
+            DurableJobCompletion::NotFound
+        }
+        crate::db::execution_environments::tasks::prepare::PreparationCompletionOutcome::ForeignManager => {
+            DurableJobCompletion::ForeignManager
+        }
+        crate::db::execution_environments::tasks::prepare::PreparationCompletionOutcome::NotCompletable => {
+            DurableJobCompletion::NotCompletable
+        }
+    })
+}
+
 /// Trusted manager-only lookup of one durable job by its stable UUID.
 pub(crate) async fn find_execution_environment_job_by_id(
     pool: &PgPool,
@@ -108,6 +146,54 @@ pub(crate) async fn complete_assigned_manager_environment_job(
     };
     if row.assigned_manager_id != manager_id {
         return Ok(DurableJobCompletion::ForeignManager);
+    }
+
+    // A preparation is not an environment operation: its ack is a typed proof
+    // about the task's sealed seed, so it takes a DB-aware path rather than the
+    // pure owner/container evaluation below.
+    if row.job_kind == "prepare_native_task" {
+        if !result.ok {
+            return complete_preparation_failure(pool, &row).await;
+        }
+        let Some(value) = result.result.clone() else {
+            return Ok(DurableJobCompletion::Inconsistent(
+                "prepared result carried no payload",
+            ));
+        };
+        let Ok(ack) = serde_json::from_value::<NativeTaskPreparedResult>(value) else {
+            return Ok(DurableJobCompletion::Inconsistent(
+                "prepared ack could not be decoded",
+            ));
+        };
+        let outcome =
+            crate::db::execution_environments::tasks::prepare::complete_native_task_preparation(
+                pool,
+                crate::db::execution_environments::tasks::prepare::PreparationCompletion {
+                    manager_id,
+                    job_id: row.job_id,
+                    result: Some(ack),
+                    failed: false,
+                },
+            )
+            .await?;
+        return Ok(match outcome {
+            crate::db::execution_environments::tasks::prepare::PreparationCompletionOutcome::Prepared
+            | crate::db::execution_environments::tasks::prepare::PreparationCompletionOutcome::Uncertain => {
+                DurableJobCompletion::Completed
+            }
+            crate::db::execution_environments::tasks::prepare::PreparationCompletionOutcome::Inconsistent(
+                reason,
+            ) => DurableJobCompletion::Inconsistent(reason),
+            crate::db::execution_environments::tasks::prepare::PreparationCompletionOutcome::NotFound => {
+                DurableJobCompletion::NotFound
+            }
+            crate::db::execution_environments::tasks::prepare::PreparationCompletionOutcome::ForeignManager => {
+                DurableJobCompletion::ForeignManager
+            }
+            crate::db::execution_environments::tasks::prepare::PreparationCompletionOutcome::NotCompletable => {
+                DurableJobCompletion::NotCompletable
+            }
+        });
     }
 
     let (state, job_result, error_summary) = match resolve_environment_job_result(&row, result) {

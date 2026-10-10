@@ -209,6 +209,24 @@ pub async fn acquire_workspace_write_lease_takeover(
         });
     };
 
+    // Read the native-task guard after the binding row lock, inside this same
+    // transaction, before any staleness or force logic. A durable native task
+    // owns this workspace outright, so a takeover must refuse regardless of
+    // how stale the legacy lease looks; no expiry can step past it.
+    if crate::db::workspace_bindings::native_task_guard::native_task_holds_binding(
+        &mut tx,
+        workspace_binding_id,
+    )
+    .await?
+    .is_some()
+    {
+        tx.rollback().await?;
+        return Ok(TakeoverOutcome::Conflict {
+            reason: TakeoverConflictReason::NotActive,
+            current: probe,
+        });
+    }
+
     let decision = classify_takeover(
         &locked,
         new_owner,

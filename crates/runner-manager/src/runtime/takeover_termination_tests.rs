@@ -42,6 +42,7 @@ fn test_config(workspace_root: &std::path::Path) -> crate::config::RunnerManager
         docker_cli: "docker".to_string(),
         docker_host: None,
         runtime_class: None,
+        native_task_root: None,
     }
 }
 

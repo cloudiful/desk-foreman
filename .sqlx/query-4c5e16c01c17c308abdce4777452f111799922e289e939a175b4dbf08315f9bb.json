@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Lock the environment before expiring any linked operation row. Preparation\n-- acknowledgements use the same environment-first order before task/job writes.\nSELECT 1 AS locked\nFROM execution_environments\nWHERE application_id = $1\n  AND environment_id = $2\nFOR UPDATE;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "locked",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4c5e16c01c17c308abdce4777452f111799922e289e939a175b4dbf08315f9bb"
+}

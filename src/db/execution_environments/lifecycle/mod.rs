@@ -20,6 +20,15 @@ pub use replace::replace_execution_environment;
 pub use status::execution_environment_status;
 pub use stop::stop_execution_environment;
 
+// Visibility-only: the native-task phase reuses the same lock-held helpers so
+// task admission applies identical blocker and manager-selection rules rather
+// than a second copy that could drift.
+pub(crate) use support::{expire_overdue_jobs, find_job_by_id, load_jobs, select_manager};
+
+// Visibility-only: native-task admission reuses the exact confirmed-stop rule
+// replacement already applies, so the two can never drift apart.
+pub(crate) use replace::proof_is_confirmed_stop;
+
 pub use types::{
     ACCEPTED_CONFIRMED_STOP_STATES, EnvironmentOperationDescriptor, LIFECYCLE_ENVIRONMENT_STATES,
     LIFECYCLE_STATE_READY, LIFECYCLE_STATE_REPLACED, LIFECYCLE_STATE_STARTING,

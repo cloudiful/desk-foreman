@@ -9,80 +9,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value, json};
 
+use super::security_expectations::APPLICATION_BEARER_OPERATIONS;
 use super::{APPLICATION_BEARER_SCHEME, openapi_document};
 
 const HTTP_METHODS: [&str; 7] = ["get", "post", "put", "patch", "delete", "head", "options"];
 
 /// Operations guarded by `application_actor`, as `(path, method, operationId)`.
-const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 13] = [
-    (
-        "/api/internal/execution-environments/ensure",
-        "post",
-        "ensure_execution_environment",
-    ),
-    (
-        "/api/internal/execution-environments/{environment_id}/invalidate",
-        "post",
-        "invalidate_execution_environment",
-    ),
-    (
-        "/api/internal/execution-environments/{environment_id}/provision",
-        "post",
-        "provision_execution_environment",
-    ),
-    (
-        "/api/internal/execution-environments/{environment_id}/stop",
-        "post",
-        "stop_execution_environment",
-    ),
-    (
-        "/api/internal/execution-environments/{environment_id}/replace",
-        "post",
-        "replace_execution_environment",
-    ),
-    (
-        "/api/internal/execution-environments/{environment_id}/status",
-        "get",
-        "execution_environment_status",
-    ),
-    // The private-service gateway resolves the same application identity from
-    // the same bearer guard, so every relayed method is guarded by it too.
-    (
-        "/api/internal/execution-environments/{environment_id}/service/{path}",
-        "get",
-        "execution_environment_service_get",
-    ),
-    (
-        "/api/internal/execution-environments/{environment_id}/service/{path}",
-        "post",
-        "execution_environment_service_post",
-    ),
-    (
-        "/api/internal/execution-environments/{environment_id}/service/{path}",
-        "put",
-        "execution_environment_service_put",
-    ),
-    (
-        "/api/internal/execution-environments/{environment_id}/service/{path}",
-        "patch",
-        "execution_environment_service_patch",
-    ),
-    (
-        "/api/internal/execution-environments/{environment_id}/service/{path}",
-        "delete",
-        "execution_environment_service_delete",
-    ),
-    (
-        "/api/internal/execution-environments/{environment_id}/service/{path}",
-        "head",
-        "execution_environment_service_head",
-    ),
-    (
-        "/api/internal/execution-environments/{environment_id}/service/{path}",
-        "options",
-        "execution_environment_service_options",
-    ),
-];
 
 fn document() -> Value {
     serde_json::to_value(openapi_document()).expect("serialize openapi document")

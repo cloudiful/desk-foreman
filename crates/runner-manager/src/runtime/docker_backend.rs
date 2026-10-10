@@ -1,8 +1,8 @@
 use desk_foreman::runner::RunnerFuture;
 use runner_protocol::{
     CommandOutput, EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest,
-    RunnerCommandRequest, RunnerOwner, RunnerShellRequest, StopExecutionEnvironmentAck,
-    StopExecutionEnvironmentRequest,
+    NativeTaskPreparedResult, PrepareNativeTaskRequest, RunnerCommandRequest, RunnerOwner,
+    RunnerShellRequest, SeedBundle, StopExecutionEnvironmentAck, StopExecutionEnvironmentRequest,
 };
 
 use super::{
@@ -49,6 +49,14 @@ impl RunnerBackend for DockerRunnerBackend {
                 cwd: None,
             })
         })
+    }
+
+    fn prepare_native_task<'a>(
+        &'a self,
+        request: PrepareNativeTaskRequest,
+        seed: SeedBundle,
+    ) -> RunnerFuture<'a, anyhow::Result<NativeTaskPreparedResult>> {
+        Box::pin(async move { self.prepare_native_task_checkout(request, seed).await })
     }
 
     fn run_command<'a>(
@@ -157,5 +165,20 @@ impl RunnerBackend for DockerRunnerBackend {
             let profile = ExecutionEnvironmentProfile::from_env_or_default();
             super::execution_environment::stop_execution_environment(self, &profile, request).await
         })
+    }
+}
+
+impl DockerRunnerBackend {
+    /// Materialize one task checkout through the shared filesystem store.
+    ///
+    /// Docker is not touched: P2b is a filesystem-only preparation, and the
+    /// privileged launch path is a later phase. A manager with no trusted root
+    /// fails here with the fixed unsupported message.
+    pub(crate) async fn prepare_native_task_checkout(
+        &self,
+        request: PrepareNativeTaskRequest,
+        seed: SeedBundle,
+    ) -> anyhow::Result<NativeTaskPreparedResult> {
+        self.native_tasks.materialize(&request, &seed).await
     }
 }

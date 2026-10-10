@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Seal one file of a snapshot (issue 753 P2a).\n--\n-- Rows are inserted in path order so the stored ordering matches the digest,\n-- and `(task_id, path)` makes a duplicate path impossible at the storage\n-- layer even if an application-side check ever missed one.\nINSERT INTO execution_environment_task_seed_files (task_id, path, content)\nVALUES ($1, $2, $3);\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7def23be317bf23ed56151b7a7ece1c29d1874aff8a3cf4a1fd9906b7c47e6c1"
+}

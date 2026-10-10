@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- The sealed files of a snapshot, in canonical path order (issue 753 P2a).\nSELECT path, content\nFROM execution_environment_task_seed_files\nWHERE task_id = $1\nORDER BY path;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_task_seed_files",
+            "name": "path"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "content",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_task_seed_files",
+            "name": "content"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "8c9e94ed3074c4481f2fe3c1eb3a5ba8258bfaf5274dc78798a8f2d11c693a47"
+}

@@ -30,6 +30,9 @@ pub struct DockerRunnerBackend {
     /// generation. Network bookkeeping only: the durable barrier stays the
     /// authority on what may serve.
     pub(crate) service_cancel: ServiceCancelRegistry,
+    /// Filesystem materializer for native-task checkouts. Disabled when no
+    /// trusted root is configured; it never falls back to a workspace root.
+    pub(crate) native_tasks: crate::runtime::NativeTaskStore,
 }
 
 impl DockerRunnerBackend {
@@ -37,6 +40,7 @@ impl DockerRunnerBackend {
         config: SharedRunnerManagerConfig,
         manager_id: String,
         reporter: Arc<RunnerLifecycleReporter>,
+        native_tasks: crate::runtime::NativeTaskStore,
     ) -> Arc<Self> {
         Arc::new(Self {
             config,
@@ -47,6 +51,7 @@ impl DockerRunnerBackend {
             last_active: Mutex::new(HashMap::new()),
             active_ops: Mutex::new(HashMap::new()),
             service_cancel: ServiceCancelRegistry::new(),
+            native_tasks,
         })
     }
 

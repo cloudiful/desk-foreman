@@ -1,5 +1,7 @@
 use std::{fs, time::Duration};
 
+mod guard;
+
 use crate::{
     AppState,
     db::{self, audit::AuditLogEntry},
@@ -18,12 +20,30 @@ pub fn spawn_janitor(state: AppState) {
     });
 }
 
-async fn cleanup_archived_workspaces(state: &AppState) -> anyhow::Result<()> {
+/// One archived-workspace sweep.
+///
+/// Exposed so a test can drive the real janitor path — lock, guard, filesystem
+/// cleanup, delete — instead of asserting on a re-implementation of it.
+pub async fn cleanup_archived_workspaces(state: &AppState) -> anyhow::Result<()> {
     let before = Utc::now()
         - ChronoDuration::from_std(state.config.workspace_retention)
             .map_err(|_| anyhow::anyhow!("invalid workspace retention"))?;
     let archived = db::queries::list_archived_workspace_bindings(&state.db, before).await?;
     for binding in archived {
+        // Take the binding row lock, then re-read the native-task guard, and
+        // hold it through the filesystem cleanup and the delete. An admitted
+        // task owns this workspace, so an archived binding that still has one
+        // is skipped rather than deleted out from under it.
+        let mut cleanup =
+            guard::lock_binding_for_cleanup(&state.db, binding.workspace_binding_id).await?;
+        if cleanup.should_skip() {
+            tracing::info!(
+                workspace_binding_id = binding.workspace_binding_id,
+                "janitor skipped an archived workspace a native task still owns"
+            );
+            cleanup.release().await?;
+            continue;
+        }
         let owner = runner_protocol::RunnerOwner::WorkspaceBinding {
             workspace_binding_id: binding.workspace_binding_id,
         };
@@ -45,10 +65,16 @@ async fn cleanup_archived_workspaces(state: &AppState) -> anyhow::Result<()> {
             );
             continue;
         }
-        if db::queries::delete_workspace_binding(&state.db, binding.workspace_binding_id)
-            .await?
-            .is_some()
-        {
+        // The delete runs on the guarded transaction, so the row cannot be
+        // removed outside the window this lock closes; the lock is held through
+        // the filesystem cleanup and the delete, then released by commit.
+        let deleted = crate::db::workspace_bindings::native_task_guard::delete_binding(
+            cleanup.transaction_mut(),
+            binding.workspace_binding_id,
+        )
+        .await?;
+        cleanup.release().await?;
+        if deleted.is_some() {
             db::queries::record_audit(
                 &state.db,
                 AuditLogEntry {
@@ -58,7 +84,10 @@ async fn cleanup_archived_workspaces(state: &AppState) -> anyhow::Result<()> {
                     action: "workspace.delete",
                     target_type: "workspace_binding",
                     target_id: &binding.workspace_binding_id.to_string(),
-                    workspace_binding_id: Some(binding.workspace_binding_id),
+                    // The binding row no longer exists, so the audit row cannot
+                    // carry a foreign key to it; `target_id` keeps the
+                    // identifier for the audit trail.
+                    workspace_binding_id: None,
                     external_user_id: Some(&binding.external_user_id),
                     payload: serde_json::json!({}),
                     request_id: None,

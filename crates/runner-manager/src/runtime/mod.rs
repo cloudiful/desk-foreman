@@ -9,6 +9,7 @@ mod docker_tests;
 pub mod execution_environment;
 mod janitor;
 mod local_service;
+mod native_task;
 pub(crate) mod process_termination;
 mod reporter;
 pub(crate) mod session_gate;
@@ -23,6 +24,7 @@ pub use direct::DirectRunnerBackend;
 pub use docker::DockerRunnerBackend;
 pub use janitor::spawn_janitor;
 pub use local_service::LocalRunnerService;
+pub(crate) use native_task::NativeTaskStore;
 pub use reporter::RunnerLifecycleReporter;
 
 use std::time::Instant;
