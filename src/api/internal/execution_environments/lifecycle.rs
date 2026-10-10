@@ -36,6 +36,7 @@ use super::types::{
     post,
     path = "/api/internal/execution-environments/{environment_id}/provision",
     tag = "internal",
+    security(("application_bearer" = [])),
     params(
         ("environment_id" = Uuid, Path, description = "Durable environment identifier")
     ),
@@ -72,6 +73,7 @@ pub async fn provision_execution_environment(
     post,
     path = "/api/internal/execution-environments/{environment_id}/stop",
     tag = "internal",
+    security(("application_bearer" = [])),
     params(
         ("environment_id" = Uuid, Path, description = "Durable environment identifier")
     ),
@@ -107,6 +109,7 @@ pub async fn stop_execution_environment(
     post,
     path = "/api/internal/execution-environments/{environment_id}/replace",
     tag = "internal",
+    security(("application_bearer" = [])),
     params(
         ("environment_id" = Uuid, Path, description = "Durable environment identifier")
     ),
@@ -144,6 +147,7 @@ pub async fn replace_execution_environment(
     get,
     path = "/api/internal/execution-environments/{environment_id}/status",
     tag = "internal",
+    security(("application_bearer" = [])),
     params(
         ("environment_id" = Uuid, Path, description = "Durable environment identifier")
     ),

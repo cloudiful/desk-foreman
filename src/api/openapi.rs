@@ -1,4 +1,7 @@
-use utoipa::OpenApi;
+use utoipa::{
+    Modify, OpenApi,
+    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
+};
 
 use crate::{
     db::types::*,
@@ -10,6 +13,12 @@ use crate::{
         shared::{ApplyPatchOutput, CancelSessionOutput},
     },
 };
+
+/// Name of the security scheme the internal application-authenticated routes
+/// advertise. It mirrors the `application_actor` bearer guard, so generated
+/// clients send the same `Authorization: Bearer <application token>` header the
+/// runtime already requires.
+pub(crate) const APPLICATION_BEARER_SCHEME: &str = "application_bearer";
 
 #[derive(OpenApi)]
 #[openapi(
@@ -166,10 +175,38 @@ use crate::{
         (name = "internal", description = "Internal application and runner-manager API"),
         (name = "tools", description = "Workspace tool API for the authenticated user"),
         (name = "admin-tools", description = "Admin-targeted workspace tool API")
-    )
+    ),
+    modifiers(&ApplicationBearer)
 )]
 struct ApiDoc;
+
+/// Declares the application bearer security scheme in `components`. Operations
+/// opt into it one by one so public routes (login, health) stay unauthenticated.
+struct ApplicationBearer;
+
+impl Modify for ApplicationBearer {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        openapi
+            .components
+            .get_or_insert_with(Default::default)
+            .add_security_scheme(
+                APPLICATION_BEARER_SCHEME,
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some(
+                            "Bearer token of the calling application, checked by the internal API guard.",
+                        ))
+                        .build(),
+                ),
+            );
+    }
+}
 
 pub fn openapi_document() -> utoipa::openapi::OpenApi {
     ApiDoc::openapi()
 }
+
+#[cfg(test)]
+#[path = "openapi_security_tests.rs"]
+mod security_tests;

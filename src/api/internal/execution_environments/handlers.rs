@@ -30,6 +30,7 @@ use super::types::{EnsureExecutionEnvironmentRequest, InvalidateExecutionEnviron
     post,
     path = "/api/internal/execution-environments/ensure",
     tag = "internal",
+    security(("application_bearer" = [])),
     request_body = EnsureExecutionEnvironmentRequest,
     responses(
         (status = 200, body = ExecutionEnvironment),
@@ -66,6 +67,7 @@ pub async fn ensure_execution_environment(
     post,
     path = "/api/internal/execution-environments/{environment_id}/invalidate",
     tag = "internal",
+    security(("application_bearer" = [])),
     params(
         ("environment_id" = Uuid, Path, description = "Durable environment identifier")
     ),
