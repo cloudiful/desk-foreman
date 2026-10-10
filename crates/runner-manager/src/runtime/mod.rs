@@ -6,6 +6,7 @@ mod docker_command;
 mod docker_lifecycle;
 #[cfg(test)]
 mod docker_tests;
+pub mod execution_environment;
 mod janitor;
 mod local_service;
 pub(crate) mod process_termination;

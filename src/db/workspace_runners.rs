@@ -109,6 +109,14 @@ pub async fn save_workspace_runner(
         RunnerOwner::WorkspaceBinding {
             workspace_binding_id,
         } => ("workspace_binding", None, Some(*workspace_binding_id)),
+        // Compile-only compatibility: the legacy workspace_runners table has
+        // no environment owner columns. Fail closed instead of mapping to a
+        // user/workspace identity or writing an invalid row.
+        RunnerOwner::ExecutionEnvironment { .. } => {
+            anyhow::bail!(
+                "execution environment owners are not persisted through legacy workspace_runners"
+            );
+        }
     };
 
     sqlx::query_as::<_, WorkspaceRunnerRecord>(include_str!("../sql/save_workspace_runner.sql"))
@@ -135,6 +143,16 @@ pub async fn report_workspace_runner(
     runner_manager_id: i64,
     event: &runner_protocol::RunnerLifecycleEvent,
 ) -> anyhow::Result<()> {
+    // Compile-only compatibility: environment lifecycle never flows through
+    // the legacy table. Reject explicitly instead of writing invalid rows.
+    if matches!(
+        event.owner,
+        runner_protocol::RunnerOwner::ExecutionEnvironment { .. }
+    ) {
+        anyhow::bail!(
+            "execution environment owners are not reported through legacy workspace_runners"
+        );
+    }
     let status = event.status.as_str();
     if status == "running" {
         let input = SaveWorkspaceRunner {
@@ -164,12 +182,16 @@ pub async fn report_workspace_runner(
         .bind(match event.owner {
             runner_protocol::RunnerOwner::InternalUser { user_id } => Some(user_id),
             runner_protocol::RunnerOwner::WorkspaceBinding { .. } => None,
+            // Unreachable: rejected above. Never map to a user identity.
+            runner_protocol::RunnerOwner::ExecutionEnvironment { .. } => None,
         })
         .bind(match event.owner {
             runner_protocol::RunnerOwner::InternalUser { .. } => None,
             runner_protocol::RunnerOwner::WorkspaceBinding {
                 workspace_binding_id,
             } => Some(workspace_binding_id),
+            // Unreachable: rejected above. Never write an invalid row.
+            runner_protocol::RunnerOwner::ExecutionEnvironment { .. } => None,
         })
         .execute(pool)
         .await?;

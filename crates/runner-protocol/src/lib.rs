@@ -3,6 +3,12 @@ use std::path::PathBuf;
 use serde_json::Value;
 use utoipa::ToSchema;
 
+pub mod execution_environment;
+
+pub use execution_environment::{
+    EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest, StopExecutionEnvironmentAck,
+    StopExecutionEnvironmentRequest,
+};
 pub const RUNNER_JOB_TIMEOUT_SECS: u64 = 3_660;
 pub const RUNNER_JOB_POLL_TIMEOUT_SECS: u64 = 10;
 pub const RUNNER_MANAGER_HEARTBEAT_TTL_SECS: u64 = 30;
@@ -25,9 +31,7 @@ impl RunnerLifecycleStatus {
     }
 }
 
-#[derive(
-    Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, ToSchema,
-)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, ToSchema)]
 pub struct RunnerLifecycleEvent {
     pub owner: RunnerOwner,
     pub container_name: String,
@@ -58,8 +62,16 @@ mod lifecycle_tests {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize, ToSchema)]
 pub enum RunnerOwner {
-    InternalUser { user_id: i64 },
-    WorkspaceBinding { workspace_binding_id: i64 },
+    InternalUser {
+        user_id: i64,
+    },
+    WorkspaceBinding {
+        workspace_binding_id: i64,
+    },
+    ExecutionEnvironment {
+        environment_id: String,
+        generation: i64,
+    },
 }
 
 impl RunnerOwner {
@@ -67,6 +79,7 @@ impl RunnerOwner {
         match self {
             Self::InternalUser { .. } => "user",
             Self::WorkspaceBinding { .. } => "workspace_binding",
+            Self::ExecutionEnvironment { .. } => "execution_environment",
         }
     }
 
@@ -76,6 +89,22 @@ impl RunnerOwner {
             Self::WorkspaceBinding {
                 workspace_binding_id,
             } => format!("workspace_binding:{workspace_binding_id}"),
+            Self::ExecutionEnvironment {
+                environment_id,
+                generation,
+            } => format!("execution_environment:{environment_id}:{generation}"),
+        }
+    }
+
+    /// In-process lock key. Environment owners serialize on the
+    /// environment id alone; generation-specific locks cannot protect
+    /// replacement. Legacy owners keep their stable key.
+    pub fn lock_key(&self) -> String {
+        match self {
+            Self::ExecutionEnvironment { environment_id, .. } => {
+                crate::execution_environment::environment_lock_key(environment_id)
+            }
+            _ => self.stable_key(),
         }
     }
 

@@ -16,15 +16,15 @@ use super::{RunnerLifecycleReporter, docker_command::ensure_docker_command_succe
 use tokio::time::{Duration, timeout};
 
 pub struct DockerRunnerBackend {
-    pub(super) config: SharedRunnerManagerConfig,
-    pub(super) manager_id: String,
-    pub(super) reporter: Arc<RunnerLifecycleReporter>,
-    pub(super) observed: Mutex<HashMap<String, runner_protocol::RunnerLifecycleEvent>>,
+    pub(crate) config: SharedRunnerManagerConfig,
+    pub(crate) manager_id: String,
+    pub(crate) reporter: Arc<RunnerLifecycleReporter>,
+    pub(crate) observed: Mutex<HashMap<String, runner_protocol::RunnerLifecycleEvent>>,
     /// Serializes container create/start reconciliation per owner so concurrent
     /// first requests cannot race on `docker run --name <same-name>`.
-    pub(super) runner_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    pub(super) last_active: Mutex<HashMap<String, Instant>>,
-    pub(super) active_ops: Mutex<HashMap<String, usize>>,
+    pub(crate) runner_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    pub(crate) last_active: Mutex<HashMap<String, Instant>>,
+    pub(crate) active_ops: Mutex<HashMap<String, usize>>,
 }
 
 impl DockerRunnerBackend {
@@ -44,8 +44,8 @@ impl DockerRunnerBackend {
         })
     }
 
-    pub(super) fn runner_lock(&self, owner: &RunnerOwner) -> Arc<tokio::sync::Mutex<()>> {
-        let key = owner.stable_key().to_string();
+    pub(crate) fn runner_lock(&self, owner: &RunnerOwner) -> Arc<tokio::sync::Mutex<()>> {
+        let key = owner.lock_key();
         let mut locks = self.runner_locks.lock().expect("runner lock map poisoned");
         locks
             .entry(key)
@@ -59,6 +59,14 @@ impl DockerRunnerBackend {
         workspace_root: &Path,
         requested_network_enabled: bool,
     ) -> anyhow::Result<String> {
+        // Legacy workspace/user path only. An execution-environment owner must
+        // use the environment ensure primitive; reject it here, before any
+        // Docker command or mount construction runs.
+        if runner_protocol::execution_environment::is_execution_environment(owner) {
+            anyhow::bail!(
+                "execution environment owners must use ensure_execution_environment, not ensure_runner"
+            );
+        }
         let config = self.config.read().await.clone();
         let lock = self.runner_lock(owner);
         let _guard = lock.lock().await;
@@ -226,14 +234,62 @@ impl DockerRunnerBackend {
         }
     }
 
-    pub(super) async fn docker_status<const N: usize>(
+    /// Environment-level lock: all generations of one environment share
+    /// one mutex so concurrent ensures cannot attach the same durable
+    /// state to two running generations. Legacy owners keep their
+    /// stable-key lock via `lock_key()`.
+    pub(crate) fn environment_runner_lock(
+        &self,
+        environment_id: &str,
+    ) -> Arc<tokio::sync::Mutex<()>> {
+        let key = runner_protocol::execution_environment::environment_lock_key(environment_id);
+        let mut locks = self.runner_locks.lock().expect("runner lock map poisoned");
+        locks
+            .entry(key)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    }
+
+    pub(crate) async fn docker_status<const N: usize>(
         &self,
         args: [&str; N],
     ) -> anyhow::Result<()> {
         self.docker_output(args).await.map(|_| ())
     }
 
-    pub(super) async fn docker_output<const N: usize>(
+    /// Bounded Docker invocation for execution-environment operations.
+    ///
+    /// Reuses `bounded_command_output`, so a deadline kills and reaps the
+    /// spawned Docker CLI before returning instead of dropping an orphaned
+    /// process. Additive: legacy `docker_output`/`docker_status` semantics
+    /// are untouched.
+    pub(crate) async fn docker_output_bounded(
+        &self,
+        args: Vec<String>,
+        timeout_ms: u64,
+    ) -> anyhow::Result<CommandOutput> {
+        self.docker_output_owned(args, Some(timeout_ms), None).await
+    }
+
+    /// Bounded Docker status: a non-zero exit or a timeout is an error, so
+    /// a deadline is never mistaken for a successful command.
+    pub(crate) async fn docker_status_bounded(
+        &self,
+        args: Vec<String>,
+        timeout_ms: u64,
+    ) -> anyhow::Result<()> {
+        let output = self
+            .docker_output_owned(args, Some(timeout_ms), None)
+            .await?;
+        if output.timed_out {
+            anyhow::bail!(
+                "bounded docker command timed out within the execution environment operation deadline"
+            );
+        }
+        ensure_docker_command_succeeded("run bounded docker command", &output)
+    }
+
+    pub(crate) async fn docker_output<const N: usize>(
         &self,
         args: [&str; N],
     ) -> anyhow::Result<String> {
@@ -241,7 +297,7 @@ impl DockerRunnerBackend {
             .await
     }
 
-    pub(super) async fn docker_output_owned(
+    pub(crate) async fn docker_output_owned(
         &self,
         args: Vec<String>,
         timeout_ms: Option<u64>,

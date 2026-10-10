@@ -163,6 +163,22 @@ async fn execute_job_inner(
             runner.cleanup_runner_owner(owner).await?;
             Ok(Value::Null)
         }
+        "ensure_execution_environment" => {
+            let request = serde_json::from_value::<
+                runner_protocol::EnsureExecutionEnvironmentRequest,
+            >(payload)?;
+            Ok(serde_json::to_value(
+                runner.ensure_execution_environment(request).await?,
+            )?)
+        }
+        "stop_execution_environment" => {
+            let request = serde_json::from_value::<runner_protocol::StopExecutionEnvironmentRequest>(
+                payload,
+            )?;
+            Ok(serde_json::to_value(
+                runner.stop_execution_environment(request).await?,
+            )?)
+        }
         _ => bail!("unknown runner job kind: {kind}"),
     }
 }

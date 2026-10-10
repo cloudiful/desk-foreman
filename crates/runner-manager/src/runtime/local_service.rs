@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use desk_foreman::runner::{RunnerFuture, RunnerService};
 use runner_protocol::{
-    CancelSessionRequest, ExecRequest, InputRequest, RunnerCommandRequest, RunnerOwner,
-    RunnerSessionStatus, ShellToolOutput,
+    CancelSessionRequest, EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest,
+    ExecRequest, InputRequest, RunnerCommandRequest, RunnerOwner, RunnerSessionStatus,
+    ShellToolOutput, StopExecutionEnvironmentAck, StopExecutionEnvironmentRequest,
 };
 
 use super::{RunnerBackend, shell_manager::ShellManager};
@@ -87,5 +88,19 @@ impl RunnerService for LocalRunnerService {
             }
             self.backend.cleanup_runner_owner(owner).await
         })
+    }
+
+    fn ensure_execution_environment<'a>(
+        &'a self,
+        request: EnsureExecutionEnvironmentRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<EnsureExecutionEnvironmentAck>> {
+        Box::pin(async move { self.backend.ensure_execution_environment(request).await })
+    }
+
+    fn stop_execution_environment<'a>(
+        &'a self,
+        request: StopExecutionEnvironmentRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<StopExecutionEnvironmentAck>> {
+        Box::pin(async move { self.backend.stop_execution_environment(request).await })
     }
 }

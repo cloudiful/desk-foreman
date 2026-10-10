@@ -77,6 +77,10 @@ pub async fn list_runner_sessions(
     let all = state.runner.list_sessions().await?;
     let filtered: Vec<RunnerSessionStatus> = all
         .into_iter()
+        // Compile-only compatibility: the legacy admin sessions surface has
+        // no environment owner representation. Skip explicitly instead of
+        // mapping to a user/workspace identity.
+        .filter(|session| !matches!(session.owner, RunnerOwner::ExecutionEnvironment { .. }))
         .filter(|session| match &params.owner_kind {
             Some(kind) => matches!(
                 (&session.owner, kind.as_str()),
@@ -174,6 +178,9 @@ fn session_response(row: RunnerSessionStatus) -> RunnerSessionResponse {
         RunnerOwner::WorkspaceBinding {
             workspace_binding_id,
         } => ("workspace_binding".to_string(), workspace_binding_id),
+        // Compile-only compatibility: unreachable via the explicit skip
+        // above. Never map to a user/workspace identity.
+        RunnerOwner::ExecutionEnvironment { .. } => ("execution_environment".to_string(), -1),
     };
     RunnerSessionResponse {
         session_id: row.session_id,

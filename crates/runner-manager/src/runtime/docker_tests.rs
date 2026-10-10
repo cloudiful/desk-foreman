@@ -234,3 +234,55 @@ async fn cleanup_blocks_while_owner_has_active_operations() {
         "blocked cleanup must not docker stop, got: {logged}"
     );
 }
+
+#[tokio::test]
+async fn legacy_ensure_rejects_execution_environment_owner_before_docker() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let log = temp.path().join("docker-env-owner.log");
+    std::fs::write(&log, "").expect("seed log");
+    let fake = write_fake_docker(temp.path(), "docker-env-owner", &log, "ok");
+    let backend = backend_with_docker_cli(&fake.to_string_lossy());
+    let owner = RunnerOwner::ExecutionEnvironment {
+        environment_id: "123e4567-e89b-12d3-a456-426614174000".to_string(),
+        generation: 0,
+    };
+
+    let result = backend
+        .ensure_runner(&owner, std::path::Path::new("/tmp"), false)
+        .await;
+
+    let error = result.expect_err("environment owners must be rejected by the legacy path");
+    assert!(
+        error.to_string().contains("ensure_execution_environment"),
+        "rejection must point at the environment primitive, got: {error}"
+    );
+    let logged = std::fs::read_to_string(&log).expect("read log");
+    assert!(
+        logged.is_empty(),
+        "no Docker command may run for an environment owner, got: {logged}"
+    );
+}
+
+#[tokio::test]
+async fn legacy_ensure_still_enters_docker_for_a_workspace_owner() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let log = temp.path().join("docker-legacy-owner.log");
+    std::fs::write(&log, "").expect("seed log");
+    let fake = write_fake_docker(temp.path(), "docker-legacy-owner", &log, "ok");
+    let backend = backend_with_docker_cli(&fake.to_string_lossy());
+    let owner = RunnerOwner::WorkspaceBinding {
+        workspace_binding_id: 42,
+    };
+
+    // The guard is scoped to environment owners: a legacy workspace owner still
+    // reaches Docker even though the fake CLI cannot complete a real ensure.
+    let _ = backend
+        .ensure_runner(&owner, std::path::Path::new("/tmp"), false)
+        .await;
+
+    let logged = std::fs::read_to_string(&log).expect("read log");
+    assert!(
+        !logged.is_empty(),
+        "a workspace owner must not be blocked before Docker"
+    );
+}

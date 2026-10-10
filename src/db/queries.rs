@@ -1,5 +1,7 @@
 pub use super::applications::*;
 pub use super::audit::*;
+pub use super::execution_environment_jobs::*;
+pub use super::execution_environments::*;
 pub use super::runner_managers::*;
 pub use super::sessions::*;
 pub use super::users::*;

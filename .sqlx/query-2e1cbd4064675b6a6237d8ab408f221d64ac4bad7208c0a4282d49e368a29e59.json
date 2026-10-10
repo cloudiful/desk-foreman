@@ -1,0 +1,137 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    environment_id,\n    application_id,\n    external_user_id,\n    runtime_kind,\n    generation,\n    state,\n    state_volume_ref,\n    last_active_at,\n    created_at,\n    updated_at\nFROM execution_environments\nWHERE application_id = $1\n  AND external_user_id = $2\nLIMIT 1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "environment_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "environment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "application_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "application_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "external_user_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "external_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "runtime_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "runtime_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "generation"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "state_volume_ref",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "state_volume_ref"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_active_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "last_active_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2e1cbd4064675b6a6237d8ab408f221d64ac4bad7208c0a4282d49e368a29e59"
+}

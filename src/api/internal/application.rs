@@ -51,6 +51,7 @@ pub async fn application_capabilities(
         max_sessions: policy.limits.max_sessions,
         network_enabled: policy.limits.network_enabled,
         runner_available,
+        execution_environments_ready: false,
     }))
 }
 

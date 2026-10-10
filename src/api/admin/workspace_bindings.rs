@@ -38,7 +38,9 @@ pub async fn list_workspace_bindings(
     ValidatedQuery(params): ValidatedQuery<ListWorkspaceBindingsParams>,
 ) -> Result<Json<Page<WorkspaceBindingResponse>>, AppError> {
     require_admin(&state, &jar).await?;
-    Ok(Json(crate::db::queries::list_workspace_bindings(&state.db, &params).await?))
+    Ok(Json(
+        crate::db::queries::list_workspace_bindings(&state.db, &params).await?,
+    ))
 }
 
 #[utoipa::path(

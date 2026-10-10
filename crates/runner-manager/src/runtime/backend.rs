@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use desk_foreman::runner::RunnerFuture;
-use runner_protocol::{CommandOutput, RunnerCommandRequest, RunnerOwner, RunnerShellRequest};
+use runner_protocol::{
+    CommandOutput, EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest,
+    RunnerCommandRequest, RunnerOwner, RunnerShellRequest, StopExecutionEnvironmentAck,
+    StopExecutionEnvironmentRequest,
+};
 
 pub trait RunnerBackend: Send + Sync {
     fn reconcile<'a>(&'a self) -> RunnerFuture<'a, anyhow::Result<()>>;
@@ -20,6 +24,28 @@ pub trait RunnerBackend: Send + Sync {
         &'a self,
         owner: RunnerOwner,
     ) -> RunnerFuture<'a, anyhow::Result<()>>;
+
+    /// Agent-neutral environment ensure. Default fails closed; the Docker
+    /// backend overrides with the trusted-profile implementation.
+    fn ensure_execution_environment<'a>(
+        &'a self,
+        _request: EnsureExecutionEnvironmentRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<EnsureExecutionEnvironmentAck>> {
+        Box::pin(async move {
+            anyhow::bail!("execution environments are not supported by this runner backend")
+        })
+    }
+
+    /// Agent-neutral environment stop with inspect-confirmed acknowledgment.
+    /// Default fails closed; the Docker backend overrides.
+    fn stop_execution_environment<'a>(
+        &'a self,
+        _request: StopExecutionEnvironmentRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<StopExecutionEnvironmentAck>> {
+        Box::pin(async move {
+            anyhow::bail!("execution environments are not supported by this runner backend")
+        })
+    }
 
     fn begin_shell_operation(&self, _owner: &RunnerOwner) {}
 

@@ -1,5 +1,7 @@
 pub mod applications;
 pub mod audit;
+pub mod execution_environment_jobs;
+pub mod execution_environments;
 pub mod queries;
 pub mod runner_managers;
 pub mod sessions;

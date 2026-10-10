@@ -697,7 +697,10 @@ pub struct ApplicationCapabilitiesResponse {
     pub max_sessions: Option<usize>,
     pub network_enabled: bool,
     pub runner_available: bool,
+    pub execution_environments_ready: bool,
 }
+
+pub use super::execution_environments::types::ExecutionEnvironment;
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
 pub struct GitWorkspaceSyncRequest {

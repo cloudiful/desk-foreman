@@ -21,16 +21,15 @@ pub async fn list_runner_managers(
         .bind(params.enabled)
         .fetch_one(pool)
         .await?;
-    let items = sqlx::query_as::<_, RunnerManagerResponse>(include_str!(
-        "../sql/list_runner_managers.sql"
-    ))
-    .bind(RUNNER_MANAGER_HEARTBEAT_TTL_SECS as i64)
-    .bind(&params.search)
-    .bind(params.enabled)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await?;
+    let items =
+        sqlx::query_as::<_, RunnerManagerResponse>(include_str!("../sql/list_runner_managers.sql"))
+            .bind(RUNNER_MANAGER_HEARTBEAT_TTL_SECS as i64)
+            .bind(&params.search)
+            .bind(params.enabled)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await?;
     Ok(Page {
         items,
         total,

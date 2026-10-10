@@ -1,9 +1,14 @@
 use desk_foreman::runner::RunnerFuture;
-use runner_protocol::{CommandOutput, RunnerCommandRequest, RunnerOwner, RunnerShellRequest};
+use runner_protocol::{
+    CommandOutput, EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest,
+    RunnerCommandRequest, RunnerOwner, RunnerShellRequest, StopExecutionEnvironmentAck,
+    StopExecutionEnvironmentRequest,
+};
 
 use super::{
     ProcessSpawnTarget, RunnerBackend, backend::BorrowedRunnerOperationLease,
-    docker::DockerRunnerBackend, shell_spawn::append_shell_args,
+    docker::DockerRunnerBackend, execution_environment::ExecutionEnvironmentProfile,
+    shell_spawn::append_shell_args,
 };
 
 impl RunnerBackend for DockerRunnerBackend {
@@ -94,6 +99,11 @@ impl RunnerBackend for DockerRunnerBackend {
         owner: RunnerOwner,
     ) -> RunnerFuture<'a, anyhow::Result<()>> {
         Box::pin(async move {
+            if runner_protocol::execution_environment::is_execution_environment(&owner) {
+                anyhow::bail!(
+                    "execution environment owners must use stop_execution_environment, not cleanup_runner_owner"
+                );
+            }
             let lock = self.runner_lock(&owner);
             let _guard = lock.lock().await;
             if self
@@ -125,6 +135,27 @@ impl RunnerBackend for DockerRunnerBackend {
                 .expect("runner activity map poisoned")
                 .remove(&owner.stable_key());
             Ok(())
+        })
+    }
+
+    fn ensure_execution_environment<'a>(
+        &'a self,
+        request: EnsureExecutionEnvironmentRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<EnsureExecutionEnvironmentAck>> {
+        Box::pin(async move {
+            let profile = ExecutionEnvironmentProfile::from_env_or_default();
+            super::execution_environment::ensure_execution_environment(self, &profile, request)
+                .await
+        })
+    }
+
+    fn stop_execution_environment<'a>(
+        &'a self,
+        request: StopExecutionEnvironmentRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<StopExecutionEnvironmentAck>> {
+        Box::pin(async move {
+            let profile = ExecutionEnvironmentProfile::from_env_or_default();
+            super::execution_environment::stop_execution_environment(self, &profile, request).await
         })
     }
 }

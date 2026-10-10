@@ -1,0 +1,185 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Reconcile an unconfirmed stop: retain the candidate and downgrade a\n-- `stopping` environment to `uncertain` so a recovery stop can be admitted\n-- (issue 742 P3). Overdue pending/claimed stop rows were already expired to\n-- `uncertain` in the same transaction.\nUPDATE execution_environments\nSET state = 'uncertain',\n    last_active_at = NOW(),\n    updated_at = NOW()\nWHERE environment_id = $1\n  AND application_id = $2\n  AND state = 'stopping'\nRETURNING\n    environment_id,\n    application_id,\n    external_user_id,\n    runtime_kind,\n    generation,\n    state,\n    state_volume_ref,\n    assigned_manager_id,\n    container_generation,\n    stop_proof_job_id,\n    stop_proof_generation,\n    last_active_at,\n    created_at,\n    updated_at;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "environment_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "environment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "application_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "application_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "external_user_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "external_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "runtime_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "runtime_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "generation"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "state_volume_ref",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "state_volume_ref"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "assigned_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "assigned_manager_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "container_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "container_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "stop_proof_job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "stop_proof_job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "stop_proof_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "stop_proof_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "last_active_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "last_active_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e7a32d4d91650dfabfa83bf5c5766c8527d7c7d5d93b01ef0b63ed7dd8ad66b2"
+}

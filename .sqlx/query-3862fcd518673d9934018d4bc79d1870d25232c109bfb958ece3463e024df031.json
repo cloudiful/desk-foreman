@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- First-provision binding: select the enabled+online+recently-seen manager\n-- internally (issue 742 P3). It remains the environment's immutable binding.\nSELECT runner_manager_id\nFROM runner_managers\nWHERE enabled = TRUE\n  AND status = 'online'\n  AND last_seen_at > NOW() - ($1::double precision * INTERVAL '1 second')\nORDER BY last_seen_at DESC NULLS LAST, runner_manager_id ASC\nLIMIT 1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "runner_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runner_managers",
+            "name": "runner_manager_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3862fcd518673d9934018d4bc79d1870d25232c109bfb958ece3463e024df031"
+}

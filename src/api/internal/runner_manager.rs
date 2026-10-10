@@ -16,6 +16,10 @@ use runner_protocol::{
 
 use crate::{AppState, error::AppError};
 
+use super::runner_manager_environment_jobs::{
+    complete_environment_job_result, next_assigned_environment_job, routes_to_durable_handler,
+};
+
 pub(super) async fn runner_manager_from_token(
     state: &AppState,
     headers: &HeaderMap,
@@ -85,6 +89,11 @@ pub async fn next_runner_job(
     headers: HeaderMap,
 ) -> Result<Json<Option<RunnerJob>>, AppError> {
     let manager = runner_manager_from_token(&state, &headers).await?;
+    // Durable assigned-manager jobs take precedence; when none is claimable
+    // the legacy in-memory broker behavior is unchanged.
+    if let Some(job) = next_assigned_environment_job(&state, manager.runner_manager_id).await? {
+        return Ok(Json(Some(job)));
+    }
     let job = tokio::time::timeout(
         std::time::Duration::from_secs(RUNNER_JOB_POLL_TIMEOUT_SECS),
         state.runner_broker.next_job(manager.runner_manager_id),
@@ -107,6 +116,11 @@ pub async fn complete_runner_job(
     Json(result): Json<RunnerJobResult>,
 ) -> Result<StatusCode, AppError> {
     let manager = runner_manager_from_token(&state, &headers).await?;
+    // A reserved durable id is handled here exclusively; a malformed prefixed
+    // id is rejected and never falls back to the legacy broker.
+    if routes_to_durable_handler(&result.job_id) {
+        return complete_environment_job_result(&state, manager.runner_manager_id, result).await;
+    }
     state
         .runner_broker
         .complete_job(manager.runner_manager_id, result)
