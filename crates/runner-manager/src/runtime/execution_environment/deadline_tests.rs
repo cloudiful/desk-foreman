@@ -43,7 +43,7 @@ mod deadline_tests {
         std::fs::write(&log, "").expect("seed log");
         let fake = support::write_simple_fake(temp.path(), "docker-ok", &log, "ok");
         let backend = support::backend_with_cli(&fake.to_string_lossy());
-        let mut profile = ExecutionEnvironmentProfile::test_enabled();
+        let mut profile = support::bare_enabled_profile();
         profile.operation_deadline = Duration::ZERO;
 
         let ensure = ensure_execution_environment(&backend, &profile, ensure_req(0)).await;

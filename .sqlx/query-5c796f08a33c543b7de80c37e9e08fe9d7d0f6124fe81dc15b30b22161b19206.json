@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Owner-scoped lookup for the private agent-service gateway (issue 749 P2b).\n--\n-- Scoped by both application and environment so a foreign or unknown id is\n-- simply absent. Returns only what admission needs: the authorized\n-- generation, the provision candidate generation, the immutable manager\n-- binding, and the checked state. No external user id, state volume\n-- reference, or any credential material is selected here.\nSELECT\n    generation,\n    container_generation,\n    assigned_manager_id,\n    state\nFROM execution_environments\nWHERE environment_id = $1\n  AND application_id = $2\nLIMIT 1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "generation"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "container_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "container_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "assigned_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "assigned_manager_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "5c796f08a33c543b7de80c37e9e08fe9d7d0f6124fe81dc15b30b22161b19206"
+}

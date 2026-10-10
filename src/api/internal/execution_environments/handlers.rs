@@ -95,7 +95,16 @@ pub async fn invalidate_execution_environment(
     )
     .await?
     {
-        InvalidateOutcome::Invalidated(environment) => Ok(Json(environment)),
+        // Only a committed invalidation may tear live streams down. A stale
+        // or missing environment changed nothing, so its streams keep running
+        // against the generation that is still authoritative.
+        InvalidateOutcome::Invalidated(environment) => {
+            state
+                .runner_broker
+                .service_relay()
+                .cancel_environment(environment_id);
+            Ok(Json(environment))
+        }
         InvalidateOutcome::Stale { current } => Err(AppError::conflict(format!(
             "stale generation: expected {} but environment {} is at generation {}",
             request.expected_generation, current.environment_id, current.generation

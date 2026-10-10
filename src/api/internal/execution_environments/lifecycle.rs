@@ -102,6 +102,12 @@ pub async fn stop_execution_environment(
     )
     .await
     .map_err(map_lifecycle_error)?;
+    // Only a committed stop may tear live streams down. A refused stop left
+    // the environment serving, so its streams must keep running.
+    state
+        .runner_broker
+        .service_relay()
+        .cancel_environment(environment_id);
     Ok(Json(descriptor))
 }
 

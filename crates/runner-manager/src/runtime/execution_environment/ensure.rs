@@ -16,26 +16,38 @@
 //! lower generation either. The reservation is released only on an
 //! ordinary operation exit, so a crash or cancellation leaves it for
 //! explicit operator recovery.
+//!
+//! A running acknowledgment is stronger than "the container reports
+//! running" (issue 749 P1). The trusted command and state working
+//! directory are validated before any disk or Docker work, and every
+//! reuse/start/create branch additionally runs the same-container non-root
+//! state probe before it can return `running`. A probe failure is
+//! uncertainty about state, not a stop proof: nothing is removed, stopped,
+//! or retried automatically, and the durable high-water stays as written.
 
 use runner_protocol::{
     EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest,
     execution_environment as protocol,
 };
 
+use super::ensure_helpers;
 use super::file_lock::{EnvFileLock, lock_holder_token, release_and_finish};
-use super::inspect::{EnvContainerInfo, ensure_owner_matches, inspect_environment_container};
+use super::inspect::{ensure_owner_matches, inspect_environment_container};
+use super::service::ServiceCredentialStore;
+use super::state_probe::confirm_state_writable;
 use super::tombstone::{TombstoneStore, advance_high_water, ensure_generation_admissible};
-use super::{ExecutionEnvironmentProfile, LABEL_ENVIRONMENT, argv};
+use super::{ExecutionEnvironmentProfile, argv};
 use crate::runtime::docker::DockerRunnerBackend;
 
 /// Idempotent ensure for one `(environment_id, generation)`.
 ///
-/// Fails closed when the profile is disabled, when volume ownership or the
-/// dedicated state root is not explicit, when the owner is malformed, when
-/// a durable barrier already closed the generation, or when another
-/// generation holds state. Same-generation running containers return
-/// immediately without recreation; any reused container must match the
-/// requested owner labels before it can be acknowledged.
+/// Fails closed when the profile is disabled, when volume ownership, the
+/// trusted command, or the dedicated state root is not explicit, when the
+/// owner is malformed, when a durable barrier already closed the
+/// generation, or when another generation holds state. Same-generation
+/// running containers return immediately without recreation; any reused
+/// container must match the requested owner labels, and any returned
+/// acknowledgment must additionally pass the state probe.
 pub async fn ensure_execution_environment(
     backend: &DockerRunnerBackend,
     profile: &ExecutionEnvironmentProfile,
@@ -45,12 +57,19 @@ pub async fn ensure_execution_environment(
         protocol::validate_environment_owner(&request.owner).map_err(|e| anyhow::anyhow!(e))?;
     let environment_id = environment_id.to_string();
     profile.ensure_enabled()?;
-    let (volume_uid, volume_gid) = profile.ensure_volume_ownership()?;
+    // Trusted process inputs first: an absent or malformed command,
+    // working directory, root uid, or private-service profile refuses
+    // every ensure branch — including reuse — before any disk or Docker
+    // work.
+    let process = profile.ensure_process_profile()?;
+    let service = profile.ensure_service_profile()?;
     let volume_name =
         protocol::derive_state_volume_name(&environment_id).map_err(|e| anyhow::anyhow!(e))?;
+    let state_mount_target = profile.state_mount_target.clone();
 
     let deadline = profile.operation_deadline()?;
     let state_dir = profile.ensure_state_dir()?;
+    let credentials = ServiceCredentialStore::new(state_dir);
     // Gate the dedicated-root filesystem work on the aggregate deadline
     // before it starts instead of hiding it in an async outer timeout.
     deadline.remaining_ms()?;
@@ -108,71 +127,29 @@ pub async fn ensure_execution_environment(
         let container_name = request.owner.container_name();
         let owner_stable_key = request.owner.stable_key();
 
-        let filter = format!("label={LABEL_ENVIRONMENT}={environment_id}");
-        let ps_output = backend
-            .docker_output_bounded(
-                vec![
-                    "ps".to_string(),
-                    "-a".to_string(),
-                    "--filter".to_string(),
-                    filter,
-                    "--format".to_string(),
-                    "{{.Names}}".to_string(),
-                ],
-                deadline.remaining_ms()?,
-            )
-            .await?;
-        if ps_output.timed_out {
-            anyhow::bail!(
-                "docker ps timed out for execution environment {environment_id} within the operation deadline"
-            );
-        }
-        if ps_output.exit_code != Some(0) {
-            anyhow::bail!(
-                "docker ps failed for execution environment {environment_id}: {}",
-                ps_output.output.trim()
-            );
-        }
-        let mut same_generation: Option<EnvContainerInfo> = None;
-        for line in ps_output.stdout.lines() {
-            let name = line.trim();
-            if name.is_empty() {
-                continue;
-            }
-            let Some(info) =
-                inspect_environment_container(backend, name, deadline.remaining_ms()?).await?
-            else {
-                continue;
-            };
-            if info.environment_id.as_deref() != Some(environment_id.as_str()) {
-                continue;
-            }
-            match info.generation {
-                Some(other) if other == generation => {
-                    // Same generation must belong to this exact owner before
-                    // it can be reused or acknowledged.
-                    ensure_owner_matches(&info, &request.owner)?;
-                    same_generation = Some(info);
-                }
-                _ => {
-                    // Other (or malformed) generation: refuse when it may still
-                    // hold state. Stopped generations are ignored; running or
-                    // unknown blocks creation. Never delete to force through.
-                    if protocol::is_running_or_unknown_status(&info.status) {
-                        anyhow::bail!(
-                            "execution environment {environment_id} generation {generation} refused: generation {:?} is {}",
-                            info.generation,
-                            info.status
-                        );
-                    }
-                }
-            }
-        }
+        let same_generation = ensure_helpers::scan_same_generation_container(
+            backend,
+            &environment_id,
+            generation,
+            &request.owner,
+            &deadline,
+        )
+        .await?;
 
         if let Some(info) = same_generation {
             if info.status == protocol::EXECUTION_ENVIRONMENT_RUNNING_STATE
                 || info.status == "running"
             {
+                // Reuse: labels already matched above, so probe the real
+                // state writability before the idempotent acknowledgment.
+                confirm_state_writable(backend, &container_name, &process, &deadline).await?;
+                // A running container keeps the credential it was launched
+                // with. Require it to still be present and valid rather than
+                // minting a new one, which would silently break the agent
+                // that is already serving with the old value.
+                if let Some(config) = service {
+                    credentials.existing(&environment_id, generation, &config.auth_env_name)?;
+                }
                 return Ok(EnsureExecutionEnvironmentAck {
                     owner: request.owner,
                     container_name,
@@ -196,6 +173,14 @@ pub async fn ensure_execution_environment(
                         })?;
                 ensure_owner_matches(&rechecked, &request.owner)?;
                 if rechecked.status == "running" {
+                    confirm_state_writable(backend, &container_name, &process, &deadline).await?;
+                    // Restart reuses the same container and therefore the
+                    // same credential file; the env was baked in at
+                    // creation, so an unusable file means the container
+                    // cannot serve and the restart is refused.
+                    if let Some(config) = service {
+                        credentials.existing(&environment_id, generation, &config.auth_env_name)?;
+                    }
                     return Ok(EnsureExecutionEnvironmentAck {
                         owner: request.owner,
                         container_name,
@@ -218,6 +203,22 @@ pub async fn ensure_execution_environment(
             let config = backend.config.read().await.clone();
             (config, backend.manager_id.clone())
         };
+        // Only this branch may mint a credential: the admission lock is
+        // already held, the durable barrier is written, and this is before
+        // the container run. Reuse and restart above only read.
+        let mut credential_env_file: Option<String> = None;
+        if let Some(config) = service {
+            let credential =
+                credentials.obtain(&environment_id, generation, &config.auth_env_name)?;
+            credential_env_file = Some(credential.env_file().to_string_lossy().into_owned());
+        }
+        let service_run = match (service, credential_env_file.as_deref()) {
+            (Some(config), Some(env_file)) => Some(argv::ServiceRunSpec {
+                network: &config.network,
+                credential_env_file: env_file,
+            }),
+            _ => None,
+        };
         let spec = argv::EnvironmentRunSpec {
             container_name: &container_name,
             owner_stable_key: &owner_stable_key,
@@ -225,9 +226,12 @@ pub async fn ensure_execution_environment(
             generation,
             manager_id: &manager_id,
             volume_name: &volume_name,
-            state_mount_target: &profile.state_mount_target,
-            volume_uid,
-            volume_gid,
+            state_mount_target: &state_mount_target,
+            state_workdir: process.state_workdir,
+            command: process.command,
+            service: service_run,
+            volume_uid: process.uid,
+            volume_gid: process.gid,
             config: &config_snapshot,
         };
         let run_argv = argv::build_environment_run_argv(&spec);
@@ -278,6 +282,11 @@ pub async fn ensure_execution_environment(
                 );
             }
         }
+        // Create: the final owner and running-state validation above must
+        // be followed by the same-container non-root state probe. A probe
+        // failure leaves the container and the durable high-water exactly
+        // as they are; nothing is removed or restarted to force a retry.
+        confirm_state_writable(backend, &container_name, &process, &deadline).await?;
         Ok(EnsureExecutionEnvironmentAck {
             owner: request.owner,
             container_name,

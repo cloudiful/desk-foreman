@@ -10,6 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::ExecutionEnvironmentProfile;
+use super::profile::command::TrustedCommand;
+use super::profile::workdir::TrustedStateWorkdir;
 use crate::config::{RunnerBackendKind, RunnerManagerConfig};
 use crate::runtime::docker::DockerRunnerBackend;
 
@@ -137,6 +139,23 @@ pub fn write_hang_fake_with_pid(
 
 /// Inspect JSON for one environment container.
 pub fn inspect_json(status: &str, owner_key: &str, env_id: &str, generation: &str) -> String {
+    inspect_json_with_networks(
+        status,
+        owner_key,
+        env_id,
+        generation,
+        &serde_json::json!({}),
+    )
+}
+
+/// Inspect JSON including `NetworkSettings.Networks` for service tests.
+pub fn inspect_json_with_networks(
+    status: &str,
+    owner_key: &str,
+    env_id: &str,
+    generation: &str,
+    networks: &serde_json::Value,
+) -> String {
     serde_json::json!({
         "Id": "abc123",
         "State": {"Status": status},
@@ -147,6 +166,7 @@ pub fn inspect_json(status: &str, owner_key: &str, env_id: &str, generation: &st
             "desk-foreman.execution-environment": env_id,
             "desk-foreman.generation": generation
         }},
+        "NetworkSettings": {"Networks": networks},
         "Mounts": []
     })
     .to_string()
@@ -167,17 +187,45 @@ pub fn state_dir(temp: &Path) -> PathBuf {
     temp.join("state")
 }
 
+/// Enabled profile with explicit process inputs but no persistent root.
+/// Real deployments read uid/gid from the environment; tests pass them
+/// directly to avoid global env races. The deadline is short enough to
+/// bound the deterministic hang fakes while staying far above any
+/// fake-CLI spawn latency.
+pub fn bare_enabled_profile() -> ExecutionEnvironmentProfile {
+    ExecutionEnvironmentProfile {
+        enabled: true,
+        stop_timeout: Duration::from_millis(500),
+        operation_deadline: Duration::from_secs(1),
+        volume_uid: Some(1000),
+        volume_gid: Some(1000),
+        command: TrustedCommand::Configured(vec![
+            "/usr/bin/sleep".to_string(),
+            "infinity".to_string(),
+        ]),
+        state_workdir: TrustedStateWorkdir::Configured("/state/work".to_string()),
+        // A bare unset root must never silently fall back to ephemeral
+        // state; tests that reach the filesystem add one explicitly.
+        state_dir: None,
+        ..ExecutionEnvironmentProfile::default()
+    }
+}
+
 /// Enabled profile with an explicit, living state root.
 pub fn enabled_profile(state_root: &Path) -> ExecutionEnvironmentProfile {
-    ExecutionEnvironmentProfile::test_enabled_with_state_dir(state_root)
+    ExecutionEnvironmentProfile {
+        state_dir: Some(state_root.to_path_buf()),
+        ..bare_enabled_profile()
+    }
 }
 
 /// Disabled profile that still owns an explicit state root, so a
 /// cleanup-only stop can pass the persistent-root precondition.
 pub fn disabled_profile(state_root: &Path) -> ExecutionEnvironmentProfile {
-    let mut profile = ExecutionEnvironmentProfile::disabled();
-    profile.state_dir = Some(state_root.to_path_buf());
-    profile
+    ExecutionEnvironmentProfile {
+        state_dir: Some(state_root.to_path_buf()),
+        ..ExecutionEnvironmentProfile::default()
+    }
 }
 
 fn env_dir_name() -> String {

@@ -6,6 +6,7 @@
 //! file stays wiring-only.
 
 pub mod lifecycle;
+pub mod service;
 pub mod store;
 pub mod types;
 
@@ -19,6 +20,7 @@ pub use lifecycle::{
     execution_environment_status, provision_execution_environment, replace_execution_environment,
     stop_execution_environment,
 };
+pub use service::{ServiceEnvironment, find_execution_environment_for_service};
 pub use store::{
     EnsureOutcome, InvalidateOutcome, ensure_execution_environment, find_execution_environment,
     find_execution_environment_by_identity, invalidate_execution_environment,

@@ -12,8 +12,8 @@ mod durable_tests {
     use runner_protocol::{EnsureExecutionEnvironmentRequest, StopExecutionEnvironmentRequest};
 
     use super::super::{
-        ExecutionEnvironmentProfile, ensure::ensure_execution_environment,
-        stop::stop_execution_environment, test_support as support,
+        ensure::ensure_execution_environment, stop::stop_execution_environment,
+        test_support as support,
     };
 
     fn ensure_req(generation: i64) -> EnsureExecutionEnvironmentRequest {
@@ -135,7 +135,7 @@ mod durable_tests {
         std::fs::write(&log, "").expect("seed log");
         let fake = support::write_simple_fake(temp.path(), "docker-ok", &log, "ok");
         let backend = support::backend_with_cli(&fake.to_string_lossy());
-        let profile = ExecutionEnvironmentProfile::test_enabled();
+        let profile = support::bare_enabled_profile();
 
         let ensure = ensure_execution_environment(&backend, &profile, ensure_req(0)).await;
         assert!(ensure.is_err());

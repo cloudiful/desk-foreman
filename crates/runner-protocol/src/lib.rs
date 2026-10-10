@@ -4,6 +4,7 @@ use serde_json::Value;
 use utoipa::ToSchema;
 
 pub mod execution_environment;
+pub mod service_relay;
 
 pub use execution_environment::{
     EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest, StopExecutionEnvironmentAck,

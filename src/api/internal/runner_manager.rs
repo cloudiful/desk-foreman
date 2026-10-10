@@ -20,7 +20,12 @@ use super::runner_manager_environment_jobs::{
     complete_environment_job_result, next_assigned_environment_job, routes_to_durable_handler,
 };
 
-pub(super) async fn runner_manager_from_token(
+/// Authenticate a runner-manager request from its bearer token.
+///
+/// Visible beyond this module because the relay tunnel ingress authenticates
+/// with exactly the same credential and the same rules: a second bearer path
+/// would be a second answer to "who is calling".
+pub(crate) async fn runner_manager_from_token(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<crate::db::types::RunnerManagerRecord, AppError> {

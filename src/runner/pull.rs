@@ -15,7 +15,10 @@ use runner_protocol::{
 
 use crate::{
     db,
-    runner::{RunnerFuture, RunnerService, pull_cancellation::should_skip_abandoned_queued_job},
+    runner::{
+        RunnerFuture, RunnerService, pull_cancellation::should_skip_abandoned_queued_job,
+        service_relay::RelayRegistry,
+    },
 };
 
 struct QueuedJob {
@@ -33,6 +36,13 @@ pub struct RunnerBroker {
     jobs: Mutex<VecDeque<QueuedJob>>,
     pending: Mutex<std::collections::HashMap<String, PendingJob>>,
     notify: Notify,
+    /// Live manager tunnels and admitted relay streams.
+    ///
+    /// Held by the broker rather than by `AppState` so the reverse-relay
+    /// gateway reaches it through the same handle as every other runner
+    /// surface. It is network bookkeeping only: the database remains the
+    /// authority on which generation may serve.
+    service_relay: Arc<RelayRegistry>,
 }
 
 impl RunnerBroker {
@@ -42,7 +52,14 @@ impl RunnerBroker {
             jobs: Mutex::new(VecDeque::new()),
             pending: Mutex::new(std::collections::HashMap::new()),
             notify: Notify::new(),
+            service_relay: RelayRegistry::new(),
         })
+    }
+
+    /// The reverse-relay registry shared by the manager tunnel ingress and
+    /// the owner-scoped service gateway.
+    pub fn service_relay(&self) -> &Arc<RelayRegistry> {
+        &self.service_relay
     }
 
     pub fn spawn_liveness_monitor(self: &Arc<Self>) {

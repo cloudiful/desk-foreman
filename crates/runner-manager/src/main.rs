@@ -2,6 +2,7 @@ mod config;
 mod runtime;
 mod server;
 mod upstream;
+mod upstream_service_relay;
 
 use crate::{
     config::{RunnerBackendKind, RunnerManagerConfig, SharedRunnerManagerConfig},
@@ -68,6 +69,17 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             if let Err(error) = upstream::run(upstream_config, upstream_runner).await {
                 tracing::error!(error = %error, "runner upstream worker exited");
+            }
+        });
+        // The reverse relay rides beside the pull worker on the same
+        // bearer and control-plane URL. It disables itself when there is
+        // no docker backend or no URL, so a direct-backend or standalone
+        // manager starts exactly as before.
+        let relay_config = std::sync::Arc::clone(&config);
+        let relay_docker = handles.docker_backend.clone();
+        tokio::spawn(async move {
+            if let Err(error) = upstream_service_relay::run(relay_config, relay_docker).await {
+                tracing::error!(error = %error, "service relay worker exited");
             }
         });
     }

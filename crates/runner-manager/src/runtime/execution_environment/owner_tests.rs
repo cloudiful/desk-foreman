@@ -143,6 +143,10 @@ mod owner_tests {
             !logged.lines().any(|l| l.starts_with("run ")),
             "mismatched reuse must not create, got: {logged}"
         );
+        assert!(
+            !logged.lines().any(|l| l.starts_with("exec ")),
+            "a foreign container is never probed as this owner's state, got: {logged}"
+        );
     }
 
     #[tokio::test]
@@ -182,6 +186,11 @@ mod owner_tests {
             "a created container with foreign labels must not acknowledge success"
         );
         assert!(result.unwrap_err().to_string().contains("do not match"));
+        let logged = std::fs::read_to_string(&log).expect("read log");
+        assert!(
+            !logged.lines().any(|l| l.starts_with("exec ")),
+            "a container whose labels do not match is never probed, got: {logged}"
+        );
     }
 
     #[tokio::test]

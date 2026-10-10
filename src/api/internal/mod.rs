@@ -17,9 +17,13 @@ pub(super) mod lease;
 pub(super) mod lease_audit;
 pub(super) mod runner_manager;
 pub(super) mod runner_manager_environment_jobs;
+pub(super) mod runner_manager_service_relay;
 pub(super) mod shared;
 
 pub(super) use application::{application_capabilities, sync_resource_workspace_git};
+/// Every relayed method, bound onto the gateway's single route.
+use execution_environments::service_route;
+
 pub(super) use execution_environments::{
     ensure_execution_environment, execution_environment_status, invalidate_execution_environment,
     provision_execution_environment, replace_execution_environment, stop_execution_environment,
@@ -32,6 +36,7 @@ pub(super) use lease::{
 pub(super) use runner_manager::{
     complete_runner_job, next_runner_job, report_workspace_runner, runner_manager_config,
 };
+pub(super) use runner_manager_service_relay::runner_manager_service_relay;
 
 pub(super) fn router() -> axum::Router<crate::AppState> {
     axum::Router::new()
@@ -54,6 +59,10 @@ pub(super) fn router() -> axum::Router<crate::AppState> {
         .route(
             "/api/internal/runner-manager/workspace-runners/report",
             axum::routing::post(report_workspace_runner),
+        )
+        .route(
+            "/api/internal/runner-manager/service-relay",
+            axum::routing::get(runner_manager_service_relay),
         )
         .route(
             "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/git/sync",
@@ -97,5 +106,9 @@ pub(super) fn router() -> axum::Router<crate::AppState> {
         .route(
             "/api/internal/execution-environments/{environment_id}/status",
             axum::routing::get(execution_environment_status),
+        )
+        .route(
+            "/api/internal/execution-environments/{environment_id}/service/{*path}",
+            service_route(),
         )
 }

@@ -12,6 +12,7 @@ use tokio::process::Command;
 
 use crate::config::{RunnerManagerConfig, SharedRunnerManagerConfig};
 
+use super::execution_environment::service::ServiceCancelRegistry;
 use super::{RunnerLifecycleReporter, docker_command::ensure_docker_command_succeeded};
 use tokio::time::{Duration, timeout};
 
@@ -25,6 +26,10 @@ pub struct DockerRunnerBackend {
     pub(crate) runner_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub(crate) last_active: Mutex<HashMap<String, Instant>>,
     pub(crate) active_ops: Mutex<HashMap<String, usize>>,
+    /// Wakes live relayed service streams when `stop` persists a stopped
+    /// generation. Network bookkeeping only: the durable barrier stays the
+    /// authority on what may serve.
+    pub(crate) service_cancel: ServiceCancelRegistry,
 }
 
 impl DockerRunnerBackend {
@@ -41,7 +46,13 @@ impl DockerRunnerBackend {
             runner_locks: Mutex::new(HashMap::new()),
             last_active: Mutex::new(HashMap::new()),
             active_ops: Mutex::new(HashMap::new()),
+            service_cancel: ServiceCancelRegistry::new(),
         })
+    }
+
+    /// Wakes live relayed streams of one environment after a committed stop.
+    pub(crate) fn service_cancel(&self) -> &ServiceCancelRegistry {
+        &self.service_cancel
     }
 
     pub(crate) fn runner_lock(&self, owner: &RunnerOwner) -> Arc<tokio::sync::Mutex<()>> {

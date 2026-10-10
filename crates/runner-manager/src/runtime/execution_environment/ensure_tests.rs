@@ -9,16 +9,21 @@
 mod ensure_tests {
     use std::sync::Arc;
 
-    use runner_protocol::{EnsureExecutionEnvironmentRequest, RunnerOwner};
+    use runner_protocol::{
+        EnsureExecutionEnvironmentRequest, RunnerOwner, StopExecutionEnvironmentRequest,
+    };
 
     use super::super::{
-        ExecutionEnvironmentProfile, ensure::ensure_execution_environment, test_support as support,
+        ExecutionEnvironmentProfile,
+        ensure::ensure_execution_environment,
+        profile::{
+            command::{TrustedCommand, parse_trusted_command},
+            workdir::{TrustedStateWorkdir, parse_state_workdir},
+        },
+        stop::stop_execution_environment,
+        test_support as support,
     };
     use crate::runtime::RunnerBackend;
-
-    fn disabled_profile() -> ExecutionEnvironmentProfile {
-        ExecutionEnvironmentProfile::disabled()
-    }
 
     #[tokio::test]
     async fn disabled_profile_rejects_ensure_without_docker_calls() {
@@ -30,7 +35,7 @@ mod ensure_tests {
         let owner = support::env_owner(0);
         let result = ensure_execution_environment(
             &backend,
-            &disabled_profile(),
+            &ExecutionEnvironmentProfile::default(),
             EnsureExecutionEnvironmentRequest { owner },
         )
         .await;
@@ -138,6 +143,13 @@ mod ensure_tests {
             !logged.contains(" rm"),
             "must never delete to force ensure, got: {logged}"
         );
+        // An old native writer still holds state: it blocks the new
+        // generation until an explicit owner-verified stop, and its state
+        // directory is never probed as the new owner's.
+        assert!(
+            !logged.lines().any(|l| l.starts_with("exec ")),
+            "the blocking old writer must not be probed, got: {logged}"
+        );
     }
 
     #[tokio::test]
@@ -202,7 +214,7 @@ mod ensure_tests {
         for owner in bad {
             let result = ensure_execution_environment(
                 &backend,
-                &ExecutionEnvironmentProfile::test_enabled(),
+                &support::bare_enabled_profile(),
                 EnsureExecutionEnvironmentRequest { owner },
             )
             .await;
@@ -244,50 +256,120 @@ mod ensure_tests {
     }
 
     #[tokio::test]
-    async fn creation_argv_is_hardened_and_volume_survives() {
+    async fn unusable_creation_profile_refuses_ensure_before_docker_and_keeps_stop_working() {
+        // Requirement (749 P1): a profile that cannot launch anything must
+        // refuse every ensure branch, including reuse, before any Docker
+        // or disk work, while stop stays operable.
         let temp = tempfile::tempdir().expect("tempdir");
         let state = support::state_dir(temp.path());
-        let owner = support::env_owner(0);
-        let container = owner.container_name();
-        let ps_file = temp.path().join("ps.txt");
-        std::fs::write(&ps_file, "").expect("empty ps");
-        let running_json = temp.path().join("running.json");
-        std::fs::write(
-            &running_json,
-            support::inspect_json("running", &owner.stable_key(), support::ENV_ID, "0"),
-        )
-        .expect("inspect");
-        let log = temp.path().join("create.log");
+        let log = temp.path().join("invalid-profile.log");
         std::fs::write(&log, "").expect("seed log");
-        // Empty `ps` means no pre-existing container, so the single
-        // post-create inspect must report running.
+        let owner = support::env_owner(0);
+        let inspect_file = temp.path().join("inspect.json");
+        std::fs::write(
+            &inspect_file,
+            support::inspect_json("exited", &owner.stable_key(), support::ENV_ID, "0"),
+        )
+        .expect("inspect json");
         let script = format!(
-            "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"ps\" ]; then\n  exit 0\nfi\nif [ \"$1\" = \"inspect\" ]; then\n  cat \"{}\"\n  exit 0\nfi\nif [ \"$1\" = \"volume\" ]; then\n  exit 0\nfi\nexit 0\n",
+            "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"inspect\" ]; then\n  cat \"{}\"\n  exit 0\nfi\nexit 0\n",
             log.display(),
-            running_json.display()
+            inspect_file.display()
         );
         let fake = support::write_executable(temp.path(), "docker-fake", &script);
         let backend = support::backend_with_cli(&fake.to_string_lossy());
-        let ack = ensure_execution_environment(
+        let enabled = support::enabled_profile(&state);
+
+        let unusable = [
+            ("default", ExecutionEnvironmentProfile::default()),
+            (
+                "unset command",
+                ExecutionEnvironmentProfile {
+                    command: TrustedCommand::Unset,
+                    ..enabled.clone()
+                },
+            ),
+            (
+                "malformed command",
+                ExecutionEnvironmentProfile {
+                    command: parse_trusted_command(Some("not-json")),
+                    ..enabled.clone()
+                },
+            ),
+            (
+                "unset workdir",
+                ExecutionEnvironmentProfile {
+                    state_workdir: TrustedStateWorkdir::Unset,
+                    ..enabled.clone()
+                },
+            ),
+            (
+                "escaping workdir",
+                ExecutionEnvironmentProfile {
+                    state_workdir: parse_state_workdir(Some("/state/../etc"), "/state"),
+                    ..enabled.clone()
+                },
+            ),
+            (
+                "root uid",
+                ExecutionEnvironmentProfile {
+                    volume_uid: Some(0),
+                    ..enabled.clone()
+                },
+            ),
+            (
+                "absent ownership",
+                ExecutionEnvironmentProfile {
+                    volume_uid: None,
+                    volume_gid: None,
+                    ..enabled.clone()
+                },
+            ),
+        ];
+
+        for (label, profile) in unusable {
+            // Give the default profile the same durable root so the refusal
+            // can only come from the creation inputs.
+            let profile = ExecutionEnvironmentProfile {
+                state_dir: Some(state.clone()),
+                enabled: true,
+                ..profile
+            };
+            let ensure = ensure_execution_environment(
+                &backend,
+                &profile,
+                EnsureExecutionEnvironmentRequest {
+                    owner: owner.clone(),
+                },
+            )
+            .await;
+            assert!(ensure.is_err(), "{label} profile must refuse ensure");
+            assert!(
+                !ensure.unwrap_err().to_string().contains("not-json"),
+                "{label} refusal must stay redacted"
+            );
+            assert!(
+                std::fs::read_to_string(&log).expect("read log").is_empty(),
+                "{label} profile must not touch docker"
+            );
+        }
+
+        // Stop keeps working on the very same unlaunchable profile.
+        let unlaunchable = ExecutionEnvironmentProfile {
+            command: TrustedCommand::Unset,
+            state_workdir: TrustedStateWorkdir::Unset,
+            volume_uid: None,
+            volume_gid: None,
+            ..enabled
+        };
+        let ack = stop_execution_environment(
             &backend,
-            &support::enabled_profile(&state),
-            EnsureExecutionEnvironmentRequest { owner },
+            &unlaunchable,
+            StopExecutionEnvironmentRequest { owner },
         )
         .await
-        .expect("creation must succeed");
-        assert_eq!(ack.container_name, container);
-        let logged = std::fs::read_to_string(&log).expect("read log");
-        assert!(logged.contains("--read-only"));
-        assert!(logged.contains("--cap-drop"));
-        assert!(logged.contains("no-new-privileges:true"));
-        assert!(logged.contains(":/state"));
-        assert!(!logged.contains(" --publish"));
-        assert!(!logged.contains(" -p "));
-        assert!(!logged.contains("/tmp:/workspace"), "no host blanket mount");
-        assert!(
-            !logged.contains("volume rm"),
-            "volume must never be deleted"
-        );
+        .expect("stop stays operable without creation inputs");
+        assert!(ack.confirmed);
     }
 
     #[tokio::test]

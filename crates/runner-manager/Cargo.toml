@@ -7,6 +7,7 @@ edition.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 desk-foreman = { path = "../.." }
+futures-util.workspace = true
 runner-protocol.workspace = true
 pty-process.workspace = true
 reqwest.workspace = true
@@ -17,3 +18,8 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tempfile.workspace = true
+tokio-tungstenite.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+sqlx.workspace = true

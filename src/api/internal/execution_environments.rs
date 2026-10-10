@@ -7,6 +7,7 @@
 
 pub mod handlers;
 pub mod lifecycle;
+pub mod service;
 pub mod types;
 
 pub use handlers::{ensure_execution_environment, invalidate_execution_environment};
@@ -14,6 +15,7 @@ pub use lifecycle::{
     execution_environment_status, provision_execution_environment, replace_execution_environment,
     stop_execution_environment,
 };
+pub use service::service_route;
 pub use types::{
     EnsureExecutionEnvironmentRequest, InvalidateExecutionEnvironmentRequest,
     ProvisionExecutionEnvironmentRequest, ReplaceExecutionEnvironmentRequest,

@@ -1,9 +1,16 @@
-//! Hardened `docker run` argv for execution environments (issue 739 P1).
+//! Hardened `docker run` argv for execution environments (issue 739 P1,
+//! trusted process command in 749 P1).
 //!
 //! Pure builders only: no Docker calls here so fake-CLI tests can assert
 //! labels, mounts, and hardening without a daemon. The only mount is the
 //! dedicated state volume; task workspaces and the global project root
 //! are never mounted. No published ports, no host paths from requests.
+//!
+//! The configured trusted command is appended verbatim as the container
+//! `CMD`, after the image. The image's own `ENTRYPOINT` therefore still
+//! decides what actually runs, so the configured image must be one whose
+//! entrypoint accepts a command of this shape; no entrypoint override is
+//! invented here.
 
 use super::{LABEL_ENVIRONMENT, LABEL_GENERATION, LABEL_MANAGED, LABEL_MANAGER, LABEL_OWNER};
 use crate::config::RunnerManagerConfig;
@@ -19,9 +26,29 @@ pub struct EnvironmentRunSpec<'a> {
     pub manager_id: &'a str,
     pub volume_name: &'a str,
     pub state_mount_target: &'a str,
+    /// Validated absolute working directory inside the state mount.
+    pub state_workdir: &'a str,
+    /// Validated trusted command argv, appended verbatim after the image.
+    pub command: &'a [String],
+    /// Optional private-service launch: the trusted Docker network to join
+    /// and the host credential file to inject. `None` leaves the container
+    /// network policy exactly as the manager config already decided.
+    pub service: Option<ServiceRunSpec<'a>>,
     pub volume_uid: u32,
     pub volume_gid: u32,
     pub config: &'a RunnerManagerConfig,
+}
+
+/// Private-service inputs for one container creation. Carries the trusted
+/// network name and a host-side credential *path* — never the credential
+/// value, which must not appear in an argv where any local process could
+/// read it.
+#[derive(Clone, Copy, Debug)]
+pub struct ServiceRunSpec<'a> {
+    /// Docker network the container joins explicitly.
+    pub network: &'a str,
+    /// Host path passed to `--env-file`.
+    pub credential_env_file: &'a str,
 }
 
 /// Build the hardened `docker run` argv. Never emits `-p`/`--publish`,
@@ -51,8 +78,8 @@ pub fn build_environment_run_argv(spec: &EnvironmentRunSpec<'_>) -> Vec<String> 
         format!("DF_GENERATION={}", spec.generation),
         "-v".to_string(),
         format!("{}:{}", spec.volume_name, spec.state_mount_target),
-        "-w".to_string(),
-        spec.state_mount_target.to_string(),
+        "--workdir".to_string(),
+        spec.state_workdir.to_string(),
         "--read-only".to_string(),
         "--tmpfs".to_string(),
         "/tmp:rw,nosuid,size=256m".to_string(),
@@ -71,13 +98,20 @@ pub fn build_environment_run_argv(spec: &EnvironmentRunSpec<'_>) -> Vec<String> 
         args.push("--runtime".to_string());
         args.push(runtime_class.clone());
     }
-    if !config.network_enabled {
+    if let Some(service) = spec.service {
+        // Explicit, trusted network. The manager deployment must already
+        // join this network; nothing here reaches out to create or attach
+        // to one, and no port is ever published for the agent.
+        args.push("--network".to_string());
+        args.push(service.network.to_string());
+        args.push("--env-file".to_string());
+        args.push(service.credential_env_file.to_string());
+    } else if !config.network_enabled {
         args.push("--network".to_string());
         args.push("none".to_string());
     }
     args.push(config.image.clone());
-    args.push("sleep".to_string());
-    args.push("infinity".to_string());
+    args.extend(spec.command.iter().cloned());
     args
 }
 
@@ -94,74 +128,4 @@ pub fn build_volume_create_argv(volume_name: &str, environment_id: &str) -> Vec<
         format!("{LABEL_ENVIRONMENT}={environment_id}"),
         volume_name.to_string(),
     ]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-    use std::time::Duration;
-
-    fn manager_config() -> RunnerManagerConfig {
-        RunnerManagerConfig {
-            control_plane_url: None,
-            manager_id: "test-manager".to_string(),
-            bind_addr: "127.0.0.1:0".to_string(),
-            auth_token: "test-token".to_string(),
-            backend: crate::config::RunnerBackendKind::Docker,
-            workspace_root: PathBuf::from("/tmp"),
-            host_workspace_root: PathBuf::from("/tmp"),
-            image: "test-image".to_string(),
-            workdir: "/workspace".to_string(),
-            network_enabled: false,
-            max_output_bytes: 256,
-            max_timeout_ms: 1000,
-            max_sessions: 1,
-            pids_limit: 64,
-            memory_limit: "256m".to_string(),
-            cpu_limit: "1".to_string(),
-            idle_ttl: Duration::from_secs(1),
-            docker_cli: "docker".to_string(),
-            docker_host: None,
-            runtime_class: None,
-        }
-    }
-
-    #[test]
-    fn environment_argv_is_hardened_without_ports_or_host_mounts() {
-        let config = manager_config();
-        let spec = EnvironmentRunSpec {
-            container_name: "desk-foreman-runner-execution_environment-abc-0",
-            owner_stable_key: "execution_environment:abc:0",
-            environment_id: "123e4567-e89b-12d3-a456-426614174000",
-            generation: 0,
-            manager_id: "test-manager",
-            volume_name: "df-env-123e4567e89b12d3a456426614174000",
-            state_mount_target: "/state",
-            volume_uid: 1000,
-            volume_gid: 1000,
-            config: &config,
-        };
-        let argv = build_environment_run_argv(&spec);
-        let joined = argv.join(" ");
-        assert!(argv.contains(&"--read-only".to_string()));
-        assert!(argv.contains(&"--cap-drop".to_string()));
-        assert!(argv.contains(&"no-new-privileges:true".to_string()));
-        assert!(joined.contains("df-env-123e4567e89b12d3a456426614174000:/state"));
-        assert!(joined.contains("desk-foreman.execution-environment=123e4567"));
-        assert!(joined.contains("desk-foreman.generation=0"));
-        assert!(!argv.iter().any(|a| a == "-p" || a == "--publish"));
-        assert!(!joined.contains("/tmp:/workspace"), "no host blanket mount");
-        assert!(!joined.contains("WORKSPACE_ROOT"), "no workspace env leak");
-        assert!(joined.contains("--user 1000:1000"));
-        assert!(joined.contains("--network none"));
-    }
-
-    #[test]
-    fn volume_create_never_deletes() {
-        let argv = build_volume_create_argv("df-env-abc", "env-abc");
-        assert_eq!(argv[0], "volume");
-        assert_eq!(argv[1], "create");
-        assert!(!argv.iter().any(|a| a == "rm"));
-    }
 }

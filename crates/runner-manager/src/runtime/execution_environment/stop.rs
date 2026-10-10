@@ -91,6 +91,12 @@ pub async fn stop_execution_environment(
         // even if the termination below fails or the process restarts.
         store.save(record_stopped(barrier, generation))?;
 
+        // Wake live relayed streams inside the same guard, after the
+        // persisted intent. A refused stop never reaches this point, so its
+        // streams keep running; the absent branch below is cancelled too,
+        // because its generation is closed even though no container exists.
+        backend.service_cancel().cancel_environment(&environment_id);
+
         let Some(info) = preflight else {
             return Ok(StopExecutionEnvironmentAck {
                 owner: request.owner,
