@@ -1,13 +1,10 @@
-//! Authenticated durable native task handlers (issue 753 P1).
+//! Authenticated durable native task handlers (issue 764 P1).
 //!
-//! Four operations on one intent: admit (or idempotently replay), read,
-//! cancel, and release against a confirmed stop proof. Every route resolves
-//! the application identity from the bearer first — never from the body —
-//! then runs a short owner-scoped transaction.
-//!
-//! Nothing here prepares a checkout, mounts a workspace, dispatches a job or
-//! touches Docker. A task admitted here has no writer yet, and no API marks a
-//! task running.
+//! Routes admit and inspect one task, seal and prepare its seed, schedule
+//! original-manager start/stop jobs, and release only against a positive stop
+//! proof. Every application route resolves identity from the bearer and uses
+//! owner-scoped state. This HTTP layer never accepts host paths or starts
+//! Docker; running and stop-proof states require matching manager acknowledgments.
 
 use axum::{
     Json,
@@ -28,10 +25,14 @@ use crate::{
 
 pub mod prepare;
 pub mod seeds;
+pub mod start;
+pub mod stop;
 pub mod types;
 
 pub use prepare::{find_native_task_preparation_handler, prepare_native_task_handler};
 pub use seeds::{find_native_task_seed_handler, seed_native_task_handler};
+pub use start::start_native_task_handler;
+pub use stop::stop_native_task_handler;
 
 use types::{
     AdmitNativeTaskRequest, CancelNativeTaskRequest, NativeTaskDescriptor, ReleaseNativeTaskRequest,

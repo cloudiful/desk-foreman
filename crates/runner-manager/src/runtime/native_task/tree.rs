@@ -18,7 +18,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path};
 
 use anyhow::bail;
-use runner_protocol::SourceSeedSnapshotFile;
+use runner_protocol::{SeedBundle, SourceSeedSnapshotFile};
 
 mod validation;
 
@@ -26,6 +26,70 @@ use self::validation::{
     read_file, validate_file_metadata, validate_parent_directories, validate_tree_entries,
 };
 use super::paths::{TREE_DIR_MODE, TREE_FILE_MODE, refuse_link_or_irregular, validate_private_dir};
+
+/// Snapshot a prepared tree after verifying every entry is still manager-owned.
+///
+/// Used only before first task start: running replays intentionally do not read
+/// or compare edited task files with the sealed seed.
+pub(crate) fn snapshot_published_tree(tree_dir: &Path, uid: u32) -> anyhow::Result<SeedBundle> {
+    validate_private_dir(tree_dir, uid)?;
+    let mut files = Vec::new();
+    let mut total_bytes = 0usize;
+    collect_snapshot(tree_dir, tree_dir, uid, &mut files, &mut total_bytes)?;
+    let bundle = runner_protocol::validate_seed_bundle(&files).map_err(|error| {
+        anyhow::anyhow!(
+            "prepared task tree no longer matches its seed rules: {}",
+            error.code()
+        )
+    })?;
+    validate_tree_entries(tree_dir, &bundle.files, uid)?;
+    Ok(bundle)
+}
+
+fn collect_snapshot(
+    root: &Path,
+    directory: &Path,
+    uid: u32,
+    files: &mut Vec<SourceSeedSnapshotFile>,
+    total_bytes: &mut usize,
+) -> anyhow::Result<()> {
+    validate_private_dir(directory, uid)?;
+    for entry in fs::read_dir(directory)
+        .map_err(|error| anyhow::anyhow!("failed to read the prepared task tree: {error}"))?
+    {
+        let path = entry
+            .map_err(|error| anyhow::anyhow!("failed to read the prepared task tree: {error}"))?
+            .path();
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| anyhow::anyhow!("failed to inspect a prepared task entry: {error}"))?;
+        if metadata.file_type().is_symlink() {
+            bail!("prepared native task tree entries must not be symlinks");
+        }
+        if metadata.is_dir() {
+            validate_private_dir(&path, uid)?;
+            collect_snapshot(root, &path, uid, files, total_bytes)?;
+            continue;
+        }
+        if !metadata.is_file() || files.len() >= runner_protocol::MAX_SEED_ENTRIES {
+            bail!("prepared native task tree has an unsupported entry count or type");
+        }
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|error| anyhow::anyhow!("prepared task path escaped its tree: {error}"))?
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("prepared task path is not valid UTF-8"))?
+            .to_string();
+        let bytes = read_file(&path, uid)?;
+        *total_bytes = total_bytes.saturating_add(bytes.len());
+        if *total_bytes > runner_protocol::MAX_SEED_TOTAL_BYTES {
+            bail!("prepared native task tree exceeds the sealed input size bound");
+        }
+        let content = String::from_utf8(bytes)
+            .map_err(|_| anyhow::anyhow!("prepared native task tree contains non-UTF-8 data"))?;
+        files.push(SourceSeedSnapshotFile::new(relative, content));
+    }
+    Ok(())
+}
 
 /// Stage every file of `files` (already in canonical path order) into
 /// `staging_dir`, verify the recomputed manifest, then publish by renaming the

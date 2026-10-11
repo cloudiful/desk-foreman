@@ -1,26 +1,28 @@
-//! Durable native task intent (issue 753 P1).
+//! Durable native task ownership and original-manager execution control (issue 764 P1).
 //!
-//! One authenticated application admits at most one active task per
-//! environment and per authorized workspace binding, queries it, cancels it,
-//! and releases an executed task only against a positive stop proof from its
-//! own original manager.
-//!
-//! A task is an *intent*. Nothing here dispatches a job, prepares a checkout,
-//! mounts a workspace or starts a container: the durable intent and its
-//! exclusivity anchors are the whole deliverable, so a later phase can mount
-//! without re-deciding ownership.
+//! An authenticated application admits one task per environment and authorized
+//! workspace binding, prepares its sealed seed, schedules a fenced start and a
+//! task-aware stop, and releases only against the task's own positive
+//! environment and preparation-quiescence proof. Manager-side native
+//! start/stop execution and default service routing remain outside this phase.
 
 mod admit;
 mod cancel;
+pub(crate) mod native_execution;
 pub(crate) mod prepare;
 mod queries;
 mod release;
 pub mod seeds;
+mod start;
+mod stop;
 mod types;
 
 use sqlx::PgPool;
 use uuid::Uuid;
 
+pub use native_execution::{
+    NativeTaskOperationDescriptor, TaskExecutionError, TaskExecutionRequest,
+};
 pub use prepare::{
     PreparationDescriptor, PrepareError, PrepareRequest, find_native_task_preparation,
     prepare_native_task,
@@ -112,6 +114,28 @@ pub async fn release_native_task(
         expected_stop_job_id,
     )
     .await
+}
+
+/// Schedule or replay the original-manager start for a prepared native task.
+pub async fn start_native_task(
+    pool: &PgPool,
+    application_id: i64,
+    environment_id: Uuid,
+    task_id: Uuid,
+    request: TaskExecutionRequest,
+) -> Result<NativeTaskOperationDescriptor, TaskExecutionError> {
+    start::start(pool, application_id, environment_id, task_id, request).await
+}
+
+/// Schedule or replay the original-manager stop for a native task.
+pub async fn stop_native_task(
+    pool: &PgPool,
+    application_id: i64,
+    environment_id: Uuid,
+    task_id: Uuid,
+    request: TaskExecutionRequest,
+) -> Result<NativeTaskOperationDescriptor, TaskExecutionError> {
+    stop::stop(pool, application_id, environment_id, task_id, request).await
 }
 
 /// Wrap a query failure as an internal error without leaking its text.

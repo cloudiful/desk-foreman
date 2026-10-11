@@ -14,6 +14,8 @@ SELECT
     state,
     container_generation,
     prepare_job_id,
+    start_job_id,
+    stop_job_id,
     created_at,
     updated_at,
     terminal_at

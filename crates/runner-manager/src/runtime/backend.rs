@@ -4,7 +4,9 @@ use desk_foreman::runner::RunnerFuture;
 use runner_protocol::{
     CommandOutput, EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest,
     NativeTaskPreparedResult, PrepareNativeTaskRequest, RunnerCommandRequest, RunnerOwner,
-    RunnerShellRequest, SeedBundle, StopExecutionEnvironmentAck, StopExecutionEnvironmentRequest,
+    RunnerShellRequest, SeedBundle, StartNativeTaskRequest, StartNativeTaskResult,
+    StopExecutionEnvironmentAck, StopExecutionEnvironmentRequest, StopNativeTaskRequest,
+    StopNativeTaskResult,
 };
 
 pub trait RunnerBackend: Send + Sync {
@@ -61,6 +63,24 @@ pub trait RunnerBackend: Send + Sync {
     ) -> RunnerFuture<'a, anyhow::Result<NativeTaskPreparedResult>> {
         Box::pin(async move {
             anyhow::bail!("native task preparation is not configured on this runner backend")
+        })
+    }
+
+    fn start_native_task<'a>(
+        &'a self,
+        _request: StartNativeTaskRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<StartNativeTaskResult>> {
+        Box::pin(async move {
+            anyhow::bail!("native task start is not configured on this runner backend")
+        })
+    }
+
+    fn stop_native_task<'a>(
+        &'a self,
+        _request: StopNativeTaskRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<StopNativeTaskResult>> {
+        Box::pin(async move {
+            anyhow::bail!("native task stop is not configured on this runner backend")
         })
     }
 

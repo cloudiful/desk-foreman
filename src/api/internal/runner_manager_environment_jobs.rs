@@ -34,9 +34,9 @@ pub(super) fn routes_to_durable_handler(job_id: &str) -> bool {
 
 /// Claim the next pending durable job assigned to `manager_id`, if any.
 ///
-/// The owner-only payload is exactly what the runner-manager worker already
-/// deserializes for `ensure_execution_environment`/`stop_execution_environment`
-/// jobs, so no wire DTO changes are needed.
+/// Legacy ensure/stop payloads remain owner-only. Preparation and task
+/// execution use strict shared DTOs built entirely from stored task, seed and
+/// environment identity; no caller-selected host input enters the manager job.
 pub(super) async fn next_assigned_environment_job(
     state: &AppState,
     manager_id: i64,
@@ -75,6 +75,14 @@ pub(super) async fn next_assigned_environment_job(
             total_bytes: seed.total_bytes,
         })
         .map_err(|error| AppError::internal(anyhow::Error::from(error)))?
+    } else if row.job_kind == "start_native_task"
+        || (row.job_kind == "stop" && row.native_task_id.is_some())
+    {
+        crate::db::execution_environments::tasks::native_execution::request_for_native_job(
+            &state.db, &row,
+        )
+        .await
+        .map_err(AppError::internal)?
     } else {
         serde_json::json!({ "owner": environment_job_owner(&row) })
     };

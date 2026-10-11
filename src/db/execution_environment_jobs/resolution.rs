@@ -19,6 +19,10 @@ pub(crate) const ENSURE_WIRE_KIND: &str = "ensure_execution_environment";
 pub(crate) const STOP_WIRE_KIND: &str = "stop_execution_environment";
 /// Wire job kind the manager executes for a native-task preparation record.
 pub(crate) const PREPARE_WIRE_KIND: &str = "prepare_native_task";
+/// Wire job kind the manager executes to start a prepared native task.
+pub(crate) const START_NATIVE_WIRE_KIND: &str = "start_native_task";
+/// Wire job kind for a task-linked stop row.
+pub(crate) const STOP_NATIVE_WIRE_KIND: &str = "stop_native_task";
 
 /// States a positive stop confirmation may report. `removed` is deliberately
 /// excluded: it is not a confirmed quiescence of the requested generation.
@@ -47,8 +51,10 @@ pub(crate) fn environment_job_wire_kind(
 ) -> anyhow::Result<&'static str> {
     match row.job_kind.as_str() {
         "ensure" => Ok(ENSURE_WIRE_KIND),
+        "stop" if row.native_task_id.is_some() => Ok(STOP_NATIVE_WIRE_KIND),
         "stop" => Ok(STOP_WIRE_KIND),
         "prepare_native_task" => Ok(PREPARE_WIRE_KIND),
+        "start_native_task" => Ok(START_NATIVE_WIRE_KIND),
         other => anyhow::bail!("durable environment job has an unknown kind: {other}"),
     }
 }
@@ -102,6 +108,7 @@ pub(crate) fn resolve_environment_job_result(
                         outcome: "ensure_running".to_string(),
                         observed_state: Some(ack.state),
                         confirmed: None,
+                        preparation_quiescent: None,
                     })
                 } else {
                     EnvironmentJobResolution::Inconsistent(
@@ -165,5 +172,6 @@ fn uncertain_result_for_kind(job_kind: &str) -> ExecutionEnvironmentJobResult {
         outcome: outcome.to_string(),
         observed_state: None,
         confirmed: None,
+        preparation_quiescent: None,
     }
 }

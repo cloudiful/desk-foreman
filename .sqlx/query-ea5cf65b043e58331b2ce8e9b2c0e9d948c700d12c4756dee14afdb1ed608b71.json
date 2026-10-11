@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Retain task ownership after a failed task stop.\nUPDATE execution_environment_tasks\nSET state = 'uncertain',\n    updated_at = NOW()\nWHERE task_id = $1\n  AND application_id = $2\n  AND environment_id = $3\n  AND stop_job_id = $4\n  AND state IN ('stopping', 'uncertain')\nRETURNING task_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "task_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ea5cf65b043e58331b2ce8e9b2c0e9d948c700d12c4756dee14afdb1ed608b71"
+}

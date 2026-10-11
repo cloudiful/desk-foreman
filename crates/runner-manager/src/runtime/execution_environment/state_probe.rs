@@ -28,6 +28,7 @@ use crate::runtime::docker::DockerRunnerBackend;
 /// inside the current working directory, which Docker already set to the
 /// validated state workdir.
 const STATE_PROBE_SCRIPT: &str = "set -eu;probe=$(mktemp ./.df-state-probe.XXXXXX);trap 'rm -f \"$probe\"' EXIT HUP INT TERM;printf 'df' >\"$probe\";rm -f \"$probe\";trap - EXIT HUP INT TERM";
+const TASK_WORKSPACE_PROBE_SCRIPT: &str = "set -eu;probe=$(mktemp ./.df-task-probe.XXXXXX);trap 'rm -f \"$probe\"' EXIT HUP INT TERM;printf 'df' >\"$probe\";rm -f \"$probe\";trap - EXIT HUP INT TERM";
 
 /// Identity of the container and user the probe runs as.
 pub struct StateProbeSpec<'a> {
@@ -56,6 +57,21 @@ pub fn build_state_probe_argv(spec: &StateProbeSpec<'_>) -> Vec<String> {
         "sh".to_string(),
         "-c".to_string(),
         STATE_PROBE_SCRIPT.to_string(),
+    ]
+}
+
+/// Build a probe for the fixed native task checkout workdir.
+pub fn build_task_workspace_probe_argv(container_name: &str, uid: u32, gid: u32) -> Vec<String> {
+    vec![
+        "exec".to_string(),
+        "--user".to_string(),
+        format!("{uid}:{gid}"),
+        "--workdir".to_string(),
+        super::NATIVE_TASK_WORKDIR.to_string(),
+        container_name.to_string(),
+        "sh".to_string(),
+        "-c".to_string(),
+        TASK_WORKSPACE_PROBE_SCRIPT.to_string(),
     ]
 }
 
@@ -96,6 +112,29 @@ pub(crate) async fn confirm_state_writable(
             "execution environment state probe reported the state working directory is not writable by the configured non-root user (exit_code={:?})",
             output.exit_code
         );
+    }
+    Ok(())
+}
+
+/// Confirm the task bind is writable in the same running container and as the
+/// same manager-matched non-root user as the persistent state volume.
+pub(crate) async fn confirm_task_workspace_writable(
+    backend: &DockerRunnerBackend,
+    container_name: &str,
+    process: &EnsureProcessProfile<'_>,
+    deadline: &OperationDeadline,
+) -> anyhow::Result<()> {
+    let output = backend
+        .docker_output_bounded(
+            build_task_workspace_probe_argv(container_name, process.uid, process.gid),
+            deadline.remaining_ms()?,
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!("native task workspace probe could not run in the validated container")
+        })?;
+    if output.timed_out || output.exit_code != Some(0) {
+        anyhow::bail!("native task workspace is not writable by the configured non-root user");
     }
     Ok(())
 }

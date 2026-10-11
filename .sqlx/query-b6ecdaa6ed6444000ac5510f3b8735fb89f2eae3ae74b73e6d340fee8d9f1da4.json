@@ -1,0 +1,213 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Attach a task-aware stop job and retain its potential container candidate.\nUPDATE execution_environment_tasks\nSET state = 'stopping',\n    container_generation = $4,\n    stop_job_id = $5,\n    updated_at = NOW()\nWHERE task_id = $1\n  AND application_id = $2\n  AND environment_id = $3\n  AND target_generation = $4\n  AND state IN ('prepared', 'preparing', 'starting', 'running', 'stopping', 'uncertain')\n  AND stop_job_id IS NOT DISTINCT FROM $6\nRETURNING\n    task_id,\n    operation_token,\n    environment_id,\n    application_id,\n    workspace_binding_id,\n    subject_external_user_id,\n    target_generation,\n    assigned_manager_id,\n    state,\n    container_generation,\n    prepare_job_id,\n    start_job_id,\n    stop_job_id,\n    created_at,\n    updated_at,\n    terminal_at;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "operation_token",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "operation_token"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "environment_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "environment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "application_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "application_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "workspace_binding_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "workspace_binding_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "subject_external_user_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "subject_external_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "target_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "target_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "assigned_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "assigned_manager_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "container_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "container_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "prepare_job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "prepare_job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "start_job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "start_job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "stop_job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "stop_job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "terminal_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "terminal_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Uuid",
+        "Int8",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "b6ecdaa6ed6444000ac5510f3b8735fb89f2eae3ae74b73e6d340fee8d9f1da4"
+}

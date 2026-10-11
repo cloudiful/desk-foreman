@@ -5,12 +5,17 @@ use utoipa::ToSchema;
 
 pub mod execution_environment;
 pub mod service_relay;
+pub mod task_execution;
 pub mod task_preparation;
 pub mod task_seed;
 
 pub use execution_environment::{
     EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest, StopExecutionEnvironmentAck,
     StopExecutionEnvironmentRequest,
+};
+pub use task_execution::{
+    NativeTaskRuntimeIdentity, StartNativeTaskRequest, StartNativeTaskResult,
+    StopNativeTaskRequest, StopNativeTaskResult,
 };
 pub use task_preparation::{NativeTaskPreparedResult, PrepareNativeTaskRequest};
 pub use task_seed::{

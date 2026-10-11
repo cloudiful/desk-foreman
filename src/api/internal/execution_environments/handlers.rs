@@ -102,13 +102,16 @@ pub async fn invalidate_execution_environment(
             state
                 .runner_broker
                 .service_relay()
-                .cancel_environment(environment_id);
+                .cancel_environment_through(environment_id, request.expected_generation);
             Ok(Json(environment))
         }
         InvalidateOutcome::Stale { current } => Err(AppError::conflict(format!(
             "stale generation: expected {} but environment {} is at generation {}",
             request.expected_generation, current.environment_id, current.generation
         ))),
+        InvalidateOutcome::NativeTaskActive => Err(AppError::conflict(
+            "execution environment is owned by an active native task",
+        )),
         InvalidateOutcome::NotFound => Err(AppError::not_found("execution environment not found")),
     }
 }

@@ -40,6 +40,7 @@ fn request(manager_id: i64, environment_id: Uuid) -> StreamRequest {
     StreamRequest {
         stream_id: RelayId::from_bytes(Uuid::new_v4().into_bytes()),
         environment_id,
+        generation: 1,
         manager_id,
         declared_body_length: 0,
     }
@@ -49,6 +50,7 @@ fn request_with_id(manager_id: i64, environment_id: Uuid, stream_id: RelayId) ->
     StreamRequest {
         stream_id,
         environment_id,
+        generation: 1,
         manager_id,
         declared_body_length: 0,
     }

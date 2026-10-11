@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Fresh native-active task check for one workspace binding (issue 753 P1).\n--\n-- Run inside an already-open transaction that holds the binding row lock and\n-- read again after the lock is granted, so the answer reflects committed\n-- state rather than a snapshot taken before a concurrent admission committed.\n-- Returns the single active task id; `state = ANY(...)` keeps the active set in\n-- one place with the partial unique indexes.\nSELECT task_id\nFROM execution_environment_tasks\nWHERE workspace_binding_id = $1\n  AND state IN ('admitted', 'preparing', 'prepared', 'starting', 'running', 'stopping', 'uncertain')\nLIMIT 1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "task_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a9edc11bd3d1a37973da7725c439280f661160827064389d016c3b7b8188e33a"
+}

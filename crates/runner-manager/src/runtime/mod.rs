@@ -24,7 +24,7 @@ pub use direct::DirectRunnerBackend;
 pub use docker::DockerRunnerBackend;
 pub use janitor::spawn_janitor;
 pub use local_service::LocalRunnerService;
-pub(crate) use native_task::NativeTaskStore;
+pub(crate) use native_task::{NativeTaskStore, start_native_task, stop_native_task};
 pub use reporter::RunnerLifecycleReporter;
 
 use std::time::Instant;

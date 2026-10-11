@@ -1,0 +1,215 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Insert one durable task intent (issue 753 P1).\n--\n-- `ON CONFLICT DO NOTHING` with no conflict target covers *every* uniqueness\n-- constraint on the row: the `task_id` primary key and the `operation_token`\n-- unique index. Naming only `task_id` would let a racing insert that collides\n-- on `operation_token` raise a unique violation, which surfaces as an internal\n-- error instead of a typed refusal.\n--\n-- A conflict returns no row, and the caller resolves it in the same\n-- transaction: an identical intent replays its own existing task, and anything\n-- else is a typed conflict. A concurrent uncommitted conflicting insert makes\n-- this statement wait, so the caller always observes the committed winner.\nINSERT INTO execution_environment_tasks (\n    task_id,\n    operation_token,\n    environment_id,\n    application_id,\n    workspace_binding_id,\n    subject_external_user_id,\n    target_generation,\n    assigned_manager_id,\n    state\n)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'admitted')\nON CONFLICT DO NOTHING\nRETURNING\n    task_id,\n    operation_token,\n    environment_id,\n    application_id,\n    workspace_binding_id,\n    subject_external_user_id,\n    target_generation,\n    assigned_manager_id,\n    state,\n    container_generation,\n    prepare_job_id,\n    start_job_id,\n    stop_job_id,\n    created_at,\n    updated_at,\n    terminal_at;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "operation_token",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "operation_token"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "environment_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "environment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "application_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "application_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "workspace_binding_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "workspace_binding_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "subject_external_user_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "subject_external_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "target_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "target_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "assigned_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "assigned_manager_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "container_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "container_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "prepare_job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "prepare_job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "start_job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "start_job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "stop_job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "stop_job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "terminal_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_tasks",
+            "name": "terminal_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "31ef48fc6f87b844651866780c6e26021ab7670150b8a72dab8b04147e58be8e"
+}

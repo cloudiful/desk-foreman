@@ -14,6 +14,8 @@ pub mod call;
 pub mod closed;
 pub mod errors;
 pub mod frames;
+#[cfg(test)]
+mod generation_cases;
 pub mod registry;
 #[cfg(test)]
 mod registry_burst_tests;

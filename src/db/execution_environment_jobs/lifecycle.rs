@@ -162,6 +162,12 @@ pub async fn expire_execution_environment_jobs(
         tx.commit().await?;
         return Ok(Vec::new());
     }
+    crate::db::execution_environments::tasks::native_execution::expire_overdue_native_jobs(
+        &mut tx,
+        application_id,
+        environment_id,
+    )
+    .await?;
 
     let expired: Vec<ExecutionEnvironmentJob> = sqlx::query_file_as!(
         ExecutionEnvironmentJob,
@@ -171,23 +177,6 @@ pub async fn expire_execution_environment_jobs(
     )
     .fetch_all(&mut *tx)
     .await?;
-
-    // An expired preparation retains its task as `uncertain` in the same
-    // transaction, exactly like the status-path expiry: the task keeps its
-    // exclusive anchors and is never released or re-dispatched.
-    for job in &expired {
-        if job.job_kind == "prepare_native_task" {
-            if let Some(task_id) = job.native_task_id {
-                crate::db::execution_environments::tasks::prepare::mark_preparation_uncertain(
-                    &mut tx,
-                    application_id,
-                    environment_id,
-                    task_id,
-                )
-                .await?;
-            }
-        }
-    }
 
     tx.commit().await?;
     Ok(expired)

@@ -32,6 +32,7 @@ pub(super) struct StreamRoute {
     pub(super) manager_id: i64,
     pub(super) lease: RelayId,
     pub(super) environment_id: Uuid,
+    pub(super) generation: i64,
     pub(super) call: Weak<CallInner>,
 }
 
@@ -40,7 +41,7 @@ pub(super) struct RegistryState {
     pub(super) tunnels: HashMap<i64, TunnelSlot>,
     pub(super) routes: HashMap<RelayId, StreamRoute>,
     pub(super) closed: ClosedStreamIds,
-    pub(super) environment_epochs: HashMap<Uuid, u64>,
+    pub(super) cancelled_through_generation: HashMap<Uuid, i64>,
     pub(super) environment_streams: HashMap<Uuid, usize>,
     pub(super) manager_streams: HashMap<i64, usize>,
 }

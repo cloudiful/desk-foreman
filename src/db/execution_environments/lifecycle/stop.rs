@@ -15,8 +15,8 @@ use crate::db::execution_environment_jobs::job_token_is_valid;
 
 use super::LifecycleError;
 use super::support::{
-    NewLifecycleJob, expire_overdue_jobs, find_job_by_token, insert_job, load_jobs,
-    lock_environment,
+    NewLifecycleJob, ensure_no_active_native_task, expire_overdue_jobs, find_job_by_token,
+    insert_job, load_jobs, lock_environment,
 };
 use super::transitions::{begin_stop, resume_stop};
 use super::types::{
@@ -25,14 +25,15 @@ use super::types::{
 };
 
 /// Admit (or idempotently replay) one stop for `(application_id,
-/// environment_id)`.
+/// environment_id)`. The second result is the committed candidate cutoff for a
+/// new stop, and `None` for read-only replays.
 pub async fn stop_execution_environment(
     pool: &PgPool,
     application_id: i64,
     environment_id: Uuid,
     expected_generation: i64,
     operation_token: &str,
-) -> Result<EnvironmentOperationDescriptor, LifecycleError> {
+) -> Result<(EnvironmentOperationDescriptor, Option<i64>), LifecycleError> {
     if !job_token_is_valid(operation_token) {
         return Err(LifecycleError::InvalidToken);
     }
@@ -43,33 +44,37 @@ pub async fn stop_execution_environment(
         return Err(LifecycleError::NotFound);
     };
 
+    // Same-token replay of an identical stop intent never increments again.
+    if let Some(existing) =
+        find_job_by_token(&mut tx, application_id, environment_id, operation_token).await?
+    {
+        let identical = existing.native_task_id.is_none()
+            && existing.job_kind == "stop"
+            && Some(existing.assigned_manager_id) == environment.assigned_manager_id
+            && Some(existing.target_generation) == environment.container_generation;
+        if !identical {
+            return Err(LifecycleError::TokenConflict);
+        }
+        return Ok((
+            environment_descriptor(
+                &environment,
+                Some(&operation_descriptor(
+                    existing.job_id,
+                    &existing.job_kind,
+                    &existing.state,
+                )),
+            ),
+            None,
+        ));
+    }
+
+    ensure_no_active_native_task(&mut tx, application_id, environment_id).await?;
     let Some(candidate) = environment.container_generation else {
         return Err(LifecycleError::NotProvisioned);
     };
     let Some(manager_id) = environment.assigned_manager_id else {
         return Err(LifecycleError::NotProvisioned);
     };
-
-    // Same-token replay of an identical stop intent never increments again.
-    if let Some(existing) =
-        find_job_by_token(&mut tx, application_id, environment_id, operation_token).await?
-    {
-        let identical = existing.job_kind == "stop"
-            && existing.assigned_manager_id == manager_id
-            && existing.target_generation == candidate;
-        if !identical {
-            return Err(LifecycleError::TokenConflict);
-        }
-        return Ok(environment_descriptor(
-            &environment,
-            Some(&operation_descriptor(
-                existing.job_id,
-                &existing.job_kind,
-                &existing.state,
-            )),
-        ));
-    }
-
     if expected_generation != environment.generation {
         return Err(LifecycleError::StaleGeneration {
             current: environment.generation,
@@ -90,6 +95,7 @@ pub async fn stop_execution_environment(
         .iter()
         .filter(|job| {
             job.job_kind == "stop"
+                && job.native_task_id.is_none()
                 && job.assigned_manager_id == manager_id
                 && job.target_generation == candidate
         })
@@ -100,13 +106,16 @@ pub async fn stop_execution_environment(
             "succeeded" => {
                 // Already confirmed and awaiting status reconciliation; do not
                 // admit a second stop.
-                return Ok(environment_descriptor(
-                    &environment,
-                    Some(&operation_descriptor(
-                        stop.job_id,
-                        &stop.job_kind,
-                        &stop.state,
-                    )),
+                return Ok((
+                    environment_descriptor(
+                        &environment,
+                        Some(&operation_descriptor(
+                            stop.job_id,
+                            &stop.job_kind,
+                            &stop.state,
+                        )),
+                    ),
+                    None,
                 ));
             }
             _ => {}
@@ -145,8 +154,11 @@ pub async fn stop_execution_environment(
     };
 
     tx.commit().await?;
-    Ok(environment_descriptor(
-        &environment,
-        Some(&operation_descriptor(job.job_id, &job.job_kind, &job.state)),
+    Ok((
+        environment_descriptor(
+            &environment,
+            Some(&operation_descriptor(job.job_id, &job.job_kind, &job.state)),
+        ),
+        Some(candidate),
     ))
 }

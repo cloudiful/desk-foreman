@@ -23,7 +23,9 @@ pub use stop::stop_execution_environment;
 // Visibility-only: the native-task phase reuses the same lock-held helpers so
 // task admission applies identical blocker and manager-selection rules rather
 // than a second copy that could drift.
-pub(crate) use support::{expire_overdue_jobs, find_job_by_id, load_jobs, select_manager};
+pub(crate) use support::{
+    expire_overdue_jobs, find_job_by_id, find_job_by_token, load_jobs, select_manager,
+};
 
 // Visibility-only: native-task admission reuses the exact confirmed-stop rule
 // replacement already applies, so the two can never drift apart.
@@ -61,6 +63,8 @@ pub enum LifecycleError {
     StopInFlight,
     /// Unresolved ensure/stop blockers prevent the mutation.
     UnresolvedBlockers,
+    /// A native task currently owns the environment.
+    NativeTaskActive,
     /// No manager is enabled, online and recently seen for a first provision.
     ManagerUnavailable,
     /// The transaction itself failed; no lifecycle state mutated, but the

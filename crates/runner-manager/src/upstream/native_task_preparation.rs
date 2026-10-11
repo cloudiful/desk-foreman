@@ -1,5 +1,5 @@
 //! Mandatory named integration gate for native-task preparation
-//! (issue 753 P2b, `#[cfg(test)]`).
+//! (issues 753 and 764 P2b, `#[cfg(test)]`).
 //!
 //! Real isolated PostgreSQL, the real DF router, and the real manager dispatch
 //! helper and filesystem store, with no Docker anywhere. What this proves is
@@ -15,7 +15,7 @@
 
 #[cfg(test)]
 #[path = "native_task_preparation/support.rs"]
-mod support;
+pub(super) mod support;
 
 #[cfg(test)]
 #[path = "native_task_preparation/cases.rs"]

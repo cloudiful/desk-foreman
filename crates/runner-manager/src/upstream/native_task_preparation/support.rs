@@ -14,8 +14,11 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::config::{RunnerBackendKind, RunnerManagerConfig};
+use crate::runtime::RunnerBackend;
 use crate::runtime::execution_environment::service::host_identity::UidSource;
-use crate::runtime::{DockerRunnerBackend, NativeTaskStore, RunnerLifecycleReporter};
+
+#[path = "test_backend.rs"]
+mod test_backend;
 use crate::upstream_service_relay::full_gateway_db::db::IsolatedDb;
 use crate::upstream_service_relay::full_gateway_support::support::{
     create_app, create_manager, spawn_df, test_state,
@@ -25,22 +28,23 @@ use crate::upstream_service_relay::full_gateway_support::support::{
 pub(super) const GATE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// One preparation rig with a real router and a real trusted root.
-pub(super) struct Rig {
-    pub(super) db: IsolatedDb,
-    pub(super) base: String,
+pub(crate) struct Rig {
+    pub(crate) db: IsolatedDb,
+    pub(crate) base: String,
     _handle: tokio::task::JoinHandle<()>,
-    pub(super) manager_id: i64,
-    pub(super) manager_token: String,
-    pub(super) app_id: i64,
-    pub(super) env_id: Uuid,
-    pub(super) task_id: Uuid,
-    pub(super) root: PathBuf,
+    pub(crate) manager_id: i64,
+    pub(crate) manager_token: String,
+    pub(crate) app_id: i64,
+    pub(crate) application_token: String,
+    pub(crate) env_id: Uuid,
+    pub(crate) task_id: Uuid,
+    pub(crate) root: PathBuf,
     _temp: tempfile::TempDir,
-    pub(super) client: reqwest::Client,
+    pub(crate) client: reqwest::Client,
 }
 
 /// The current process's effective uid.
-pub(super) fn current_uid() -> u32 {
+pub(crate) fn current_uid() -> u32 {
     UidSource::Proc.effective_uid().expect("effective uid")
 }
 
@@ -54,7 +58,7 @@ pub(super) fn root(temp: &tempfile::TempDir) -> PathBuf {
 }
 
 /// A manager config for the backend, with the given root and identity.
-pub(super) fn manager_config(
+pub(crate) fn manager_config(
     root: Option<PathBuf>,
     manager_id: i64,
 ) -> Arc<tokio::sync::RwLock<RunnerManagerConfig>> {
@@ -80,6 +84,7 @@ pub(super) fn manager_config(
         docker_host: None,
         runtime_class: None,
         native_task_root: root,
+        native_task_host_root: None,
     }))
 }
 
@@ -157,9 +162,9 @@ async fn code_project_binding(pool: &PgPool, app_id: i64) -> i64 {
 
 impl Rig {
     /// Build an admitted, seeded task whose preparation is scheduled.
-    pub(super) async fn start(files: &[(&str, &str)]) -> Self {
+    pub(crate) async fn start(files: &[(&str, &str)]) -> Self {
         let db = IsolatedDb::setup().await;
-        let (app_id, _app_token) = create_app(&db.pool, "prep-owner").await;
+        let (app_id, application_token) = create_app(&db.pool, "prep-owner").await;
         let (manager_id, manager_token) = online_manager(&db.pool, "prep-manager").await;
         let env_id = prepare_environment(&db.pool, app_id, manager_id).await;
         let binding_id = code_project_binding(&db.pool, app_id).await;
@@ -208,25 +213,19 @@ impl Rig {
             manager_id,
             manager_token,
             app_id,
+            application_token,
             env_id,
             task_id,
         }
     }
 
-    /// A backend with a real filesystem store over `root`.
-    pub(super) fn backend(&self, root: Option<PathBuf>) -> Arc<DockerRunnerBackend> {
-        let store = NativeTaskStore::with_uid_source(root.clone(), UidSource::Fixed(current_uid()));
-        let config = manager_config(root, self.manager_id);
-        DockerRunnerBackend::new(
-            config,
-            self.manager_id.to_string(),
-            RunnerLifecycleReporter::noop(),
-            store,
-        )
+    /// A backend with a real filesystem store and isolated durable state root.
+    pub(crate) fn backend(&self, root: Option<PathBuf>) -> Arc<dyn RunnerBackend> {
+        test_backend::build(root, self.manager_id, self._temp.path())
     }
 
     /// Poll the durable job as the manager.
-    pub(super) async fn poll(&self) -> RunnerJob {
+    pub(crate) async fn poll(&self) -> RunnerJob {
         let response = self
             .client
             .get(format!(
@@ -244,7 +243,7 @@ impl Rig {
     }
 
     /// The task's current state.
-    pub(super) async fn task_state(&self) -> String {
+    pub(crate) async fn task_state(&self) -> String {
         let (state,): (String,) =
             sqlx::query_as("SELECT state FROM execution_environment_tasks WHERE task_id = $1")
                 .bind(self.task_id)
@@ -255,7 +254,7 @@ impl Rig {
     }
 
     /// The environment's candidate generation and state.
-    pub(super) async fn environment_fence(&self) -> (Option<i64>, String) {
+    pub(crate) async fn environment_fence(&self) -> (Option<i64>, String) {
         sqlx::query_as(
             "SELECT container_generation, state FROM execution_environments WHERE environment_id = $1",
         )
@@ -266,7 +265,7 @@ impl Rig {
     }
 
     /// The trusted tree directory of this task.
-    pub(super) fn tree_dir(&self) -> PathBuf {
+    pub(crate) fn tree_dir(&self) -> PathBuf {
         self.root
             .join(self.env_id.to_string())
             .join(self.task_id.to_string())

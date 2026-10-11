@@ -1,9 +1,9 @@
 # 持久化原生任务意图
 
-应用为已授权的工作区绑定登记一个持久化的任务意图。任务是持久化的**意图**，
-而不是正在运行的进程：已登记的任务没有写入者、没有检出、没有挂载、也没有
-容器。控制面在此保证的是归属：谁可以持有该工作区、持有多久，以及在释放之前
-必须证明什么。
+应用为已授权的工作区绑定登记一个持久化的任务意图。任务状态从登记与准备，推进到
+围栏保护的启动和任务级停止。控制面为原始 Manager 记录持久化作业；只有匹配的类型化
+启动确认才能将任务标记为 `running`。停止确认必须同时证明环境已停止且准备写入者已静默，
+并且应用显式调用 release 后才会释放工作区。
 
 ```
 应用 ──HTTPS──▶ 控制面 ──▶ 持久化任务行
@@ -33,7 +33,8 @@
 
 ### `GET /api/internal/execution-environments/{environment_id}/tasks/{task_id}`
 
-读取一个归属于本应用的任务意图。
+读取一个归属于本应用的任务、当前状态、候选代次，以及可选的
+`start_job_id` / `stop_job_id` 锚点。
 
 ### `POST /api/internal/execution-environments/{environment_id}/tasks/{task_id}/cancel`
 
@@ -43,9 +44,9 @@
 
 ### `POST /api/internal/execution-environments/{environment_id}/tasks/{task_id}/release`
 
-依据任务自身已确认的停止证明释放一个已执行任务。每个字段都是围栏：证明必须属于
-该任务、来自该任务最初的 Manager、针对该任务的代次，并记录正向静默。任何其他
-情况都不会改动该任务。
+依据任务自身已确认的停止证明释放一个已停止任务。每个字段都是围栏：证明必须属于
+该任务、来自该任务最初的 Manager、针对其候选代次，并记录正向环境确认及
+`preparation_quiescent: true`。停止作业绝不会自动释放任务。
 
 ### `POST /api/internal/execution-environments/{environment_id}/tasks/{task_id}/seed`
 
@@ -76,9 +77,9 @@
 | 400 | operation token 缺失或超长。 |
 | 401 | 缺少应用 Bearer。 |
 | 404 | 属于其他应用的、或未知的环境、绑定、任务或证明。外来资源与不存在的资源不可区分。 |
-| 409 | 围栏不匹配、subject 不匹配、绑定不合格、存在遗留写入属主、存在未解决阻塞，或活跃任务冲突。 |
+| 409 | 围栏不匹配、subject 不匹配、绑定不合格、存在遗留写入属主、存在未解决阻塞、token 冲突或活跃任务冲突。 |
 | 413 | 种子请求体、条目数或内容大小超过允许上限。 |
-| 503 | 没有可用于绑定的 Runner Manager。 |
+| 503 | 原始 Runner Manager 不可用于任务登记、启动或停止。 |
 
 ## 登记规则
 
@@ -100,8 +101,8 @@
 ## 排他性
 
 两个 partial unique 索引与相应的登记守卫共同保证：每个环境、每个工作区绑定在
-`admitted`、`preparing`、`running`、`stopping` 和 `uncertain` 状态下最多只有一个
-活跃任务。`released` 任务会释放两者。
+`admitted`、`preparing`、`prepared`、`starting`、`running`、`stopping` 和
+`uncertain` 状态下最多只有一个活跃任务。`released` 任务会释放两者。
 
 ## 遗留围栏写入者
 
@@ -118,6 +119,9 @@
 在加锁之前求值的检查读到的是可能早于「等待期间被登记的任务」的快照——这正是该
 守卫要封闭的交错。任务登记会获取同一把锁，因此要么任务先提交（遗留路径即可看到
 它），要么任务等待（并看到该遗留转换）。
+
+只要存在活跃任务锚点，环境元数据 invalidate 以及遗留 provision、replace、stop 路由也会拒绝。
+Status 可以读取当前环境/作业描述，但绝不会通过遗留生命周期路径协调任务级 start/stop 作业。
 
 不存在原生任务时，所有遗留路径的行为与之前完全一致。
 
@@ -171,9 +175,9 @@ NUL 及其他控制字符、空的 `.`/`..` 分量、结尾斜杠、重复路径
 
 ## 原始 Manager 准备
 
-带有已封存种子的已登记任务可以被**准备**：控制面记录一个持久化作业，交由该任务的
-**原始** Manager 把种子物化到私有检出目录，并返回类型化证明。这里只是控制面调度——
-不派发、不挂载、不启动容器、也不写入任何规范根目录。
+带有已封存种子的已登记任务可以被**准备**：控制面记录并向该任务的**原始** Manager
+派发一个持久化作业，由 Manager 将种子物化到私有检出目录并返回类型化证明。准备操作不会
+启动容器，也不会写入规范根目录。
 
 ### `POST /api/internal/execution-environments/{environment_id}/tasks/{task_id}/prepare`
 
@@ -216,31 +220,74 @@ Manager 用自己的 Bearer 获取分配给它的作业的已封存种子字节�
 `prepared` 是活跃任务状态：与 `preparing` 一样，它独占环境与工作区绑定，因此不会有新的
 任务或遗留写入者占用它们。
 
+## 原生任务启动与停止
+
+### `POST /api/internal/execution-environments/{environment_id}/tasks/{task_id}/start`
+
+为已准备任务调度或重放一次启动。严格请求只包含 `expected_generation` 与不透明的
+`operation_token`。只有当任务仍是环境活跃的 `prepared` 任务、其关联准备作业已针对封存种子
+成功、任务/环境围栏匹配、任何旧候选都已有匹配的正向停止证明，并且原始 Manager 仍启用、
+在线且近期可见时才会接受。绝不会切换到其他 Manager。
+
+响应包含环境与任务状态、作业身份及 `native_task_id`。调度会在一个事务中把任务和环境设为
+`starting`、记录候选并关联作业；这只是候选，不是运行确认。Manager 请求仅包含已存储的任务
+身份（任务 ID、绑定、种子清单与准备代次）及服务端推导的环境属主。它不接受调用方路径、镜像、
+命令或 URL。
+
+只有原始 Manager 对当前未过期认领作业返回完全匹配的类型化确认，才能原子地把任务设为
+`running`、环境设为 `ready`、作业设为 `succeeded`。失败、超时、取消或陈旧确认都会保留候选
+及两个排他锚点，并将状态置为 `uncertain`。
+
+### `POST /api/internal/execution-environments/{environment_id}/tasks/{task_id}/stop`
+
+使用相同的两个请求字段调度或重放任务级停止。可接受 `prepared`、`preparing`、`starting`、
+`running`、`stopping` 与 `uncertain` 任务。首次停止只推进一次授权代次，同时保留潜在候选；
+恢复停止不会再次推进。停止意图提交后，该路由才会取消中继服务流；它绝不会释放任务。
+
+Manager 收到 `stop_native_task` wire kind 与已存储任务身份。成功停止证明必须同时包含环境观察
+为 `absent`、`exited` 或 `dead` 的确认，以及 `preparation_quiescent: true`。控制面会原子记录
+正向证明并把环境标为 `replaced`，但任务仍保持 `stopping` 并继续独占工作区。失败、过期或未
+静默的停止会令任务和环境变为 `uncertain`，且不产生释放证明。之后应用仍须以当前授权代次、
+候选代次和精确停止作业围栏显式 release。
+
+当本地检出根、Docker daemon 可见根以及现有执行环境配置均已配置时，原始 Manager 可执行
+`prepared` 任务的类型化启动。容器只挂载持久状态卷和 UUID 推导的任务树到 `/workspace`；在探测
+状态目录与任务树可写之前，必须校验精确任务标签、用户、工作目录和两个挂载。`running` 日志允许
+验证后重放，不重建容器，也不将任务修改过的文件与种子比较。被中断的 `starting` 日志会保留且不会
+自动重试。
+
+原生停止会先持久化代次屏障，再检查 Docker，并等待共享环境锁和任务工作区锁，以证明准备写入已静默。
+它只验证 Manager 所有的日志根目录，不读取或重写任务创建的后代文件；同时校验原生任务标签与挂载，
+并对现存候选执行停止/删除后重新检查。只有完成这些检查并确认状态为 `absent`、`exited` 或 `dead`，
+才会返回正向结果。Docker 状态不确定或身份不匹配时失败关闭，并保留屏障。停止会保留任务检出和状态卷；
+任务释放仍是单独的显式操作。`execution_environments_ready` 仍为 false，默认服务路由不会切换到原生任务执行。
+
 ### Runner Manager 配置
 
-准备功能**默认关闭**。在原始 Manager 上设置 `RUNNER_NATIVE_TASK_ROOT` 即可启用：
+准备功能**默认关闭**。原生启动还要求配置现有执行环境配置和 `RUNNER_NATIVE_TASK_HOST_ROOT`：
 
 | 变量 | 含义 |
 | --- | --- |
-| `RUNNER_NATIVE_TASK_ROOT` | 现存、归 Manager 所有且权限为 `0700` 的绝对目录，作为检出根目录。未设置或为空则关闭准备功能。 |
+| `RUNNER_NATIVE_TASK_ROOT` | 本地现存、归 Manager 所有且权限为 `0700` 的绝对检出根目录。未设置则关闭原生准备、启动和停止。 |
+| `RUNNER_NATIVE_TASK_HOST_ROOT` | Docker daemon 可见的规范化绝对路径；原生启动和验证现存停止候选时必需，绝不从其他根目录推断。 |
 
-若根目录是相对路径、不存在或不是目录，Manager 会拒绝启动；若根目录是符号链接、不属于本
-Manager 的有效 uid、或可被组/其他用户访问，则会拒绝每一次检出。未配置根目录的 Manager 对
-每次准备都返回固定的“不支持”失败，控制面将其记为 `uncertain` 任务——绝不会伪报成功。
-Manager 绝不会回退到工作区或规范根目录，检出路径只由环境与任务 UUID 推导：
+本地根目录保留原始路径并在使用时重新验证，因此符号链接别名会被拒绝。daemon 根不会被规范化，
+也不要求在 Manager 本地存在。两个根都不会回退到工作区或规范项目根目录；检出目录和 daemon
+挂载源只由可信环境与任务 UUID 推导：
 
 ```text
-<root>/<environment_uuid>/<task_uuid>/tree        已发布检出
-<root>/<environment_uuid>/<task_uuid>/journal.json 身份与阶段
+<本地根>/<environment_uuid>/<task_uuid>/tree
+<daemon根>/<environment_uuid>/<task_uuid>/tree -> /workspace
 ```
 
-新目录权限为 `0700`、新文件为 `0600`，全部以 `create_new` 创建，因此不会覆盖任何已存在的
-内容。暂存树在发布前会重新计算哈希并与已封存清单比对；`prepared` 日志使重复调用直接返回证明
-而不重写目录树。被中断的 `preparing` 日志会原样保留并需要显式协调：Manager 绝不会清空候选
-检出，也绝不会悄悄开始新的检出。
+新目录权限为 `0700`、新文件为 `0600`，全部以 `create_new` 创建。暂存树发布前会重新计算哈希并与
+已封存清单比对。`prepared` 日志会在任何 Docker 启动前原子推进到 `starting`；只有容器身份检查和
+状态/任务目录可写探测均成功后才推进到 `running`。被中断的 `preparing` 或 `starting` 日志会保留，
+并需要显式协调。`running` 重放会验证日志、容器身份和挂载，不会重写或重新计算任务修改过的文件。
 
 ## 本阶段的非目标
 
-没有写入者、没有检出、没有挂载、没有容器、也不派发作业。没有任何 API 会把任务
-标记为 `running`，不暴露状态卷或凭据，此处也不意味着租户隔离或真实容器执行。已封存
-快照只是控制面中的字节：它不派发、不准备、不挂载，也绝不触碰遗留的规范根目录。
+任务产物清理/导出、就绪激活和默认服务路由均不在本阶段范围内；停止不会自动释放任务。本阶段继续保持
+`execution_environments_ready` 为 false，也不切换默认服务路由。Manager 启动和停止测试使用 fake Docker CLI；
+不声称通过真实 Docker 或远程运行时验收。应用 API 不暴露状态卷、凭据、宿主路径、镜像、命令或 URL，
+任何操作都不会写入遗留规范根目录。

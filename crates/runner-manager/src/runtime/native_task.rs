@@ -1,9 +1,8 @@
-//! Native-task checkout materialization (issue 753 P2b).
+//! Manager-local native-task checkout and execution (issue 764 P2b).
 //!
-//! The original manager materializes one task's sealed seed into a private
-//! checkout under an explicit, operator-configured root. This module is
-//! **filesystem only**: it starts no container, publishes no port, launches no
-//! agent, and never touches a canonical project or its `.git`.
+//! Preparation materializes a sealed seed under an explicit local root. Native
+//! start mounts only that task tree and its environment state volume; runtime
+//! inputs remain manager-owned and no canonical project or `.git` is touched.
 //!
 //! ## Layout and trust
 //!
@@ -14,9 +13,9 @@
 //!
 //! Both identifiers are trusted UUIDs derived from the durable job, never from
 //! a request path or a subject. The root is an explicit
-//! `RUNNER_NATIVE_TASK_ROOT`; when it is absent, preparation is disabled and
-//! every call answers with a fixed unsupported failure, so there is no implicit
-//! fallback to a workspace or canonical root.
+//! `RUNNER_NATIVE_TASK_ROOT`; when it is absent, preparation stays disabled and
+//! native start fails closed. Neither path falls back to a workspace or canonical
+//! root.
 //!
 //! The root must be an existing directory owned by this manager's effective uid
 //! with an owner-only mode, and its whole chain must contain no symlink. Under
@@ -26,9 +25,10 @@
 //! available workspace dependency; this module says so rather than claiming the
 //! window is gone.
 //!
-//! See [`store`] for the ordered materialization and [`journal`] for the
-//! crash-recovery contract.
+//! See [`store`] for materialization and [`execution`] for task-aware start and
+//! stop transitions.
 
+mod execution;
 mod journal;
 mod paths;
 mod store;
@@ -41,4 +41,5 @@ mod test_journal;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use execution::{start_native_task, stop_native_task};
 pub(crate) use store::NativeTaskStore;

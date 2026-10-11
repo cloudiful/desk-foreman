@@ -148,6 +148,25 @@ pub(crate) async fn complete_assigned_manager_environment_job(
         return Ok(DurableJobCompletion::ForeignManager);
     }
 
+    if row.job_kind == "start_native_task"
+        || (row.job_kind == "stop" && row.native_task_id.is_some())
+    {
+        use crate::db::execution_environments::tasks::native_execution::NativeJobCompletion;
+        let outcome =
+            crate::db::execution_environments::tasks::native_execution::complete_native_task_job(
+                pool, manager_id, job_id, result,
+            )
+            .await?;
+        return Ok(match outcome {
+            NativeJobCompletion::Completed => DurableJobCompletion::Completed,
+            NativeJobCompletion::AlreadyTerminal => DurableJobCompletion::AlreadyTerminal,
+            NativeJobCompletion::NotCompletable => DurableJobCompletion::NotCompletable,
+            NativeJobCompletion::NotFound => DurableJobCompletion::NotFound,
+            NativeJobCompletion::ForeignManager => DurableJobCompletion::ForeignManager,
+            NativeJobCompletion::Inconsistent(reason) => DurableJobCompletion::Inconsistent(reason),
+        });
+    }
+
     // A preparation is not an environment operation: its ack is a typed proof
     // about the task's sealed seed, so it takes a DB-aware path rather than the
     // pure owner/container evaluation below.

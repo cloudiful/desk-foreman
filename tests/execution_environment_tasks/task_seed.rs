@@ -1,8 +1,8 @@
-//! Task seeding and read helpers for the native-task suite (issue 753 P1).
+//! Task seeding and read helpers for the native-task suite.
 //!
-//! Split from `db_fixtures.rs` so each file stays inside the size budget. P1
-//! has no dispatcher, so a release can only be exercised against a fixture
-//! that already proves an executed task — those seeds live here.
+//! Split from `db_fixtures.rs` so each file stays inside the size budget. The
+//! release fixtures create typed proof rows directly so fence failures can be
+//! isolated from the manager-poll workflow.
 
 use uuid::Uuid;
 
@@ -91,6 +91,7 @@ pub fn confirmed_stop() -> serde_json::Value {
     serde_json::json!({
         "outcome": "stop_confirmed",
         "observed_state": "exited",
-        "confirmed": true
+        "confirmed": true,
+        "preparation_quiescent": true
     })
 }

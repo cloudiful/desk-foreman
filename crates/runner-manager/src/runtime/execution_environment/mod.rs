@@ -37,7 +37,7 @@
 pub mod argv;
 #[cfg(test)]
 mod argv_tests;
-mod deadline;
+pub(crate) mod deadline;
 #[cfg(test)]
 mod deadline_tests;
 #[cfg(test)]
@@ -46,10 +46,10 @@ pub mod ensure;
 mod ensure_helpers;
 #[cfg(test)]
 mod ensure_tests;
-mod file_lock;
+pub(crate) mod file_lock;
 #[cfg(test)]
 mod file_lock_tests;
-mod inspect;
+pub(crate) mod inspect;
 #[cfg(test)]
 mod owner_tests;
 pub mod profile;
@@ -64,7 +64,7 @@ pub mod stop;
 mod stop_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
-mod tombstone;
+pub(crate) mod tombstone;
 #[cfg(test)]
 mod tombstone_tests;
 
@@ -91,3 +91,16 @@ pub const LABEL_OWNER: &str = "desk-foreman.owner";
 pub const LABEL_MANAGER: &str = "desk-foreman.manager";
 /// Docker label marking DF-managed containers.
 pub const LABEL_MANAGED: &str = "desk-foreman.managed";
+/// Docker label carrying the native task UUID.
+pub const LABEL_NATIVE_TASK_ID: &str = "df.native_task_id";
+/// Docker label carrying the bound workspace id.
+pub const LABEL_NATIVE_BINDING_ID: &str = "df.native_binding_id";
+/// Docker label carrying the sealed task manifest.
+pub const LABEL_NATIVE_SEED_SHA256: &str = "df.native_seed_sha256";
+/// Docker label carrying the task preparation generation.
+pub const LABEL_NATIVE_PREPARATION_GENERATION: &str = "df.native_preparation_generation";
+/// Fixed bind destination for a native task checkout.
+pub const NATIVE_TASK_WORKDIR: &str = "/workspace";
+
+#[cfg(test)]
+mod task_mount_tests;

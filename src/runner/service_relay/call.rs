@@ -42,7 +42,7 @@ pub(crate) struct CallInner {
     stream_id: RelayId,
     environment_id: Uuid,
     manager_id: i64,
-    epoch: u64,
+    generation: i64,
     events: mpsc::Sender<InboundEvent>,
     response: Mutex<Option<mpsc::Receiver<InboundEvent>>>,
     request: Mutex<BodyLengthGuard>,
@@ -64,7 +64,7 @@ impl RelayCall {
         stream_id: RelayId,
         environment_id: Uuid,
         manager_id: i64,
-        epoch: u64,
+        generation: i64,
         events: mpsc::Sender<InboundEvent>,
         response: mpsc::Receiver<InboundEvent>,
     ) -> Result<Self, RelayCallError> {
@@ -76,7 +76,7 @@ impl RelayCall {
                 stream_id,
                 environment_id,
                 manager_id,
-                epoch,
+                generation,
                 events,
                 response: Mutex::new(Some(response)),
                 request: Mutex::new(
@@ -142,11 +142,11 @@ impl RelayCall {
         self.inner.terminal.subscribe()
     }
 
-    /// True while no committed lifecycle mutation has cancelled this
-    /// environment since the stream was admitted.
+    /// True while the admitted generation remains above the committed
+    /// cancellation high-water mark for this environment.
     pub fn epoch_is_current(&self) -> bool {
         self.inner.registry.upgrade().is_some_and(|registry| {
-            registry.epoch_matches(self.inner.environment_id, self.inner.epoch)
+            registry.generation_is_current(self.inner.environment_id, self.inner.generation)
         })
     }
 

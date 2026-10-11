@@ -306,6 +306,7 @@ mod tests {
             docker_host: None,
             runtime_class: None,
             native_task_root: None,
+            native_task_host_root: None,
         }
     }
 

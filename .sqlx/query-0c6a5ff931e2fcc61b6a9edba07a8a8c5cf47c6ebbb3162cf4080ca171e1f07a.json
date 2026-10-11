@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Read the active task anchor after its caller holds the environment row lock.\nSELECT active_native_task_id IS NOT NULL\nFROM execution_environments\nWHERE environment_id = $1\n  AND application_id = $2;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "?column?",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0c6a5ff931e2fcc61b6a9edba07a8a8c5cf47c6ebbb3162cf4080ca171e1f07a"
+}

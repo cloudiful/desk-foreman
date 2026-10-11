@@ -23,7 +23,6 @@ use runner_protocol::service_relay::{MAX_BODY_BYTES, admit_stream};
 pub(super) struct Admission {
     pub(super) tunnel: super::tunnel::TunnelHandle,
     pub(super) lease: runner_protocol::service_relay::RelayId,
-    pub(super) epoch: u64,
     pub(super) environment_streams: usize,
     pub(super) manager_streams: usize,
 }
@@ -36,6 +35,13 @@ pub(super) fn check_open(
     request: &StreamRequest,
 ) -> Result<Admission, RelayAdmissionError> {
     super::registry_state::prune_dead_routes(state);
+    if state
+        .cancelled_through_generation
+        .get(&request.environment_id)
+        .is_some_and(|generation| request.generation <= *generation)
+    {
+        return Err(RelayAdmissionError::EpochChanged);
+    }
     let (tunnel, lease) = match state.tunnels.get(&request.manager_id) {
         Some(slot) if !slot.handle.is_closed() => (slot.handle.clone(), slot.lease),
         Some(_) => {
@@ -66,15 +72,9 @@ pub(super) fn check_open(
     if request.declared_body_length > MAX_BODY_BYTES {
         return Err(RelayAdmissionError::BodyTooLarge);
     }
-    let epoch = state
-        .environment_epochs
-        .get(&request.environment_id)
-        .copied()
-        .unwrap_or(0);
     Ok(Admission {
         tunnel,
         lease,
-        epoch,
         environment_streams,
         manager_streams,
     })

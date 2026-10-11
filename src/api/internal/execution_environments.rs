@@ -21,6 +21,7 @@ pub use tasks::{
     admit_native_task_handler, cancel_native_task_handler, find_native_task_handler,
     find_native_task_preparation_handler, find_native_task_seed_handler,
     prepare_native_task_handler, release_native_task_handler, seed_native_task_handler,
+    start_native_task_handler, stop_native_task_handler,
 };
 pub use types::{
     EnsureExecutionEnvironmentRequest, InvalidateExecutionEnvironmentRequest,

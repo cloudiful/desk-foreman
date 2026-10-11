@@ -27,9 +27,11 @@ pub use store::{
     find_execution_environment_by_identity, invalidate_execution_environment,
 };
 pub use tasks::{
-    NATIVE_TASK_ACTIVE_STATES, NATIVE_TASK_STATES, NativeTask, NativeTaskError, NativeTaskRequest,
-    PreparationDescriptor, PrepareError, PrepareRequest, admit_native_task, cancel_native_task,
-    find_native_task, find_native_task_preparation, prepare_native_task, release_native_task,
+    NATIVE_TASK_ACTIVE_STATES, NATIVE_TASK_STATES, NativeTask, NativeTaskError,
+    NativeTaskOperationDescriptor, NativeTaskRequest, PreparationDescriptor, PrepareError,
+    PrepareRequest, TaskExecutionError, TaskExecutionRequest, admit_native_task,
+    cancel_native_task, find_native_task, find_native_task_preparation, prepare_native_task,
+    release_native_task, start_native_task, stop_native_task,
 };
 pub use types::{
     EXECUTION_ENVIRONMENT_INITIAL_STATE, EXECUTION_ENVIRONMENT_INVALIDATED_STATE,

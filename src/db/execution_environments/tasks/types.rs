@@ -19,20 +19,22 @@ use uuid::Uuid;
 ///
 /// Exactly the set covered by the partial unique indexes, so the Rust guard
 /// and the database can never disagree about what "active" means.
-pub const NATIVE_TASK_ACTIVE_STATES: [&str; 6] = [
+pub const NATIVE_TASK_ACTIVE_STATES: [&str; 7] = [
     "admitted",
     "preparing",
     "prepared",
+    "starting",
     "running",
     "stopping",
     "uncertain",
 ];
 
 /// Every state a task row may hold.
-pub const NATIVE_TASK_STATES: [&str; 7] = [
+pub const NATIVE_TASK_STATES: [&str; 8] = [
     "admitted",
     "preparing",
     "prepared",
+    "starting",
     "running",
     "stopping",
     "uncertain",
@@ -60,6 +62,8 @@ pub struct NativeTask {
     /// The durable preparation job that materializes this task's checkout,
     /// once one is enqueued. `None` until preparation is scheduled.
     pub prepare_job_id: Option<Uuid>,
+    pub start_job_id: Option<Uuid>,
+    pub stop_job_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub terminal_at: Option<DateTime<Utc>>,
@@ -255,6 +259,7 @@ mod tests {
                 "admitted",
                 "preparing",
                 "prepared",
+                "starting",
                 "running",
                 "stopping",
                 "uncertain"

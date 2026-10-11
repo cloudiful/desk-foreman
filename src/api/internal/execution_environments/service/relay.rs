@@ -5,13 +5,13 @@
 //! 1. bounds are checked before anything is opened;
 //! 2. the owner-scoped row is read and the fences checked;
 //! 3. the stream is admitted to the manager's tunnel;
-//! 4. the row is read *again* and the stream's epoch is re-checked;
+//! 4. the row is read *again* and the stream's generation cutoff is re-checked;
 //! 5. only then is the opening frame written.
 //!
 //! Steps 3 and 4 together close the race where a stop or invalidation
-//! commits between the caller's read and the tunnel write: either the epoch
-//! moved, or the second read disagrees, and the stream is cancelled instead
-//! of opened. The database is re-read rather than trusted because the
+//! commits between the caller's read and the tunnel write: either the
+//! generation cutoff moved, or the second read disagrees, and the stream is
+//! cancelled instead of opened. The database is re-read rather than trusted because the
 //! registry is a cache, not the lifecycle authority.
 
 use std::sync::Arc;
@@ -49,6 +49,7 @@ pub async fn relay_service_request(
         .open_stream(StreamRequest {
             stream_id: RelayId::from_bytes(Uuid::new_v4().into_bytes()),
             environment_id,
+            generation: presented_generation,
             manager_id,
             declared_body_length: bounds.body_length,
         })
@@ -102,10 +103,10 @@ pub async fn relay_service_request(
     relay_response(call, responses).await
 }
 
-/// Read the owner-scoped row once more and re-check the admitted epoch.
+/// Read the owner-scoped row once more and re-check the admitted generation.
 ///
-/// Both halves matter: the epoch catches a committed mutation that cancelled
-/// this stream already, and the row catches one the registry has not seen.
+/// The cutoff catches a committed mutation already seen by the registry, and
+/// the row catches one whose cancellation callback has not run yet.
 async fn recheck_fence(
     pool: &PgPool,
     application_id: i64,

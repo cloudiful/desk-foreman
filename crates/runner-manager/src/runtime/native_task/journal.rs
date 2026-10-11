@@ -28,6 +28,10 @@ pub(crate) enum JournalPhase {
     Preparing,
     /// The tree is published and may be replayed as a proof.
     Prepared,
+    /// A container start may have been attempted; never launch automatically.
+    Starting,
+    /// The running container was inspected and both writable paths were probed.
+    Running,
 }
 
 /// The durable identity of one task checkout.
@@ -49,14 +53,18 @@ impl Journal {
     /// True when this journal describes exactly the same materialization as
     /// `other`, ignoring the phase.
     pub(crate) fn same_identity(&self, other: &Journal) -> bool {
+        self.same_runtime_identity(other)
+            && self.file_count == other.file_count
+            && self.total_bytes == other.total_bytes
+    }
+
+    pub(crate) fn same_runtime_identity(&self, other: &Journal) -> bool {
         self.version == other.version
             && self.environment_id == other.environment_id
             && self.generation == other.generation
             && self.task_id == other.task_id
             && self.workspace_binding_id == other.workspace_binding_id
             && self.manifest_sha256 == other.manifest_sha256
-            && self.file_count == other.file_count
-            && self.total_bytes == other.total_bytes
     }
 }
 
@@ -93,17 +101,41 @@ pub(crate) fn write_preparing(path: &Path, journal: &Journal, uid: u32) -> anyho
     sync_parent(path)
 }
 
-/// Atomically replace the validated `preparing` journal with its `prepared`
-/// identity. Unknown, hard-linked or changed journals are never overwritten.
+/// Atomically replace the validated `preparing` journal with `prepared`.
 pub(crate) fn write_prepared(path: &Path, journal: &Journal, uid: u32) -> anyhow::Result<()> {
-    if journal.phase != JournalPhase::Prepared {
-        bail!("a completed native task journal must use the prepared phase");
+    transition(path, JournalPhase::Preparing, journal, uid)
+}
+
+/// Durably mark a prepared task before any container command can run.
+pub(crate) fn write_starting(path: &Path, journal: &Journal, uid: u32) -> anyhow::Result<()> {
+    transition(path, JournalPhase::Prepared, journal, uid)
+}
+
+/// Publish running only after inspect and both non-root write probes succeed.
+pub(crate) fn write_running(path: &Path, journal: &Journal, uid: u32) -> anyhow::Result<()> {
+    transition(path, JournalPhase::Starting, journal, uid)
+}
+
+fn transition(
+    path: &Path,
+    expected_phase: JournalPhase,
+    journal: &Journal,
+    uid: u32,
+) -> anyhow::Result<()> {
+    let allowed = matches!(
+        (expected_phase, journal.phase),
+        (JournalPhase::Preparing, JournalPhase::Prepared)
+            | (JournalPhase::Prepared, JournalPhase::Starting)
+            | (JournalPhase::Starting, JournalPhase::Running)
+    );
+    if !allowed {
+        bail!("the native task journal transition is not permitted");
     }
     let Some(current) = read(path, uid)? else {
-        bail!("the preparing native task journal is missing");
+        bail!("the native task journal is missing before transition");
     };
-    if current.phase != JournalPhase::Preparing || !current.same_identity(journal) {
-        bail!("the native task journal changed before publication");
+    if current.phase != expected_phase || !current.same_identity(journal) {
+        bail!("the native task journal changed before transition");
     }
 
     let bytes = serde_json::to_vec(journal)
@@ -128,17 +160,17 @@ pub(crate) fn write_prepared(path: &Path, journal: &Journal, uid: u32) -> anyhow
     drop(file);
 
     let Some(current) = read(path, uid)? else {
-        bail!("the preparing native task journal disappeared before publication");
+        bail!("the native task journal disappeared before transition");
     };
-    if current.phase != JournalPhase::Preparing || !current.same_identity(journal) {
-        bail!("the native task journal changed before publication");
+    if current.phase != expected_phase || !current.same_identity(journal) {
+        bail!("the native task journal changed before transition");
     }
     fs::rename(&staging, path)
         .map_err(|error| anyhow::anyhow!("failed to publish the native task journal: {error}"))?;
     let Some(published) = read(path, uid)? else {
-        bail!("the prepared native task journal is missing after publication");
+        bail!("the transitioned native task journal is missing after publication");
     };
-    if published.phase != JournalPhase::Prepared || !published.same_identity(journal) {
+    if published.phase != journal.phase || !published.same_identity(journal) {
         bail!("the published native task journal does not match its identity");
     }
     sync_parent(path)

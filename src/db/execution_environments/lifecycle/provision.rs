@@ -13,8 +13,8 @@ use crate::db::execution_environment_jobs::job_token_is_valid;
 
 use super::LifecycleError;
 use super::support::{
-    NewLifecycleJob, expire_overdue_jobs, find_job_by_token, insert_job, lock_environment,
-    select_manager,
+    NewLifecycleJob, ensure_no_active_native_task, expire_overdue_jobs, find_job_by_token,
+    insert_job, lock_environment, select_manager,
 };
 use super::transitions::provision_update;
 use super::types::{EnvironmentOperationDescriptor, environment_descriptor, operation_descriptor};
@@ -42,7 +42,8 @@ pub async fn provision_execution_environment(
     if let Some(existing) =
         find_job_by_token(&mut tx, application_id, environment_id, operation_token).await?
     {
-        let identical = existing.job_kind == "ensure"
+        let identical = existing.native_task_id.is_none()
+            && existing.job_kind == "ensure"
             && Some(existing.assigned_manager_id) == environment.assigned_manager_id
             && Some(existing.target_generation) == environment.container_generation;
         if !identical {
@@ -58,13 +59,14 @@ pub async fn provision_execution_environment(
         ));
     }
 
-    if environment.container_generation.is_some() {
-        return Err(LifecycleError::AlreadyProvisioned);
-    }
     if expected_generation != environment.generation {
         return Err(LifecycleError::StaleGeneration {
             current: environment.generation,
         });
+    }
+    ensure_no_active_native_task(&mut tx, application_id, environment_id).await?;
+    if environment.container_generation.is_some() {
+        return Err(LifecycleError::AlreadyProvisioned);
     }
 
     // Bind a manager only on first provision; never reassign an existing

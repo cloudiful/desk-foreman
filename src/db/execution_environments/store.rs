@@ -31,6 +31,8 @@ pub enum InvalidateOutcome {
     Stale { current: ExecutionEnvironment },
     /// No row for this application and environment id.
     NotFound,
+    /// An active native task owns the environment.
+    NativeTaskActive,
 }
 
 /// Idempotent ensure for one `(application_id, external_user_id)` pair.
@@ -132,6 +134,24 @@ pub async fn invalidate_execution_environment(
     environment_id: Uuid,
     expected_generation: i64,
 ) -> anyhow::Result<InvalidateOutcome> {
+    let mut tx = pool.begin().await?;
+    let active_task = sqlx::query_file_scalar!(
+        "src/sql/execution_environments/lock_environment_for_invalidation.sql",
+        environment_id,
+        application_id,
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .flatten();
+    let Some(active_task) = active_task else {
+        tx.commit().await?;
+        return Ok(InvalidateOutcome::NotFound);
+    };
+    if active_task {
+        tx.commit().await?;
+        return Ok(InvalidateOutcome::NativeTaskActive);
+    }
+
     let updated: Option<ExecutionEnvironment> = sqlx::query_file_as!(
         ExecutionEnvironment,
         "src/sql/execution_environments/invalidate_execution_environment.sql",
@@ -139,8 +159,9 @@ pub async fn invalidate_execution_environment(
         application_id,
         expected_generation,
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     if let Some(row) = updated {
         return Ok(InvalidateOutcome::Invalidated(row));

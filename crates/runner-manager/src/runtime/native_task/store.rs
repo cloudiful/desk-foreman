@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use tokio::sync::OwnedMutexGuard;
+
 use anyhow::bail;
 use runner_protocol::{NativeTaskPreparedResult, PrepareNativeTaskRequest, SeedBundle};
 
@@ -30,6 +32,16 @@ pub(crate) struct NativeTaskStore {
     root: Option<PathBuf>,
     uid_source: UidSource,
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+}
+
+/// A task workspace held under the store's per-task mutex.
+///
+/// The filesystem layout stays private to this backend module; callers can
+/// inspect or transition the journal only through the checked operations below.
+pub(crate) struct LockedNativeTaskWorkspace {
+    layout: TaskLayout,
+    task_dir_present: bool,
+    _guard: OwnedMutexGuard<()>,
 }
 
 impl NativeTaskStore {
@@ -125,6 +137,14 @@ impl NativeTaskStore {
                     layout.task_dir.display()
                 );
             }
+            Some(existing)
+                if matches!(
+                    existing.phase,
+                    JournalPhase::Starting | JournalPhase::Running
+                ) =>
+            {
+                bail!("a native task checkout cannot be rematerialized after execution began")
+            }
             Some(_) => bail!("the native task journal has an unknown phase"),
             None => {}
         }
@@ -150,6 +170,81 @@ impl NativeTaskStore {
         Ok(proof(request))
     }
 
+    pub(crate) fn root_configured(&self) -> bool {
+        self.root.is_some()
+    }
+
+    pub(crate) fn effective_uid(&self) -> anyhow::Result<u32> {
+        self.uid_source.effective_uid()
+    }
+
+    /// Lock and validate one already-materialized task workspace.
+    pub(crate) async fn lock_workspace(
+        &self,
+        environment_id: &str,
+        task_id: uuid::Uuid,
+        uid: u32,
+    ) -> anyhow::Result<LockedNativeTaskWorkspace> {
+        let root = self
+            .root
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!(UNSUPPORTED))?;
+        paths::validate_root(root, uid)?;
+        let layout = paths::layout(root, environment_id, task_id)?;
+        let guard = self.lock_for(&layout.task_dir).lock_owned().await;
+        paths::validate_private_dir(&layout.environment_dir, uid)?;
+        paths::validate_private_dir(&layout.task_dir, uid)?;
+        Ok(LockedNativeTaskWorkspace {
+            layout,
+            task_dir_present: true,
+            _guard: guard,
+        })
+    }
+
+    /// Lock a task path for stop without creating missing workspace directories.
+    pub(crate) async fn lock_workspace_for_stop(
+        &self,
+        environment_id: &str,
+        task_id: uuid::Uuid,
+        uid: u32,
+    ) -> anyhow::Result<LockedNativeTaskWorkspace> {
+        let root = self
+            .root
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!(UNSUPPORTED))?;
+        paths::validate_root(root, uid)?;
+        let layout = paths::layout(root, environment_id, task_id)?;
+        let guard = self.lock_for(&layout.task_dir).lock_owned().await;
+
+        match std::fs::symlink_metadata(&layout.environment_dir) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(LockedNativeTaskWorkspace {
+                    layout,
+                    task_dir_present: false,
+                    _guard: guard,
+                });
+            }
+            Err(error) => {
+                bail!("failed to inspect the native task environment directory: {error}");
+            }
+            Ok(_) => paths::validate_private_dir(&layout.environment_dir, uid)?,
+        }
+
+        let task_dir_present = match std::fs::symlink_metadata(&layout.task_dir) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => bail!("failed to inspect the native task directory: {error}"),
+            Ok(_) => {
+                paths::validate_private_dir(&layout.task_dir, uid)?;
+                true
+            }
+        };
+        Ok(LockedNativeTaskWorkspace {
+            layout,
+            task_dir_present,
+            _guard: guard,
+        })
+    }
+
     /// Reserve the per-task serialization mutex.
     fn lock_for(&self, task_dir: &Path) -> Arc<tokio::sync::Mutex<()>> {
         let key = task_dir.to_string_lossy().to_string();
@@ -159,6 +254,74 @@ impl NativeTaskStore {
                 .entry(key)
                 .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
         )
+    }
+}
+
+impl LockedNativeTaskWorkspace {
+    /// Validate identity and only the top-level manager-owned roots for stop.
+    /// Descendants may contain task-written files and are never traversed.
+    pub(crate) fn stop_journal(
+        &self,
+        expected: &Journal,
+        uid: u32,
+    ) -> anyhow::Result<Option<Journal>> {
+        if !self.task_dir_present {
+            return Ok(None);
+        }
+        let existing = journal::read(&self.layout.journal_path, uid)?
+            .ok_or_else(|| anyhow::anyhow!("native task workspace exists without its journal"))?;
+        if !existing.same_runtime_identity(expected)
+            || existing.file_count as usize > runner_protocol::MAX_SEED_ENTRIES
+            || existing.total_bytes as usize > runner_protocol::MAX_SEED_TOTAL_BYTES
+        {
+            bail!("native task stop journal identity does not match the stop job");
+        }
+        validate_owned_directory_if_present(&self.layout.tree_dir, uid)?;
+        validate_owned_directory_if_present(&self.layout.staging_dir, uid)?;
+        Ok(Some(existing))
+    }
+
+    pub(crate) fn verified_journal(&self, expected: &Journal, uid: u32) -> anyhow::Result<Journal> {
+        let existing = journal::read(&self.layout.journal_path, uid)?
+            .ok_or_else(|| anyhow::anyhow!("native task preparation journal is missing"))?;
+        if !existing.same_runtime_identity(expected)
+            || existing.file_count as usize > runner_protocol::MAX_SEED_ENTRIES
+            || existing.total_bytes as usize > runner_protocol::MAX_SEED_TOTAL_BYTES
+        {
+            bail!("native task preparation journal identity does not match the start job");
+        }
+        Ok(existing)
+    }
+
+    pub(crate) fn verify_prepared_tree(&self, journal: &Journal, uid: u32) -> anyhow::Result<()> {
+        let snapshot = tree::snapshot_published_tree(&self.layout.tree_dir, uid)?;
+        if snapshot.manifest_sha256 != journal.manifest_sha256
+            || snapshot.file_count != journal.file_count
+            || snapshot.total_bytes != journal.total_bytes
+        {
+            bail!("prepared native task tree no longer matches its sealed manifest");
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_running_tree(&self, uid: u32) -> anyhow::Result<()> {
+        paths::validate_owned_tree_root(&self.layout.tree_dir, uid)
+    }
+
+    pub(crate) fn mark_starting(&self, journal: &Journal, uid: u32) -> anyhow::Result<()> {
+        journal::write_starting(&self.layout.journal_path, journal, uid)
+    }
+
+    pub(crate) fn mark_running(&self, journal: &Journal, uid: u32) -> anyhow::Result<()> {
+        journal::write_running(&self.layout.journal_path, journal, uid)
+    }
+}
+
+fn validate_owned_directory_if_present(path: &Path, uid: u32) -> anyhow::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => bail!("failed to inspect native task metadata directory: {error}"),
+        Ok(_) => paths::validate_private_dir(path, uid),
     }
 }
 

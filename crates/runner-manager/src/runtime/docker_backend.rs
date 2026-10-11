@@ -2,7 +2,9 @@ use desk_foreman::runner::RunnerFuture;
 use runner_protocol::{
     CommandOutput, EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest,
     NativeTaskPreparedResult, PrepareNativeTaskRequest, RunnerCommandRequest, RunnerOwner,
-    RunnerShellRequest, SeedBundle, StopExecutionEnvironmentAck, StopExecutionEnvironmentRequest,
+    RunnerShellRequest, SeedBundle, StartNativeTaskRequest, StartNativeTaskResult,
+    StopExecutionEnvironmentAck, StopExecutionEnvironmentRequest, StopNativeTaskRequest,
+    StopNativeTaskResult, execution_environment as protocol,
 };
 
 use super::{
@@ -57,6 +59,26 @@ impl RunnerBackend for DockerRunnerBackend {
         seed: SeedBundle,
     ) -> RunnerFuture<'a, anyhow::Result<NativeTaskPreparedResult>> {
         Box::pin(async move { self.prepare_native_task_checkout(request, seed).await })
+    }
+
+    fn start_native_task<'a>(
+        &'a self,
+        request: StartNativeTaskRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<StartNativeTaskResult>> {
+        Box::pin(async move {
+            let profile = ExecutionEnvironmentProfile::from_env_or_default();
+            super::start_native_task(self, &profile, request).await
+        })
+    }
+
+    fn stop_native_task<'a>(
+        &'a self,
+        request: StopNativeTaskRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<StopNativeTaskResult>> {
+        Box::pin(async move {
+            let profile = ExecutionEnvironmentProfile::from_env_or_default();
+            super::stop_native_task(self, &profile, request).await
+        })
     }
 
     fn run_command<'a>(
@@ -169,16 +191,68 @@ impl RunnerBackend for DockerRunnerBackend {
 }
 
 impl DockerRunnerBackend {
-    /// Materialize one task checkout through the shared filesystem store.
-    ///
-    /// Docker is not touched: P2b is a filesystem-only preparation, and the
-    /// privileged launch path is a later phase. A manager with no trusted root
-    /// fails here with the fixed unsupported message.
+    /// Run one filesystem-only preparation under the shared environment fence.
     pub(crate) async fn prepare_native_task_checkout(
         &self,
         request: PrepareNativeTaskRequest,
         seed: SeedBundle,
     ) -> anyhow::Result<NativeTaskPreparedResult> {
-        self.native_tasks.materialize(&request, &seed).await
+        let profile = ExecutionEnvironmentProfile::from_env_or_default();
+        self.prepare_native_task_checkout_with_profile(&profile, request, seed)
+            .await
+    }
+
+    pub(crate) async fn prepare_native_task_checkout_with_profile(
+        &self,
+        profile: &ExecutionEnvironmentProfile,
+        request: PrepareNativeTaskRequest,
+        seed: SeedBundle,
+    ) -> anyhow::Result<NativeTaskPreparedResult> {
+        if !self.native_tasks.root_configured() {
+            return self.native_tasks.materialize(&request, &seed).await;
+        }
+        let (environment_id, generation) =
+            protocol::validate_environment_owner(&request.owner).map_err(anyhow::Error::msg)?;
+        let state_dir = profile.ensure_state_dir()?;
+        let deadline = profile.operation_deadline()?;
+        deadline.remaining_ms()?;
+        let barrier = super::execution_environment::tombstone::TombstoneStore::open(
+            state_dir,
+            environment_id,
+        )?;
+        let environment_lock = self.environment_runner_lock(environment_id);
+        let _environment_guard =
+            tokio::time::timeout(deadline.remaining()?, environment_lock.lock())
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!("timed out waiting for the native task preparation lock")
+                })?;
+        deadline.remaining_ms()?;
+        let file_lock = super::execution_environment::file_lock::EnvFileLock::acquire(
+            &barrier.lock_path(),
+            super::execution_environment::file_lock::lock_holder_token(&self.manager_id),
+        )?;
+
+        let outcome = async {
+            deadline.remaining_ms()?;
+            let current = barrier.load()?;
+            super::execution_environment::tombstone::ensure_generation_admissible(
+                &current, generation,
+            )?;
+            barrier.save(super::execution_environment::tombstone::advance_high_water(
+                current, generation,
+            ))?;
+            deadline.remaining_ms()?;
+            let prepared = tokio::time::timeout(
+                deadline.remaining()?,
+                self.native_tasks.materialize(&request, &seed),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("timed out waiting for native task preparation"))??;
+            deadline.remaining_ms()?;
+            Ok(prepared)
+        }
+        .await;
+        super::execution_environment::file_lock::release_and_finish(file_lock, outcome)
     }
 }

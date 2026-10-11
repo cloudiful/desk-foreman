@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- No stop proof exists after failure, false quiescence or expiry.\nUPDATE execution_environments\nSET state = 'uncertain',\n    stop_proof_job_id = NULL,\n    stop_proof_generation = NULL,\n    last_active_at = NOW(),\n    updated_at = NOW()\nWHERE environment_id = $1\n  AND application_id = $2\n  AND active_native_task_id = $3\n  AND container_generation = $4\n  AND state IN ('stopping', 'uncertain')\nRETURNING environment_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "environment_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "environment_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bca0a6c90b7c495ae9999b2ae37f0fcf2d28b58dcbfb15c698ff979b2b49ce63"
+}

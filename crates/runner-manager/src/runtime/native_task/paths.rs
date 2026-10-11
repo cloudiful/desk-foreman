@@ -165,6 +165,23 @@ pub(crate) fn validate_private_dir(directory: &Path, uid: u32) -> anyhow::Result
     Ok(())
 }
 
+/// Validate a published task tree root after execution may have edited it.
+///
+/// Replays check only this owned mount root and the journal; task-created
+/// descendants are deliberately not compared with the original seed.
+pub(crate) fn validate_owned_tree_root(directory: &Path, uid: u32) -> anyhow::Result<()> {
+    let metadata = fs::symlink_metadata(directory)
+        .map_err(|error| anyhow::anyhow!("failed to inspect the native task tree root: {error}"))?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.uid() != uid
+        || metadata.permissions().mode() & 0o7777 != TREE_DIR_MODE
+    {
+        bail!("native task tree root is not an owned private directory");
+    }
+    Ok(())
+}
+
 /// Refuse a path that is not a regular, manager-owned private file.
 ///
 /// A hard link is also refused: `nlink` greater than one means the inode is

@@ -7,6 +7,7 @@ SET
 WHERE environment_id = $1
   AND application_id = $2
   AND generation = $3
+  AND active_native_task_id IS NULL
 RETURNING
     environment_id,
     application_id,

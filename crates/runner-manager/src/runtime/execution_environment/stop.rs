@@ -146,7 +146,7 @@ pub async fn stop_execution_environment(
 /// and force removal consume the remaining aggregate budget. Missing at
 /// any step is quiescent. Every command reuses the bounded command runner,
 /// so a deadline kills and reaps the Docker CLI instead of orphaning it.
-async fn stop_and_remove_within(
+pub(crate) async fn stop_and_remove_within(
     backend: &DockerRunnerBackend,
     container_name: &str,
     profile: &ExecutionEnvironmentProfile,

@@ -38,6 +38,7 @@ fn request(manager_id: i64, environment_id: Uuid) -> StreamRequest {
     StreamRequest {
         stream_id: RelayId::from_bytes(Uuid::new_v4().into_bytes()),
         environment_id,
+        generation: 1,
         manager_id,
         declared_body_length: 0,
     }
@@ -47,6 +48,7 @@ fn request_with_id(manager_id: i64, environment_id: Uuid, stream_id: RelayId) ->
     StreamRequest {
         stream_id,
         environment_id,
+        generation: 1,
         manager_id,
         declared_body_length: 0,
     }
@@ -122,26 +124,33 @@ fn a_committed_cancellation_stops_only_its_own_environment() {
     let stopped_call = registry.open_stream(request(7, stopped)).unwrap();
     let kept_call = registry.open_stream(request(8, kept)).unwrap();
 
-    assert_eq!(registry.cancel_environment(stopped), 1);
+    assert_eq!(registry.cancel_environment_through(stopped, 1), 1);
     assert!(stopped_call.is_cancelled());
     assert!(!kept_call.is_cancelled(), "another tenant keeps serving");
     assert_eq!(
-        registry.cancel_environment(stopped),
+        registry.cancel_environment_through(stopped, 1),
         0,
         "a second cancellation must not re-signal the same stream"
     );
     drop(stopped_call);
-    assert!(registry.open_stream(request(7, stopped)).is_ok());
+    assert_eq!(
+        registry.open_stream(request(7, stopped)).err(),
+        Some(RelayAdmissionError::EpochChanged),
+        "the cancelled generation stays fenced after the old route drops"
+    );
+    let mut successor = request(7, stopped);
+    successor.generation = 2;
+    assert!(registry.open_stream(successor).is_ok());
 }
 
 #[test]
-fn a_cancellation_advances_the_epoch_but_multiplex_stays_open() {
+fn a_generation_cancellation_fences_old_streams_but_multiplex_stays_open() {
     let registry = registry();
     let (_lease, _handle, _open) = attach(&registry, 7);
     let environment_id = Uuid::new_v4();
     let call = registry.open_stream(request(7, environment_id)).unwrap();
     assert!(call.epoch_is_current());
-    registry.cancel_environment(environment_id);
+    registry.cancel_environment_through(environment_id, 1);
     assert!(
         !call.epoch_is_current(),
         "a committed mutation must be visible to the stream it cancelled"
@@ -149,10 +158,12 @@ fn a_cancellation_advances_the_epoch_but_multiplex_stays_open() {
     // Multiplex: the cancelled stream still occupies its slot until its
     // ticket is released, but a second stream is admitted alongside it —
     // responses correlate by identifier, never by tunnel-singleton slot.
-    let next = registry.open_stream(request(7, environment_id)).unwrap();
+    let mut successor = request(7, environment_id);
+    successor.generation = 2;
+    let next = registry.open_stream(successor).unwrap();
     assert!(
         next.epoch_is_current(),
-        "a registration made after the mutation captures the new epoch"
+        "a registration above the committed cutoff remains current"
     );
     drop(call);
     drop(next);

@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Persist a native start candidate without claiming that it is already running.\nUPDATE execution_environments\nSET state = 'starting',\n    container_generation = $4,\n    last_active_at = NOW(),\n    updated_at = NOW()\nWHERE environment_id = $1\n  AND application_id = $2\n  AND active_native_task_id = $3\n  AND generation = $4\n  AND container_generation IS NOT DISTINCT FROM $5\n  AND state IN ('absent', 'replaced')\nRETURNING environment_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "environment_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "environment_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7d75b803863167483adedc1de1d3fffb1a00b9af78c9bc76fe543db13f9691dc"
+}

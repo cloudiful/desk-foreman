@@ -14,6 +14,11 @@ use desk_foreman::runner::RunnerService;
 use reqwest::Client;
 use runner_protocol::{RunnerJob, RunnerJobResult};
 
+#[path = "native_execution.rs"]
+mod native_execution;
+#[cfg(test)]
+pub(crate) use native_execution::ProfiledDockerBackend;
+
 use super::execute::execute_job_inner;
 use super::native_task;
 use crate::config::SharedRunnerManagerConfig;
@@ -37,6 +42,8 @@ pub(super) async fn execute_job(
             (guard.auth_token.clone(), guard.manager_id.clone())
         };
         native_task::execute_job(client, base_url, &token, &manager_id, backend, &job).await
+    } else if matches!(job.kind.as_str(), "start_native_task" | "stop_native_task") {
+        native_execution::execute_job(backend, &job).await
     } else {
         execute_job_inner(runner, config, gate, &job.kind, job.payload).await
     };

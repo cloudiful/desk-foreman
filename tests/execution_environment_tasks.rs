@@ -87,6 +87,27 @@ mod prepare_race_cases;
 #[path = "execution_environment_tasks/prepare_token_cases.rs"]
 mod prepare_token_cases;
 
+#[path = "execution_environment_tasks/native_execution_helpers.rs"]
+mod native_execution_helpers;
+
+#[path = "execution_environment_tasks/native_execution_cases.rs"]
+mod native_execution_cases;
+
+#[path = "execution_environment_tasks/reviewer_relay_cutoff_cases.rs"]
+mod reviewer_relay_cutoff_cases;
+
+#[path = "execution_environment_tasks/reviewer_native_historical_cases.rs"]
+mod reviewer_native_historical_cases;
+
+#[path = "execution_environment_tasks/reviewer_native_atomic_cases.rs"]
+mod reviewer_native_atomic_cases;
+
+#[path = "execution_environment_tasks/reviewer_native_replay_cases.rs"]
+mod reviewer_native_replay_cases;
+
+#[path = "execution_environment_tasks/native_job_constraint_cases.rs"]
+mod native_job_constraint_cases;
+
 #[path = "execution_environment_tasks/lease_helpers.rs"]
 mod lease_helpers;
 

@@ -161,6 +161,7 @@ pub(super) async fn complete(
         outcome: "task_prepared".to_string(),
         observed_state: None,
         confirmed: None,
+        preparation_quiescent: None,
     })?;
     let completed = complete_job(
         &mut locked.tx,
@@ -223,6 +224,7 @@ pub(super) async fn fail(
         outcome: "task_prepared_uncertain".to_string(),
         observed_state: None,
         confirmed: None,
+        preparation_quiescent: None,
     })?;
     let completed = complete_job(
         &mut locked.tx,

@@ -1,9 +1,8 @@
 //! Registry lifecycle cancellation (issue 749 P2d).
 //!
-//! Extracted from `registry.rs` so the registry never grows past its size
-//! budget when multiplex rules change. Holds only the committed-mutation
-//! cancellation paths — environment cancel, epoch check, and tunnel-loss
-//! fail — which all share the ticket-weak-reference discipline.
+//! A committed mutation fences only the generations it supersedes. The
+//! per-environment high-water mark also makes delayed cancellation callbacks
+//! safe for streams admitted at a successor generation.
 
 use runner_protocol::service_relay::{RelayErrorCode, RelayId};
 use uuid::Uuid;
@@ -11,20 +10,24 @@ use uuid::Uuid;
 use super::registry::RelayRegistry;
 
 impl RelayRegistry {
-    /// Cancel every stream for one environment after a committed lifecycle
-    /// mutation.
+    /// Cancel streams through one committed authorization generation.
     ///
-    /// The epoch advances first, so a registration that races this call is
-    /// refused afterwards: a later open captures the new epoch, and the
-    /// database re-read still decides.
-    pub fn cancel_environment(&self, environment_id: Uuid) -> usize {
+    /// The monotonic cutoff is recorded before routes are inspected. Repeating
+    /// an older callback cannot move it backward or affect successor streams.
+    pub fn cancel_environment_through(&self, environment_id: Uuid, generation: i64) -> usize {
         let mut state = self.lock();
-        let epoch = state.environment_epochs.entry(environment_id).or_insert(0);
-        *epoch = epoch.saturating_add(1);
+        let cutoff = state
+            .cancelled_through_generation
+            .entry(environment_id)
+            .and_modify(|current| *current = (*current).max(generation))
+            .or_insert(generation);
+        let cutoff = *cutoff;
         let victims: Vec<RelayId> = state
             .routes
             .iter()
-            .filter(|(_, route)| route.environment_id == environment_id)
+            .filter(|(_, route)| {
+                route.environment_id == environment_id && route.generation <= cutoff
+            })
             .map(|(stream_id, _)| *stream_id)
             .collect();
         let mut cancelled = 0usize;
@@ -47,22 +50,19 @@ impl RelayRegistry {
         cancelled
     }
 
-    /// True while no committed mutation has cancelled the environment since
-    /// the given epoch was captured.
-    pub fn epoch_matches(&self, environment_id: Uuid, epoch: u64) -> bool {
+    /// True while a stream's generation remains above the committed cutoff.
+    pub fn generation_is_current(&self, environment_id: Uuid, generation: i64) -> bool {
         self.lock()
-            .environment_epochs
+            .cancelled_through_generation
             .get(&environment_id)
-            .copied()
-            .unwrap_or(0)
-            == epoch
+            .is_none_or(|cutoff| generation > *cutoff)
     }
 
     /// Fail every stream carried by one manager's tunnel.
     ///
     /// The routes are left in place on purpose: only the ticket that still
-    /// holds one may release its concurrency accounting, so removing the
-    /// route here would leak the very slots this call exists to free.
+    /// holds one may release its concurrency accounting, so removing the route
+    /// here would leak the very slots this call exists to free.
     pub fn fail_manager_streams(&self, manager_id: i64) {
         let calls = {
             let state = self.lock();

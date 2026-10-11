@@ -29,7 +29,8 @@ pub(super) use execution_environments::{
     execution_environment_status, find_native_task_handler, find_native_task_preparation_handler,
     find_native_task_seed_handler, invalidate_execution_environment, prepare_native_task_handler,
     provision_execution_environment, release_native_task_handler, replace_execution_environment,
-    seed_native_task_handler, stop_execution_environment,
+    seed_native_task_handler, start_native_task_handler, stop_execution_environment,
+    stop_native_task_handler,
 };
 pub(super) use lease::{
     acquire_resource_workspace_lease, acquire_workspace_binding_lease,
@@ -131,6 +132,14 @@ pub(super) fn router() -> axum::Router<crate::AppState> {
         .route(
             "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/release",
             axum::routing::post(release_native_task_handler),
+        )
+        .route(
+            "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/start",
+            axum::routing::post(start_native_task_handler),
+        )
+        .route(
+            "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/stop",
+            axum::routing::post(stop_native_task_handler),
         )
         .route(
             "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/seed",

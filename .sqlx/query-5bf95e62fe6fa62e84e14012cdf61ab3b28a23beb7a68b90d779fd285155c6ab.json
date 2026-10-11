@@ -1,0 +1,220 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Trusted manager-only lookup of one durable environment job by its stable\n-- UUID (issue 742 P2). Not a client store: only the authenticated\n-- runner-manager result path calls this, and it re-verifies the assigned\n-- manager against the row before any evaluation.\nSELECT\n    job_id,\n    token,\n    environment_id,\n    application_id,\n    assigned_manager_id,\n    job_kind,\n    target_generation,\n    admission_generation,\n    native_task_id,\n    state,\n    claimed_at,\n    deadline_at,\n    terminal_at,\n    result,\n    error_summary,\n    created_at,\n    updated_at\nFROM execution_environment_jobs\nWHERE job_id = $1\nLIMIT 1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "token",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "token"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "environment_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "environment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "application_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "application_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "assigned_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "assigned_manager_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "job_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "job_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "target_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "target_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "admission_generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "admission_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "native_task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "native_task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "claimed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "claimed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "deadline_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "deadline_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "terminal_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "terminal_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "result",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "result"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "error_summary",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "error_summary"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "5bf95e62fe6fa62e84e14012cdf61ab3b28a23beb7a68b90d779fd285155c6ab"
+}

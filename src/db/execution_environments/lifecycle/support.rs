@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::db::execution_environment_jobs::ExecutionEnvironmentJob;
 
+use super::LifecycleError;
 use super::types::LifecycleEnvironment;
 
 /// Heartbeat window for internal manager selection, matching the existing
@@ -68,6 +69,12 @@ pub(crate) async fn expire_overdue_jobs(
     if environment.is_none() {
         return Ok(Vec::new());
     }
+    crate::db::execution_environments::tasks::native_execution::expire_overdue_native_jobs(
+        tx,
+        application_id,
+        environment_id,
+    )
+    .await?;
 
     let expired = sqlx::query_file_as!(
         ExecutionEnvironmentJob,
@@ -78,25 +85,37 @@ pub(crate) async fn expire_overdue_jobs(
     .fetch_all(&mut **tx)
     .await?;
 
-    // A preparation that expired retains its task as `uncertain` in the same
-    // transaction: the task keeps its exclusive environment and workspace
-    // anchors, is never released and is never re-dispatched. Expiry alone can
-    // never make an environment ready.
-    for job in &expired {
-        if job.job_kind == "prepare_native_task" {
-            if let Some(task_id) = job.native_task_id {
-                crate::db::execution_environments::tasks::prepare::mark_preparation_uncertain(
-                    tx,
-                    application_id,
-                    environment_id,
-                    task_id,
-                )
-                .await?;
-            }
-        }
-    }
-
     Ok(expired)
+}
+
+/// Refuse legacy lifecycle writes while a native task owns the environment.
+/// The caller must already hold the environment row lock.
+pub(crate) async fn has_active_native_task(
+    tx: &mut Transaction<'_, Postgres>,
+    application_id: i64,
+    environment_id: Uuid,
+) -> Result<bool, LifecycleError> {
+    Ok(sqlx::query_file_scalar!(
+        "src/sql/execution_environments/lifecycle/has_active_native_task.sql",
+        environment_id,
+        application_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .flatten()
+    .unwrap_or(false))
+}
+
+pub(crate) async fn ensure_no_active_native_task(
+    tx: &mut Transaction<'_, Postgres>,
+    application_id: i64,
+    environment_id: Uuid,
+) -> Result<(), LifecycleError> {
+    if has_active_native_task(tx, application_id, environment_id).await? {
+        Err(LifecycleError::NativeTaskActive)
+    } else {
+        Ok(())
+    }
 }
 
 /// All durable operation rows of one owned environment.

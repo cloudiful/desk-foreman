@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Positive native stop quiescence closes all older task execution blockers.\nUPDATE execution_environment_jobs\nSET state = 'superseded',\n    result = $2,\n    error_summary = NULL,\n    terminal_at = NOW(),\n    updated_at = NOW()\nWHERE native_task_id = $1\n  AND job_id <> $3\n  AND (\n      (job_kind IN ('prepare_native_task', 'start_native_task')\n       AND state IN ('pending', 'claimed', 'uncertain'))\n      OR (job_kind = 'stop' AND state = 'uncertain')\n  )\nRETURNING job_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "job_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4a5ebc2c9d55ef5ff4cf7f983110b040eb93f87362f4183cf069b9d0a1084fa2"
+}

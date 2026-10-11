@@ -43,12 +43,13 @@ use super::{
 
 /// What one caller wants to open.
 ///
-/// The fence facts come from the database, never from the caller; this
-/// carries only what the stream needs to exist and the length it promised.
+/// `generation` is the caller's presented fence after the database admission
+/// check; the manager binding is database-derived, never caller-selected.
 #[derive(Clone, Debug)]
 pub struct StreamRequest {
     pub stream_id: RelayId,
     pub environment_id: Uuid,
+    pub generation: i64,
     pub manager_id: i64,
     pub declared_body_length: u64,
 }
@@ -149,7 +150,6 @@ impl RelayRegistry {
         let Admission {
             tunnel,
             lease,
-            epoch,
             environment_streams,
             manager_streams,
         } = check_open(&mut state, &request)?;
@@ -159,7 +159,7 @@ impl RelayRegistry {
             request.stream_id,
             request.environment_id,
             request.manager_id,
-            epoch,
+            request.generation,
             events,
             response,
         )
@@ -172,6 +172,7 @@ impl RelayRegistry {
                 manager_id: request.manager_id,
                 lease,
                 environment_id: request.environment_id,
+                generation: request.generation,
                 call: Arc::downgrade(&call.inner),
             },
         );

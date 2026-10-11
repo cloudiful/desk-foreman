@@ -58,6 +58,48 @@ pub struct ReleaseNativeTaskRequest {
     pub expected_stop_job_id: Uuid,
 }
 
+/// Schedule or replay a task-aware start or stop operation.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct TaskExecutionRequestApi {
+    #[validate(range(min = 0))]
+    pub expected_generation: i64,
+    #[validate(custom(function = "validate_non_blank"), length(min = 1, max = 128))]
+    pub operation_token: String,
+}
+
+/// The task-linked durable execution operation returned by start/stop.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct NativeTaskExecutionDescriptor {
+    pub environment_id: Uuid,
+    pub generation: i64,
+    pub environment_state: String,
+    pub task_id: Uuid,
+    pub task_state: String,
+    pub job_id: Uuid,
+    pub job_kind: String,
+    pub job_state: String,
+    pub native_task_id: Uuid,
+}
+
+impl From<crate::db::execution_environments::NativeTaskOperationDescriptor>
+    for NativeTaskExecutionDescriptor
+{
+    fn from(value: crate::db::execution_environments::NativeTaskOperationDescriptor) -> Self {
+        Self {
+            environment_id: value.environment_id,
+            generation: value.generation,
+            environment_state: value.environment_state,
+            task_id: value.task_id,
+            task_state: value.task_state,
+            job_id: value.job_id,
+            job_kind: value.job_kind,
+            job_state: value.job_state,
+            native_task_id: value.native_task_id,
+        }
+    }
+}
+
 /// What one task API returns.
 ///
 /// Identity, binding, generation and state only: no host path, state volume,
@@ -71,10 +113,13 @@ pub struct NativeTaskDescriptor {
     pub workspace_binding_id: i64,
     /// The authorization generation this task targets.
     pub target_generation: i64,
-    /// One of admitted/preparing/running/stopping/uncertain/released.
+    /// Checked task state, including preparation and execution transitions.
     pub state: String,
-    /// The mounted container generation, once a later phase sets it.
+    /// The candidate container generation, once start is admitted.
     pub container_generation: Option<i64>,
+    /// Durable execution operation anchors.
+    pub start_job_id: Option<Uuid>,
+    pub stop_job_id: Option<Uuid>,
     /// True while this task still occupies its environment and binding.
     pub active: bool,
     /// Whether this task has reached its terminal state.
@@ -91,6 +136,8 @@ impl NativeTaskDescriptor {
             target_generation: task.target_generation,
             state: task.state.clone(),
             container_generation: task.container_generation,
+            start_job_id: task.start_job_id,
+            stop_job_id: task.stop_job_id,
             active: task.is_active(),
             released: task.is_released(),
         }
@@ -101,7 +148,10 @@ impl NativeTaskDescriptor {
 mod tests {
     use serde_json::json;
 
-    use super::{AdmitNativeTaskRequest, CancelNativeTaskRequest, ReleaseNativeTaskRequest};
+    use super::{
+        AdmitNativeTaskRequest, CancelNativeTaskRequest, ReleaseNativeTaskRequest,
+        TaskExecutionRequestApi,
+    };
 
     #[test]
     fn an_admit_request_denies_unknown_fields() {
@@ -126,6 +176,17 @@ mod tests {
             "image": "alpine"
         }));
         assert!(parsed.is_err(), "an image must never be accepted");
+    }
+
+    #[test]
+    fn a_task_execution_request_denies_runtime_configuration() {
+        let parsed: Result<TaskExecutionRequestApi, _> = serde_json::from_value(json!({
+            "expected_generation": 4,
+            "operation_token": "op-1",
+            "host_path": "/etc",
+            "command": "unsafe"
+        }));
+        assert!(parsed.is_err());
     }
 
     #[test]

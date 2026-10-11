@@ -4,7 +4,7 @@
 //! Split from `openapi_security_tests.rs` so no file exceeds the size budget:
 //! the flat `(path, method, operation id)` table is data, not logic.
 
-pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 21] = [
+pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 23] = [
     (
         "/api/internal/execution-environments/ensure",
         "post",
@@ -72,8 +72,8 @@ pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 21] = [
         "options",
         "execution_environment_service_options",
     ),
-    // Durable native task intents resolve the same application identity from
-    // the same bearer guard, so all four task operations are guarded too.
+    // Durable native task operations resolve the same application identity
+    // from the same bearer guard.
     (
         "/api/internal/execution-environments/{environment_id}/tasks/admit",
         "post",
@@ -115,5 +115,15 @@ pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 21] = [
         "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/prepare",
         "get",
         "find_native_task_preparation_handler",
+    ),
+    (
+        "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/start",
+        "post",
+        "start_native_task_handler",
+    ),
+    (
+        "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/stop",
+        "post",
+        "stop_native_task_handler",
     ),
 ];

@@ -1,10 +1,9 @@
-//! Focused types for durable environment-operation records (issue 741 P1).
+//! Focused types for durable environment and native-task job records.
 //!
-//! A row records one operation intent (ensure or stop) for one exact
-//! generation of one execution environment. `token` is an opaque
-//! caller-chosen replay key; `result` is a typed, bounded payload; the error
-//! summary is a redacted diagnostic string. No dispatch layer consumes rows
-//! in this phase, and no HTTP response is added.
+//! A row records one original-manager intent for one exact environment
+//! generation. `token` is an opaque replay key; `native_task_id` is a typed
+//! link for preparation/start and task-aware stop jobs; `result` is a bounded
+//! normalized proof, and the error summary is redacted.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -12,7 +11,8 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 /// Job kinds accepted by the store.
-pub const EXECUTION_ENVIRONMENT_JOB_KINDS: [&str; 3] = ["ensure", "stop", "prepare_native_task"];
+pub const EXECUTION_ENVIRONMENT_JOB_KINDS: [&str; 4] =
+    ["ensure", "stop", "prepare_native_task", "start_native_task"];
 
 /// Checked job states.
 pub const EXECUTION_ENVIRONMENT_JOB_STATES: [&str; 6] = [
@@ -95,6 +95,9 @@ pub struct ExecutionEnvironmentJob {
     pub assigned_manager_id: i64,
     pub job_kind: String,
     pub target_generation: i64,
+    /// The authorization generation that admitted a task-aware stop request.
+    /// `None` for legacy lifecycle jobs and native jobs created before this field.
+    pub admission_generation: Option<i64>,
     /// The native task this job serves, when it serves one.
     ///
     /// `None` for every legacy ensure/stop record; set (and required by a check
@@ -130,6 +133,9 @@ pub struct ExecutionEnvironmentJobResult {
     /// Positive stop confirmation; absent for outcomes that have none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirmed: Option<bool>,
+    /// Native task stop proof that preparation and its writer are quiescent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preparation_quiescent: Option<bool>,
 }
 
 impl ExecutionEnvironmentJobResult {
@@ -139,6 +145,7 @@ impl ExecutionEnvironmentJobResult {
             outcome: "stop_confirmed".to_string(),
             observed_state: Some(observed_state.to_string()),
             confirmed: Some(true),
+            preparation_quiescent: None,
         }
     }
 
@@ -148,6 +155,7 @@ impl ExecutionEnvironmentJobResult {
             outcome: "stop_unconfirmed".to_string(),
             observed_state: Some(observed_state.to_string()),
             confirmed: Some(false),
+            preparation_quiescent: None,
         }
     }
 }

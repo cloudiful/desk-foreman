@@ -36,6 +36,7 @@ pub struct TaskFixture {
     pub manager_token: String,
     pub environment_id: Uuid,
     pub binding_id: i64,
+    pub relay: std::sync::Arc<desk_foreman::runner::service_relay::RelayRegistry>,
     _temp: tempfile::TempDir,
 }
 
@@ -46,7 +47,9 @@ impl TaskFixture {
     pub async fn setup() -> Self {
         let database = IsolatedDb::setup().await;
         let temp = tempfile::tempdir().expect("tempdir");
-        let root = temp.path().join("workspace").to_string_lossy().to_string();
+        let workspace_root = temp.path().join("workspace");
+        std::fs::create_dir_all(&workspace_root).expect("workspace root");
+        let root = workspace_root.to_string_lossy().to_string();
         let (application_id, application_token) =
             create_app_with_token(&database.pool, "task-owner").await;
         let (_other_id, other_application_token) =
@@ -61,7 +64,11 @@ impl TaskFixture {
             "code_project:alpha",
         )
         .await;
-        let state = super::helpers::test_state(database.pool.clone());
+        let mut state = super::helpers::test_state(database.pool.clone());
+        let mut config = (*state.config).clone();
+        config.workspace_root = temp.path().to_path_buf();
+        state.config = std::sync::Arc::new(config);
+        let relay = state.runner_broker.service_relay().clone();
         let (base, _handle) = spawn_http(state).await;
         Self {
             database,
@@ -73,6 +80,7 @@ impl TaskFixture {
             manager_token,
             environment_id,
             binding_id,
+            relay,
             _temp: temp,
         }
     }

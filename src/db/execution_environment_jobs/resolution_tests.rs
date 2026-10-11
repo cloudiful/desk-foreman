@@ -31,6 +31,7 @@ mod resolution_tests {
             assigned_manager_id: 7,
             job_kind: kind.to_string(),
             target_generation: generation,
+            admission_generation: None,
             native_task_id: None,
             state: "claimed".to_string(),
             claimed_at: Some(Utc::now()),

@@ -93,7 +93,7 @@ pub async fn stop_execution_environment(
     ValidatedJson(request): ValidatedJson<StopExecutionEnvironmentRequest>,
 ) -> Result<Json<EnvironmentOperationDescriptor>, AppError> {
     let application_id = application_actor(&state, &headers).await?;
-    let descriptor = lifecycle_stop(
+    let (descriptor, cancel_through_generation) = lifecycle_stop(
         &state.db,
         application_id,
         environment_id,
@@ -102,12 +102,12 @@ pub async fn stop_execution_environment(
     )
     .await
     .map_err(map_lifecycle_error)?;
-    // Only a committed stop may tear live streams down. A refused stop left
-    // the environment serving, so its streams must keep running.
-    state
-        .runner_broker
-        .service_relay()
-        .cancel_environment(environment_id);
+    if let Some(generation) = cancel_through_generation {
+        state
+            .runner_broker
+            .service_relay()
+            .cancel_environment_through(environment_id, generation);
+    }
     Ok(Json(descriptor))
 }
 
@@ -206,6 +206,9 @@ pub(super) fn map_lifecycle_error(error: LifecycleError) -> AppError {
         }
         LifecycleError::UnresolvedBlockers => {
             AppError::conflict("execution environment has unresolved lifecycle blockers")
+        }
+        LifecycleError::NativeTaskActive => {
+            AppError::conflict("execution environment is owned by an active native task")
         }
         LifecycleError::ManagerUnavailable => {
             AppError::service_unavailable("no runner manager is available to provision")

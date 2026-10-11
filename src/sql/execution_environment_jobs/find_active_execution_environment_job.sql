@@ -6,6 +6,7 @@ SELECT
     assigned_manager_id,
     job_kind,
     target_generation,
+    admission_generation,
     native_task_id,
     state,
     claimed_at,
@@ -18,6 +19,7 @@ SELECT
 FROM execution_environment_jobs
 WHERE application_id = $1
   AND environment_id = $2
+  AND native_task_id IS NULL
   AND state IN ('pending', 'claimed', 'uncertain')
 ORDER BY created_at ASC, job_id ASC
 LIMIT 1;

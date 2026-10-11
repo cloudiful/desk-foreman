@@ -1,15 +1,10 @@
-//! Native task release against a confirmed stop proof (issue 753 P1).
+//! Native task release against a confirmed stop proof (issue 764 P1).
 //!
-//! Release is the only path that frees an executed task, and it accepts
-//! exactly one thing: a durable stop proof that belongs to this task, ran on
-//! this task's original manager, targeted this task's generation, and records
-//! positive quiescence. A stale proof, a foreign environment, an ensure
-//! success, an error, an unconfirmed observation or a mismatched manager leaves
-//! the task untouched.
-//!
-//! Nothing here sets the candidate or marks a task running: P1 seeds no
-//! dispatched state of its own, so a task can only be released by a fixture
-//! that already proved an executed task.
+//! Release is the only path that frees an executed task. The durable proof must
+//! belong to this task, come from its original manager, target its candidate,
+//! confirm the environment stopped, and prove preparation quiescence. A stale,
+//! foreign, unconfirmed or otherwise mismatched proof leaves the task untouched;
+//! stop completion never releases it automatically.
 
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -17,6 +12,7 @@ use uuid::Uuid;
 use super::internal;
 use super::queries::{clear_environment_active_task, lock_environment, lock_task, mark_released};
 use super::types::{NativeTask, NativeTaskError, TaskStopProof};
+use crate::db::execution_environment_jobs::ExecutionEnvironmentJobResult;
 use crate::db::execution_environments::lifecycle::confirmed_stop_state;
 
 pub(super) async fn release(
@@ -126,11 +122,20 @@ fn proof_matches_task(proof: Option<&TaskStopProof>, task: &NativeTask) -> bool 
     let Some(proof) = proof else {
         return false;
     };
+    let preparation_quiescent = proof
+        .result
+        .as_ref()
+        .and_then(|value| {
+            serde_json::from_value::<ExecutionEnvironmentJobResult>(value.clone()).ok()
+        })
+        .and_then(|result| result.preparation_quiescent)
+        == Some(true);
     proof.job_kind == "stop"
         && proof.state == "succeeded"
         && proof.native_task_id == Some(task.task_id)
         && proof.assigned_manager_id == task.assigned_manager_id
         && proof.target_generation == task.target_generation
+        && preparation_quiescent
         && confirmed_stop_state(proof.result.as_ref()).is_some()
 }
 
@@ -155,6 +160,8 @@ mod tests {
             state: "running".to_string(),
             container_generation: Some(4),
             prepare_job_id: None,
+            start_job_id: None,
+            stop_job_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             terminal_at: None,
@@ -185,7 +192,8 @@ mod tests {
         serde_json::json!({
             "outcome": "stop_confirmed",
             "observed_state": "exited",
-            "confirmed": true
+            "confirmed": true,
+            "preparation_quiescent": true
         })
     }
 
@@ -239,6 +247,20 @@ mod tests {
         let mut empty = proof(Some(task.task_id), 7, 4, "succeeded", confirmed());
         empty.result = None;
         assert!(!proof_matches_task(Some(&empty), &task));
+    }
+
+    #[test]
+    fn a_confirmed_container_stop_without_preparation_quiescence_never_releases() {
+        let task = task();
+        let result = serde_json::json!({
+            "outcome": "stop_confirmed",
+            "observed_state": "exited",
+            "confirmed": true
+        });
+        assert!(!proof_matches_task(
+            Some(&proof(Some(task.task_id), 7, 4, "succeeded", result)),
+            &task
+        ));
     }
 
     #[test]

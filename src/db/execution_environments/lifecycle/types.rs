@@ -160,6 +160,7 @@ pub fn superseded_result() -> ExecutionEnvironmentJobResult {
         outcome: SUPERSEDED_BY_STOP_PROOF_OUTCOME.to_string(),
         observed_state: None,
         confirmed: None,
+        preparation_quiescent: None,
     }
 }
 

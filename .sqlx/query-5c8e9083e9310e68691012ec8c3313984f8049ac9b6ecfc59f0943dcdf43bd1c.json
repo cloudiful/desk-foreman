@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Store the native stop proof without releasing its workspace owner.\nUPDATE execution_environments\nSET state = 'replaced',\n    stop_proof_job_id = $4,\n    stop_proof_generation = $5,\n    last_active_at = NOW(),\n    updated_at = NOW()\nWHERE environment_id = $1\n  AND application_id = $2\n  AND active_native_task_id = $3\n  AND container_generation = $5\n  AND generation > $5\n  AND state = 'stopping'\nRETURNING environment_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "environment_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "environment_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5c8e9083e9310e68691012ec8c3313984f8049ac9b6ecfc59f0943dcdf43bd1c"
+}

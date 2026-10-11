@@ -15,8 +15,8 @@ use crate::db::execution_environment_jobs::{ExecutionEnvironmentJob, job_token_i
 
 use super::LifecycleError;
 use super::support::{
-    NewLifecycleJob, expire_overdue_jobs, find_job_by_id, find_job_by_token, insert_job, load_jobs,
-    lock_environment,
+    NewLifecycleJob, ensure_no_active_native_task, expire_overdue_jobs, find_job_by_id,
+    find_job_by_token, insert_job, load_jobs, lock_environment,
 };
 use super::transitions::replace_update;
 use super::types::{
@@ -49,7 +49,8 @@ pub async fn replace_execution_environment(
     if let Some(existing) =
         find_job_by_token(&mut tx, application_id, environment_id, operation_token).await?
     {
-        let identical = existing.job_kind == "ensure"
+        let identical = existing.native_task_id.is_none()
+            && existing.job_kind == "ensure"
             && Some(existing.assigned_manager_id) == environment.assigned_manager_id
             && Some(existing.target_generation) == environment.container_generation;
         if !identical {
@@ -65,6 +66,7 @@ pub async fn replace_execution_environment(
         ));
     }
 
+    ensure_no_active_native_task(&mut tx, application_id, environment_id).await?;
     if expected_generation != environment.generation {
         return Err(LifecycleError::StaleGeneration {
             current: environment.generation,
@@ -160,7 +162,9 @@ pub(crate) fn proof_is_confirmed_stop(
 }
 
 fn stop_is_active(job: &ExecutionEnvironmentJob) -> bool {
-    job.job_kind == "stop" && matches!(job.state.as_str(), "pending" | "claimed")
+    job.native_task_id.is_none()
+        && job.job_kind == "stop"
+        && matches!(job.state.as_str(), "pending" | "claimed")
 }
 
 fn ensure_is_blocker(job: &ExecutionEnvironmentJob) -> bool {

@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::db::execution_environment_jobs::ExecutionEnvironmentJob;
 
 use super::LifecycleError;
-use super::support::{expire_overdue_jobs, load_jobs, lock_environment};
+use super::support::{expire_overdue_jobs, has_active_native_task, load_jobs, lock_environment};
 use super::transitions::{mark_ready, mark_replaced, mark_uncertain, supersede_ensure_jobs};
 use super::types::{
     EnvironmentOperationDescriptor, LIFECYCLE_STATE_STARTING, LIFECYCLE_STATE_STOPPING,
@@ -38,6 +38,11 @@ pub async fn execution_environment_status(
     };
 
     let jobs = load_jobs(&mut tx, application_id, environment_id).await?;
+    if has_active_native_task(&mut tx, application_id, environment_id).await? {
+        tx.commit().await?;
+        let operation = newest_operation(&jobs);
+        return Ok(environment_descriptor(&environment, operation.as_ref()));
+    }
 
     if let (Some(candidate), Some(manager_id)) = (
         environment.container_generation,
@@ -47,6 +52,7 @@ pub async fn execution_environment_status(
             .iter()
             .filter(|job| {
                 job.job_kind == "stop"
+                    && job.native_task_id.is_none()
                     && job.assigned_manager_id == manager_id
                     && job.target_generation == candidate
                     && job.state == "succeeded"
@@ -56,6 +62,7 @@ pub async fn execution_environment_status(
 
         let stop_uncertain = jobs.iter().any(|job| {
             job.job_kind == "stop"
+                && job.native_task_id.is_none()
                 && job.assigned_manager_id == manager_id
                 && job.target_generation == candidate
                 && job.state == "uncertain"
@@ -94,6 +101,7 @@ pub async fn execution_environment_status(
         } else {
             let ensure_succeeded = jobs.iter().any(|job| {
                 job.job_kind == "ensure"
+                    && job.native_task_id.is_none()
                     && job.assigned_manager_id == manager_id
                     && job.target_generation == candidate
                     && job.state == "succeeded"
@@ -101,6 +109,7 @@ pub async fn execution_environment_status(
             });
             let stop_outstanding = jobs.iter().any(|job| {
                 job.job_kind == "stop"
+                    && job.native_task_id.is_none()
                     && job.target_generation == candidate
                     && active_state(&job.state)
             });

@@ -11,5 +11,5 @@
 SELECT task_id
 FROM execution_environment_tasks
 WHERE workspace_binding_id = $1
-  AND state IN ('admitted', 'preparing', 'prepared', 'running', 'stopping', 'uncertain')
+  AND state IN ('admitted', 'preparing', 'prepared', 'starting', 'running', 'stopping', 'uncertain')
 LIMIT 1;

@@ -8,6 +8,9 @@ use std::{
 use anyhow::{Context, bail};
 use tokio::sync::RwLock;
 
+#[path = "config/native_task_paths.rs"]
+pub(crate) mod native_task_paths;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RunnerBackendKind {
     Direct,
@@ -48,10 +51,12 @@ pub struct RunnerManagerConfig {
     pub runtime_class: Option<String>,
     /// Explicit trusted root for native-task checkouts.
     ///
-    /// `None` disables native-task preparation entirely: the manager then
-    /// answers every preparation with a fixed unsupported failure, and no
-    /// implicit workspace root is ever used as a checkout root.
+    /// Explicit local root for native-task checkouts. `None` disables
+    /// preparation; it never falls back to a workspace root.
     pub native_task_root: Option<PathBuf>,
+    /// Optional daemon-visible root used only by native-task bind mounts.
+    /// It is never inferred from either local root.
+    pub native_task_host_root: Option<PathBuf>,
 }
 
 pub type SharedRunnerManagerConfig = Arc<RwLock<RunnerManagerConfig>>;
@@ -120,7 +125,8 @@ impl RunnerManagerConfig {
             runtime_class: env::var("RUNNER_RUNTIME_CLASS")
                 .ok()
                 .filter(|value| !value.trim().is_empty()),
-            native_task_root: native_task_root_from_env()?,
+            native_task_root: native_task_paths::native_task_root_from_env()?,
+            native_task_host_root: native_task_paths::native_task_host_root_from_env()?,
         })
     }
 
@@ -195,33 +201,6 @@ fn env_flag(name: &str) -> bool {
     env::var(name)
         .ok()
         .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
-}
-
-/// Parse the optional native-task root.
-///
-/// Absent or blank disables preparation. A supplied root must be an absolute,
-/// existing directory: a relative or nonexistent root is a startup error, so a
-/// manager never silently materializes somewhere operator-unintended. Ownership
-/// and mode are re-validated at use time, when the effective identity is
-/// already known.
-fn native_task_root_from_env() -> anyhow::Result<Option<PathBuf>> {
-    let Some(raw) = env::var("RUNNER_NATIVE_TASK_ROOT")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return Ok(None);
-    };
-    let path = PathBuf::from(&raw);
-    if !path.is_absolute() {
-        bail!("RUNNER_NATIVE_TASK_ROOT must be an absolute path: {raw}");
-    }
-    let canonical = path
-        .canonicalize()
-        .with_context(|| format!("RUNNER_NATIVE_TASK_ROOT must exist and be accessible: {raw}"))?;
-    if !canonical.is_dir() {
-        bail!("RUNNER_NATIVE_TASK_ROOT must be a directory: {raw}");
-    }
-    Ok(Some(canonical))
 }
 
 fn canonical_workspace_root(name: &str, path: &Path) -> anyhow::Result<PathBuf> {

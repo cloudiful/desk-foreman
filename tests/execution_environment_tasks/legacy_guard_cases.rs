@@ -55,6 +55,17 @@ async fn a_native_task_survives_legacy_transition_attempts() {
         fixture.admit_default(task_id, "op-survive").await.status,
         200
     );
+    let (guard_tx, fresh_binding) = desk_foreman::db::queries::lock_workspace_binding_for_write(
+        &fixture.database.pool,
+        fixture.binding_id,
+    )
+    .await
+    .expect("native guard query");
+    assert!(
+        fresh_binding.is_none(),
+        "the locked native guard must refuse the binding"
+    );
+    drop(guard_tx);
 
     // Git sync for this workspace goes through the fenced write lock and must
     // be refused rather than dispatching.
