@@ -258,6 +258,10 @@ impl NativeTaskStore {
 }
 
 impl LockedNativeTaskWorkspace {
+    pub(crate) fn export_tree(&self) -> &Path {
+        &self.layout.tree_dir
+    }
+
     /// Validate identity and only the top-level manager-owned roots for stop.
     /// Descendants may contain task-written files and are never traversed.
     pub(crate) fn stop_journal(

@@ -61,6 +61,16 @@ impl RunnerBackend for DockerRunnerBackend {
         Box::pin(async move { self.prepare_native_task_checkout(request, seed).await })
     }
 
+    fn export_native_task<'a>(
+        &'a self,
+        request: runner_protocol::ExportNativeTaskRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::NativeTaskExportContent>> {
+        Box::pin(async move {
+            let profile = ExecutionEnvironmentProfile::from_env_or_default();
+            super::native_task::export_native_task(self, &profile, request).await
+        })
+    }
+
     fn start_native_task<'a>(
         &'a self,
         request: StartNativeTaskRequest,

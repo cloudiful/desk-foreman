@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO execution_environment_task_export_missing_paths (job_id, path)\nSELECT $1, path\nFROM unnest($2::text[]) AS missing(path);\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "82848b3efdf1c799f75ab3935e8692efadc2065bce4ae6adbe3494a0b3d458a6"
+}

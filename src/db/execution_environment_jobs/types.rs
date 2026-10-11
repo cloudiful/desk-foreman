@@ -11,8 +11,13 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 /// Job kinds accepted by the store.
-pub const EXECUTION_ENVIRONMENT_JOB_KINDS: [&str; 4] =
-    ["ensure", "stop", "prepare_native_task", "start_native_task"];
+pub const EXECUTION_ENVIRONMENT_JOB_KINDS: [&str; 5] = [
+    "ensure",
+    "stop",
+    "prepare_native_task",
+    "start_native_task",
+    "export_native_task",
+];
 
 /// Checked job states.
 pub const EXECUTION_ENVIRONMENT_JOB_STATES: [&str; 6] = [

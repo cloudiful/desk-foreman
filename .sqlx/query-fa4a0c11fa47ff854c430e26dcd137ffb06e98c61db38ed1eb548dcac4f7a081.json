@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "-- All durable operation rows for one owned environment (issue 742 P3).\nSELECT\n    job_id,\n    token,\n    environment_id,\n    application_id,\n    assigned_manager_id,\n    job_kind,\n    target_generation,\n    admission_generation,\n    native_task_id,\n    state,\n    claimed_at,\n    deadline_at,\n    terminal_at,\n    result,\n    error_summary,\n    created_at,\n    updated_at\nFROM execution_environment_jobs\nWHERE application_id = $1\n  AND environment_id = $2\nORDER BY created_at ASC, job_id ASC;\n",
+  "query": "UPDATE execution_environment_jobs\nSET state = 'failed',\n    terminal_at = clock_timestamp(),\n    result = $6,\n    error_summary = 'assigned manager failed native task export',\n    updated_at = clock_timestamp()\nWHERE job_id = $1\n  AND application_id = $2\n  AND environment_id = $3\n  AND native_task_id = $4\n  AND assigned_manager_id = $5\n  AND job_kind = 'export_native_task'\n  AND state = 'claimed'\n  AND deadline_at > clock_timestamp()\nRETURNING\n    job_id,\n    token,\n    environment_id,\n    application_id,\n    assigned_manager_id,\n    job_kind,\n    target_generation,\n    admission_generation,\n    native_task_id,\n    state,\n    claimed_at,\n    deadline_at,\n    terminal_at,\n    result,\n    error_summary,\n    created_at,\n    updated_at;\n",
   "describe": {
     "columns": [
       {
@@ -193,8 +193,12 @@
     ],
     "parameters": {
       "Left": [
+        "Uuid",
         "Int8",
-        "Uuid"
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Jsonb"
       ]
     },
     "nullable": [
@@ -217,5 +221,5 @@
       false
     ]
   },
-  "hash": "612756c6500410eeddabe4a3a6667cfec7e673e57c10150082697501580ba12b"
+  "hash": "fa4a0c11fa47ff854c430e26dcd137ffb06e98c61db38ed1eb548dcac4f7a081"
 }

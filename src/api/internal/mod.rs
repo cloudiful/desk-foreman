@@ -18,12 +18,17 @@ pub(super) mod lease_audit;
 pub(super) mod runner_manager;
 pub(super) mod runner_manager_environment_jobs;
 pub(super) mod runner_manager_service_relay;
+pub(super) mod runner_manager_task_exports;
 pub(super) mod shared;
 
 pub(super) use application::{application_capabilities, sync_resource_workspace_git};
 /// Every relayed method, bound onto the gateway's single route.
 use execution_environments::service_route;
 
+pub(super) use execution_environments::tasks::{
+    find_native_task_export_content_handler, find_native_task_export_handler,
+    schedule_native_task_export_handler,
+};
 pub(super) use execution_environments::{
     admit_native_task_handler, cancel_native_task_handler, ensure_execution_environment,
     execution_environment_status, find_native_task_handler, find_native_task_preparation_handler,
@@ -43,6 +48,7 @@ pub(super) use runner_manager::{
 
 pub(super) use runner_manager_environment_jobs::task_seed_for_preparation_job;
 pub(super) use runner_manager_service_relay::runner_manager_service_relay;
+pub(super) use runner_manager_task_exports::upload_native_task_export_handler;
 
 pub(super) fn router() -> axum::Router<crate::AppState> {
     axum::Router::new()
@@ -65,6 +71,10 @@ pub(super) fn router() -> axum::Router<crate::AppState> {
         .route(
             "/api/internal/runner-managers/{manager_id}/environment-jobs/{job_id}/task-seed",
             axum::routing::get(task_seed_for_preparation_job),
+        )
+        .route(
+            "/api/internal/runner-managers/{manager_id}/environment-jobs/{job_id}/task-export",
+            axum::routing::post(upload_native_task_export_handler),
         )
         .route(
             "/api/internal/runner-manager/workspace-runners/report",
@@ -149,6 +159,18 @@ pub(super) fn router() -> axum::Router<crate::AppState> {
             "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/prepare",
             axum::routing::post(prepare_native_task_handler)
                 .get(find_native_task_preparation_handler),
+        )
+        .route(
+            "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/export",
+            axum::routing::post(schedule_native_task_export_handler),
+        )
+        .route(
+            "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/export/status",
+            axum::routing::get(find_native_task_export_handler),
+        )
+        .route(
+            "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/export/content",
+            axum::routing::get(find_native_task_export_content_handler),
         )
         .route(
             "/api/internal/execution-environments/{environment_id}/service/{*path}",

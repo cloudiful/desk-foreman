@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT path\nFROM execution_environment_task_export_selection_files\nWHERE job_id = $1\nORDER BY path;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_task_export_selection_files",
+            "name": "path"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8e7da2d6e8491ccd8160bd0f668e4c3a5b112a4ff894f9b97bbc8a3aec3bc8d1"
+}

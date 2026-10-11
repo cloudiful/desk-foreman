@@ -16,6 +16,8 @@ use runner_protocol::{RunnerJob, RunnerJobResult};
 
 #[path = "native_execution.rs"]
 mod native_execution;
+#[path = "native_task_export.rs"]
+mod native_task_export;
 #[cfg(test)]
 pub(crate) use native_execution::ProfiledDockerBackend;
 
@@ -42,6 +44,12 @@ pub(super) async fn execute_job(
             (guard.auth_token.clone(), guard.manager_id.clone())
         };
         native_task::execute_job(client, base_url, &token, &manager_id, backend, &job).await
+    } else if job.kind == "export_native_task" {
+        let (token, manager_id) = {
+            let guard = config.read().await;
+            (guard.auth_token.clone(), guard.manager_id.clone())
+        };
+        native_task_export::execute_job(client, base_url, &token, &manager_id, backend, &job).await
     } else if matches!(job.kind.as_str(), "start_native_task" | "stop_native_task") {
         native_execution::execute_job(backend, &job).await
     } else {

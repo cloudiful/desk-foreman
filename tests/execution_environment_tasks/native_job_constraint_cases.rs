@@ -37,7 +37,11 @@ async fn native_job_kinds_require_task_links_without_restricting_legacy_jobs() {
         200
     );
 
-    for job_kind in ["prepare_native_task", "start_native_task"] {
+    for job_kind in [
+        "prepare_native_task",
+        "start_native_task",
+        "export_native_task",
+    ] {
         let error = insert_job(&fixture, job_kind, None)
             .await
             .expect_err("native execution jobs must carry a task link");

@@ -69,6 +69,25 @@ impl TombstoneStore {
         Ok(Self { root })
     }
 
+    /// Resolve a retained barrier without creating or repairing its directory.
+    pub(crate) fn open_existing(state_dir: &Path, environment_id: &str) -> anyhow::Result<Self> {
+        if state_dir.as_os_str().is_empty() {
+            anyhow::bail!("execution environment state directory is empty");
+        }
+        runner_protocol::execution_environment::validate_environment_id(environment_id)
+            .map_err(|_| anyhow::anyhow!("invalid export environment identity"))?;
+        let simple = environment_id.replace('-', "").to_ascii_lowercase();
+        let root = state_dir.join(simple);
+        for path in [state_dir, root.as_path()] {
+            let metadata = std::fs::symlink_metadata(path)
+                .map_err(|_| anyhow::anyhow!("retained export barrier directory is unavailable"))?;
+            if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                anyhow::bail!("retained export barrier directory is invalid");
+            }
+        }
+        Ok(Self { root })
+    }
+
     pub(crate) fn barrier_path(&self) -> PathBuf {
         self.root.join(BARRIER_FILE)
     }

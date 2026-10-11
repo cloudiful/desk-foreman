@@ -4,7 +4,7 @@
 //! Split from `openapi_security_tests.rs` so no file exceeds the size budget:
 //! the flat `(path, method, operation id)` table is data, not logic.
 
-pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 23] = [
+pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 26] = [
     (
         "/api/internal/execution-environments/ensure",
         "post",
@@ -125,5 +125,20 @@ pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 23] = [
         "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/stop",
         "post",
         "stop_native_task_handler",
+    ),
+    (
+        "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/export",
+        "post",
+        "schedule_native_task_export_handler",
+    ),
+    (
+        "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/export/status",
+        "get",
+        "find_native_task_export_handler",
+    ),
+    (
+        "/api/internal/execution-environments/{environment_id}/tasks/{task_id}/export/content",
+        "get",
+        "find_native_task_export_content_handler",
     ),
 ];

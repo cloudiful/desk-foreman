@@ -3,10 +3,10 @@ use std::sync::Arc;
 use desk_foreman::runner::RunnerFuture;
 use runner_protocol::{
     CommandOutput, EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest,
-    NativeTaskPreparedResult, PrepareNativeTaskRequest, RunnerCommandRequest, RunnerOwner,
-    RunnerShellRequest, SeedBundle, StartNativeTaskRequest, StartNativeTaskResult,
-    StopExecutionEnvironmentAck, StopExecutionEnvironmentRequest, StopNativeTaskRequest,
-    StopNativeTaskResult,
+    ExportNativeTaskRequest, NativeTaskExportContent, NativeTaskPreparedResult,
+    PrepareNativeTaskRequest, RunnerCommandRequest, RunnerOwner, RunnerShellRequest, SeedBundle,
+    StartNativeTaskRequest, StartNativeTaskResult, StopExecutionEnvironmentAck,
+    StopExecutionEnvironmentRequest, StopNativeTaskRequest, StopNativeTaskResult,
 };
 
 pub trait RunnerBackend: Send + Sync {
@@ -81,6 +81,15 @@ pub trait RunnerBackend: Send + Sync {
     ) -> RunnerFuture<'a, anyhow::Result<StopNativeTaskResult>> {
         Box::pin(async move {
             anyhow::bail!("native task stop is not configured on this runner backend")
+        })
+    }
+
+    fn export_native_task<'a>(
+        &'a self,
+        _request: ExportNativeTaskRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<NativeTaskExportContent>> {
+        Box::pin(async move {
+            anyhow::bail!("native task export is not configured on this runner backend")
         })
     }
 

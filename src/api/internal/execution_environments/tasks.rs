@@ -23,12 +23,17 @@ use crate::{
     error::AppError,
 };
 
+pub mod exports;
 pub mod prepare;
 pub mod seeds;
 pub mod start;
 pub mod stop;
 pub mod types;
 
+pub use exports::{
+    find_native_task_export_content_handler, find_native_task_export_handler,
+    schedule_native_task_export_handler,
+};
 pub use prepare::{find_native_task_preparation_handler, prepare_native_task_handler};
 pub use seeds::{find_native_task_seed_handler, seed_native_task_handler};
 pub use start::start_native_task_handler;

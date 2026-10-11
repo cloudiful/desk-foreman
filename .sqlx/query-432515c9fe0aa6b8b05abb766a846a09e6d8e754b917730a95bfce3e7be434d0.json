@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT path\nFROM execution_environment_task_export_missing_paths\nWHERE job_id = $1\nORDER BY path;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_task_export_missing_paths",
+            "name": "path"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "432515c9fe0aa6b8b05abb766a846a09e6d8e754b917730a95bfce3e7be434d0"
+}

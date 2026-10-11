@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE execution_environment_jobs\nSET state = 'uncertain',\n    terminal_at = NOW(),\n    updated_at = NOW()\nWHERE application_id = $1\n  AND environment_id = $2\n  AND native_task_id IS NULL\n  AND state IN ('pending', 'claimed')\n  AND deadline_at <= NOW()\nRETURNING\n    job_id,\n    token,\n    environment_id,\n    application_id,\n    assigned_manager_id,\n    job_kind,\n    target_generation,\n    admission_generation,\n    native_task_id,\n    state,\n    claimed_at,\n    deadline_at,\n    terminal_at,\n    result,\n    error_summary,\n    created_at,\n    updated_at;\n",
+  "query": "-- All durable operation rows for one owned environment (issue 742 P3).\nSELECT\n    job_id,\n    token,\n    environment_id,\n    application_id,\n    assigned_manager_id,\n    job_kind,\n    target_generation,\n    admission_generation,\n    native_task_id,\n    state,\n    claimed_at,\n    deadline_at,\n    terminal_at,\n    result,\n    error_summary,\n    created_at,\n    updated_at\nFROM execution_environment_jobs\nWHERE application_id = $1\n  AND environment_id = $2\n  AND job_kind <> 'export_native_task'\nORDER BY created_at ASC, job_id ASC;\n",
   "describe": {
     "columns": [
       {
@@ -217,5 +217,5 @@
       false
     ]
   },
-  "hash": "09d0ddb98bd31061d086563789f4c1e4b4ffd5fd0343cd8d2412db8aa30008e7"
+  "hash": "58d0dd6cb890851ff70757d6d3c913de4a1264028f8cd17022542c8fd395a0bf"
 }

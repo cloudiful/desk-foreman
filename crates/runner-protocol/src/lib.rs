@@ -6,6 +6,7 @@ use utoipa::ToSchema;
 pub mod execution_environment;
 pub mod service_relay;
 pub mod task_execution;
+pub mod task_export;
 pub mod task_preparation;
 pub mod task_seed;
 
@@ -16,6 +17,14 @@ pub use execution_environment::{
 pub use task_execution::{
     NativeTaskRuntimeIdentity, StartNativeTaskRequest, StartNativeTaskResult,
     StopNativeTaskRequest, StopNativeTaskResult,
+};
+pub use task_export::{
+    ExportNativeTaskRequest, ExportNativeTaskResult, ExportNativeTaskUpload,
+    MAX_TASK_EXPORT_PATH_BYTES, MAX_TASK_EXPORT_PATHS, MAX_TASK_EXPORT_UPLOAD_BODY_BYTES,
+    NativeTaskExportContent, NativeTaskExportSelection, NativeTaskExportValidationError,
+    ValidatedNativeTaskExport, native_task_export_output_manifest_sha256,
+    selection_manifest_sha256, validate_native_task_export_content,
+    validate_native_task_export_selection,
 };
 pub use task_preparation::{NativeTaskPreparedResult, PrepareNativeTaskRequest};
 pub use task_seed::{

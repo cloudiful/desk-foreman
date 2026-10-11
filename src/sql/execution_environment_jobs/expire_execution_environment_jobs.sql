@@ -4,7 +4,7 @@ SET state = 'uncertain',
     updated_at = NOW()
 WHERE application_id = $1
   AND environment_id = $2
-  AND native_task_id IS NULL
+  AND (native_task_id IS NULL OR job_kind = 'export_native_task')
   AND state IN ('pending', 'claimed')
   AND deadline_at <= NOW()
 RETURNING

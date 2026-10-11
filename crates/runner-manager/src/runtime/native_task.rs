@@ -41,5 +41,5 @@ mod test_journal;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use execution::{start_native_task, stop_native_task};
+pub(crate) use execution::{export_native_task, start_native_task, stop_native_task};
 pub(crate) use store::NativeTaskStore;

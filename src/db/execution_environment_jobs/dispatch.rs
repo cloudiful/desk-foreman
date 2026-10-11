@@ -147,6 +147,12 @@ pub(crate) async fn complete_assigned_manager_environment_job(
     if row.assigned_manager_id != manager_id {
         return Ok(DurableJobCompletion::ForeignManager);
     }
+    if row.job_kind == "export_native_task" {
+        return crate::db::execution_environments::tasks::exports::complete_export_result(
+            pool, manager_id, &row, result,
+        )
+        .await;
+    }
 
     if row.job_kind == "start_native_task"
         || (row.job_kind == "stop" && row.native_task_id.is_some())

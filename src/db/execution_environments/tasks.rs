@@ -8,6 +8,7 @@
 
 mod admit;
 mod cancel;
+pub mod exports;
 pub(crate) mod native_execution;
 pub(crate) mod prepare;
 mod queries;

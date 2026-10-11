@@ -22,16 +22,17 @@ use crate::{
     upstream::native_task_preparation::support::Rig as PreparationRig,
 };
 
-pub(super) struct ManagerRig {
-    pub(super) fixture: PreparationRig,
+pub(crate) struct ManagerRig {
+    pub(crate) fixture: PreparationRig,
     pub(super) backend: Arc<dyn RunnerBackend>,
-    pub(super) fake: FakeDocker,
+    pub(crate) export_backend: Arc<dyn RunnerBackend>,
+    pub(crate) fake: FakeDocker,
     pub(super) task_tree: PathBuf,
-    pub(super) env_id: Uuid,
-    pub(super) task_id: Uuid,
+    pub(crate) env_id: Uuid,
+    pub(crate) task_id: Uuid,
 }
 
-pub(super) struct FakeDocker {
+pub(crate) struct FakeDocker {
     pub(super) log_path: PathBuf,
     mode_path: PathBuf,
 }
@@ -99,11 +100,11 @@ impl FakeDocker {
         }
     }
 
-    pub(super) fn set_mode(&self, mode: &str) {
+    pub(crate) fn set_mode(&self, mode: &str) {
         std::fs::write(&self.mode_path, mode).expect("set fake Docker mode");
     }
 
-    pub(super) fn log(&self) -> String {
+    pub(crate) fn log(&self) -> String {
         std::fs::read_to_string(&self.log_path).expect("read fake Docker log")
     }
 
@@ -116,7 +117,7 @@ impl FakeDocker {
 }
 
 impl ManagerRig {
-    pub(super) async fn prepared(files: &[(&str, &str)]) -> Self {
+    pub(crate) async fn prepared(files: &[(&str, &str)]) -> Self {
         let fixture = PreparationRig::start(files).await;
         let prepare_job = fixture.poll().await;
         assert_eq!(prepare_job.kind, "prepare_native_task");
@@ -175,7 +176,9 @@ impl ManagerRig {
             operation_deadline: Duration::from_secs(10),
             ..ExecutionEnvironmentProfile::default()
         };
-        let backend: Arc<dyn RunnerBackend> = Arc::new(ProfiledDockerBackend::new(docker, profile));
+        let export_backend: Arc<dyn RunnerBackend> = docker.clone();
+        let backend: Arc<dyn RunnerBackend> =
+            Arc::new(ProfiledDockerBackend::new(Arc::clone(&docker), profile));
         let prepared = crate::upstream::native_task::prepare(
             &fixture.client,
             &fixture.base,
@@ -203,11 +206,12 @@ impl ManagerRig {
             task_tree: fixture.tree_dir(),
             fixture,
             backend,
+            export_backend,
             fake,
         }
     }
 
-    pub(super) async fn schedule(
+    pub(crate) async fn schedule(
         &self,
         operation: &str,
         generation: i64,
@@ -230,25 +234,25 @@ impl ManagerRig {
             .expect("schedule native task operation")
     }
 
-    pub(super) async fn poll(&self, expected_kind: &str) -> RunnerJob {
+    pub(crate) async fn poll(&self, expected_kind: &str) -> RunnerJob {
         let job = self.fixture.poll().await;
         assert_eq!(job.kind, expected_kind);
         job
     }
 
-    pub(super) async fn execute(&self, job: &RunnerJob) -> anyhow::Result<Value> {
+    pub(crate) async fn execute(&self, job: &RunnerJob) -> anyhow::Result<Value> {
         execute_job(self.backend.as_ref(), job).await
     }
 
-    pub(super) async fn report_success(&self, job: &RunnerJob, result: Value) -> StatusCode {
+    pub(crate) async fn report_success(&self, job: &RunnerJob, result: Value) -> StatusCode {
         report_job(&self.fixture, &job.job_id, true, Some(result), None).await
     }
 
-    pub(super) async fn report_failure(&self, job: &RunnerJob, error: &str) -> StatusCode {
+    pub(crate) async fn report_failure(&self, job: &RunnerJob, error: &str) -> StatusCode {
         report_job(&self.fixture, &job.job_id, false, None, Some(error)).await
     }
 
-    pub(super) fn tree_file(&self, relative: &str) -> PathBuf {
+    pub(crate) fn tree_file(&self, relative: &str) -> PathBuf {
         self.task_tree.join(relative)
     }
 }

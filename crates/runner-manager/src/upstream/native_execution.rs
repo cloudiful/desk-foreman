@@ -1,5 +1,7 @@
 use anyhow::bail;
-use runner_protocol::{RunnerJob, StartNativeTaskRequest, StopNativeTaskRequest};
+use runner_protocol::{
+    ExportNativeTaskRequest, RunnerJob, StartNativeTaskRequest, StopNativeTaskRequest,
+};
 use serde_json::Value;
 
 use crate::runtime::RunnerBackend;
@@ -121,6 +123,11 @@ pub(super) async fn execute_job(
                 backend.stop_native_task(request).await?,
             )?)
         }
+        "export_native_task" => {
+            let request: ExportNativeTaskRequest = serde_json::from_value(job.payload.clone())?;
+            backend.export_native_task(request).await?;
+            bail!("native task export requires the bounded upload dispatcher")
+        }
         _ => bail!("native execution dispatcher received an unsupported job kind"),
     }
 }
@@ -229,6 +236,33 @@ mod tests {
         };
         let backend = crate::runtime::DirectRunnerBackend::new();
         assert!(execute_job(backend.as_ref(), &job).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn native_export_dispatch_stays_fail_closed_by_default() {
+        let start = request();
+        let selection =
+            runner_protocol::validate_native_task_export_selection(&["README.md".to_string()])
+                .unwrap();
+        let job = RunnerJob {
+            job_id: "envjob:123e4567-e89b-12d3-a456-426614174001".to_string(),
+            kind: "export_native_task".to_string(),
+            payload: serde_json::to_value(runner_protocol::ExportNativeTaskRequest {
+                owner: start.owner,
+                task: start.task,
+                stop_job_id: Uuid::from_u128(8),
+                selection_sha256: selection.selection_sha256,
+                paths: selection.paths,
+            })
+            .unwrap(),
+        };
+        let backend = crate::runtime::DirectRunnerBackend::new();
+        let error = execute_job(backend.as_ref(), &job).await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("native task export is not configured")
+        );
     }
 
     #[tokio::test]

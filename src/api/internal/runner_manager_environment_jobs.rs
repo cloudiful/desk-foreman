@@ -83,6 +83,14 @@ pub(super) async fn next_assigned_environment_job(
         )
         .await
         .map_err(AppError::internal)?
+    } else if row.job_kind == "export_native_task" {
+        let request = crate::db::execution_environments::tasks::exports::request_for_export_job(
+            &state.db, &row,
+        )
+        .await
+        .map_err(AppError::internal)?;
+        serde_json::to_value(request)
+            .map_err(|error| AppError::internal(anyhow::Error::from(error)))?
     } else {
         serde_json::json!({ "owner": environment_job_owner(&row) })
     };

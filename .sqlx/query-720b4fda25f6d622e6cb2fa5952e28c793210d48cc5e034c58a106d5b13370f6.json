@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO execution_environment_task_export_files (job_id, path, content)\nSELECT $1, path, content\nFROM unnest($2::text[], $3::text[]) AS output(path, content);\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "720b4fda25f6d622e6cb2fa5952e28c793210d48cc5e034c58a106d5b13370f6"
+}

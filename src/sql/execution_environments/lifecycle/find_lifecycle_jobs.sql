@@ -20,4 +20,5 @@ SELECT
 FROM execution_environment_jobs
 WHERE application_id = $1
   AND environment_id = $2
+  AND job_kind <> 'export_native_task'
 ORDER BY created_at ASC, job_id ASC;

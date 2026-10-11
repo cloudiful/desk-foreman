@@ -1,5 +1,8 @@
 # Durable native task intents
 
+See [selected retained task exports](execution-environment-task-exports.md) for
+immutable output selection and download.
+
 An application admits one durable task intent for an authorized workspace
 binding. Its state progresses from admission and preparation through a fenced
 start and a task-aware stop. The control plane records original-manager jobs,

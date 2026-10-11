@@ -1,0 +1,29 @@
+INSERT INTO execution_environment_task_exports (
+    job_id,
+    task_id,
+    environment_id,
+    application_id,
+    workspace_binding_id,
+    assigned_manager_id,
+    target_generation,
+    stop_job_id,
+    selection_sha256,
+    selection_file_count
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING
+    job_id,
+    task_id,
+    environment_id,
+    application_id,
+    workspace_binding_id,
+    assigned_manager_id,
+    target_generation,
+    stop_job_id,
+    selection_sha256,
+    selection_file_count,
+    output_manifest_sha256,
+    output_file_count,
+    output_missing_count,
+    output_total_bytes,
+    completed_at;

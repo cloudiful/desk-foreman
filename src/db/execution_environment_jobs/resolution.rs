@@ -55,6 +55,7 @@ pub(crate) fn environment_job_wire_kind(
         "stop" => Ok(STOP_WIRE_KIND),
         "prepare_native_task" => Ok(PREPARE_WIRE_KIND),
         "start_native_task" => Ok(START_NATIVE_WIRE_KIND),
+        "export_native_task" => Ok("export_native_task"),
         other => anyhow::bail!("durable environment job has an unknown kind: {other}"),
     }
 }

@@ -125,3 +125,21 @@ mod admin_guard_cases;
 
 #[path = "execution_environment_tasks/janitor_cases.rs"]
 mod janitor_cases;
+
+#[path = "execution_environment_tasks/export_helpers.rs"]
+mod export_helpers;
+
+#[path = "execution_environment_tasks/export_cases.rs"]
+mod export_cases;
+
+#[path = "execution_environment_tasks/export_atomic_cases.rs"]
+mod export_atomic_cases;
+
+#[path = "execution_environment_tasks/export_access_cases.rs"]
+mod export_access_cases;
+
+#[path = "execution_environment_tasks/export_claim_cases.rs"]
+mod export_claim_cases;
+
+#[path = "execution_environment_tasks/export_bounds_cases.rs"]
+mod export_bounds_cases;
