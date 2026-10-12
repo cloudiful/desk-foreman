@@ -133,6 +133,7 @@ pub async fn release_workspace_binding_lease(
     post,
     path = "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/lease",
     tag = "internal",
+    security(("application_bearer" = [])),
     params(
         ("resource_kind" = String, Path, description = "Resource workspace kind"),
         ("resource_id" = String, Path, description = "Resource workspace identifier")
@@ -181,6 +182,7 @@ pub async fn acquire_resource_workspace_lease(
     delete,
     path = "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/lease",
     tag = "internal",
+    security(("application_bearer" = [])),
     params(
         ("resource_kind" = String, Path, description = "Resource workspace kind"),
         ("resource_id" = String, Path, description = "Resource workspace identifier")

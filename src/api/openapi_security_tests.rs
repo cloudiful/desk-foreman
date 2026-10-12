@@ -1,7 +1,7 @@
 //! OpenAPI tests for the application bearer security contract.
 //!
-//! The internal execution-environment routes already reject requests without
-//! an application bearer token at runtime. These tests pin the generated
+//! The internal application-authenticated routes already reject requests
+//! without an application bearer token at runtime. These tests pin the generated
 //! document to that same contract so downstream clients send the header, and
 //! they fail if any requirement, the scheme itself, or a public route changes.
 
@@ -73,7 +73,7 @@ fn application_bearer_is_declared_as_http_bearer_without_credentials() {
 }
 
 #[test]
-fn environment_operations_require_the_application_bearer() {
+fn application_bearer_operations_require_the_application_bearer() {
     let document = document();
     let operations = operations(&document);
 
@@ -99,7 +99,7 @@ fn environment_operations_require_the_application_bearer() {
 }
 
 #[test]
-fn only_the_environment_operations_declare_security() {
+fn only_the_guarded_operations_declare_security() {
     let document = document();
     let mut guarded: Vec<(&str, &str, &str)> = operations(&document)
         .into_iter()
