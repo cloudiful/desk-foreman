@@ -2,6 +2,7 @@
 //!
 //! Endpoint implementations are split across focused sibling modules:
 //!   * [`lease`]          - acquire/release/takeover/status handlers
+//!   * [`resource_binding`] - lease-free binding identity resolution
 //!   * [`runner_manager`] - runner-manager bearer-token endpoints
 //!   * [`application`]    - capability introspection and git sync
 //!   * [`execution_environments`] - durable environment ensure/invalidate
@@ -15,6 +16,7 @@ pub(super) mod application;
 pub(super) mod execution_environments;
 pub(super) mod lease;
 pub(super) mod lease_audit;
+pub(super) mod resource_binding;
 pub(super) mod runner_manager;
 pub(super) mod runner_manager_environment_jobs;
 pub(super) mod runner_manager_service_relay;
@@ -42,6 +44,7 @@ pub(super) use lease::{
     release_resource_workspace_lease, release_workspace_binding_lease,
     resource_workspace_lease_status, takeover_resource_workspace_lease,
 };
+pub(super) use resource_binding::ensure_resource_workspace_binding;
 pub(super) use runner_manager::{
     complete_runner_job, next_runner_job, report_workspace_runner, runner_manager_config,
 };
@@ -102,6 +105,10 @@ pub(super) fn router() -> axum::Router<crate::AppState> {
         .route(
             "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/lease/takeover",
             axum::routing::post(takeover_resource_workspace_lease),
+        )
+        .route(
+            "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/binding",
+            axum::routing::post(ensure_resource_workspace_binding),
         )
         .route(
             "/api/internal/execution-environments/ensure",

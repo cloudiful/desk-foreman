@@ -56,6 +56,7 @@ pub(crate) const APPLICATION_BEARER_SCHEME: &str = "application_bearer";
         super::internal::lease::release_resource_workspace_lease,
         super::internal::lease::takeover_resource_workspace_lease,
         super::internal::lease::resource_workspace_lease_status,
+        super::internal::resource_binding::ensure_resource_workspace_binding,
         super::internal::application::application_capabilities,
         super::internal::application::sync_resource_workspace_git,
         super::internal::execution_environments::handlers::ensure_execution_environment,

@@ -42,9 +42,13 @@ pub(super) async fn resolve_binding_for_application(
     Ok(application_id)
 }
 
-/// Create-on-miss resource binding resolver. Preserves the existing POST
-/// acquire/release resource-lease contract that materializes a resource
-/// workspace on first access.
+/// Create-on-miss resource binding resolver.
+///
+/// Used by the resource-lease acquire/release endpoints and by
+/// `ensure_resource_workspace_binding`, which resolves binding identity
+/// without touching the lease. It materializes the resource workspace on first
+/// access and always returns the active binding; archived or deactivated rows
+/// are refused rather than resurrected.
 pub(super) async fn resolve_or_create_resource_binding_for_application(
     state: &AppState,
     headers: &HeaderMap,
@@ -74,7 +78,8 @@ pub(super) async fn resolve_or_create_resource_binding_for_application(
 /// Lookup-only resource binding resolver. Used by the lease-status GET and
 /// the lease-takeover POST so neither endpoint materializes a workspace
 /// directory or workspace_bindings row on first call; callers that need
-/// create-on-miss semantics must use the existing POST acquire endpoint.
+/// create-on-miss semantics use the resource-lease endpoints or
+/// `ensure_resource_workspace_binding`.
 pub(super) async fn resolve_resource_binding_for_application(
     state: &AppState,
     headers: &HeaderMap,

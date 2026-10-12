@@ -4,7 +4,7 @@
 //! Split from `openapi_security_tests.rs` so no file exceeds the size budget:
 //! the flat `(path, method, operation id)` table is data, not logic.
 
-pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 28] = [
+pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 29] = [
     (
         "/api/internal/execution-environments/ensure",
         "post",
@@ -150,5 +150,12 @@ pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 28] = [
         "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/lease",
         "delete",
         "release_resource_workspace_lease",
+    ),
+    // Binding identity resolution shares the lease routes' application guard
+    // and never grants a lease.
+    (
+        "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/binding",
+        "post",
+        "ensure_resource_workspace_binding",
     ),
 ];
