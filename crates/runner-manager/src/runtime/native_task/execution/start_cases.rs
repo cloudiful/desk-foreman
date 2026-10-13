@@ -1,4 +1,6 @@
-use runner_protocol::{SourceSeedSnapshotFile, validate_seed_bundle};
+use runner_protocol::{
+    SourceSeedSnapshotFile, native_task_workspace_directory, validate_seed_bundle,
+};
 
 use super::test_support::Rig;
 
@@ -25,21 +27,34 @@ async fn prepared_start_mounts_the_task_and_records_a_running_journal() {
             .expect("journal JSON");
     assert_eq!(journal["phase"], "running");
 
+    let directory = native_task_workspace_directory(rig.request.task.workspace_binding_id);
     let log = rig.log();
     assert!(log.contains("volume create"), "{log}");
     assert_eq!(rig.run_count(), 1, "{log}");
-    assert!(log.contains(&format!(
-        "type=bind,source={},target=/workspace",
-        rig.host_tree
-    )));
+    assert!(
+        log.contains(&format!(
+            "type=bind,source={},target={directory}",
+            rig.host_tree
+        )),
+        "{log}"
+    );
     assert!(log.contains("df-env-123e4567e89b12d3a456426614174000:/state"));
-    assert!(log.contains("--workdir /workspace"));
+    assert!(log.contains(&format!("--workdir {directory}")));
     assert!(log.contains("--workdir /state/work"));
+    assert!(
+        !log.contains("--workdir /workspace "),
+        "the shared workspace root is never a container working directory: {log}"
+    );
     assert_eq!(
         log.lines()
             .filter(|line| line.starts_with("exec --user 1000:1000 "))
             .count(),
         2
+    );
+    assert!(
+        log.lines()
+            .any(|line| line.contains(&format!("--workdir {directory} "))),
+        "the task writability probe must run inside the bound checkout: {log}"
     );
     assert!(!log.contains("--privileged") && !log.contains("--publish"));
 }

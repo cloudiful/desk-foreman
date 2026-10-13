@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::StatusCode;
-use runner_protocol::{NativeTaskRuntimeIdentity, RunnerJob};
+use runner_protocol::{NativeTaskRuntimeIdentity, RunnerJob, native_task_workspace_directory};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -92,6 +92,7 @@ impl FakeDocker {
             &marker_path,
             &barrier_path,
             &container_name,
+            &native_task_workspace_directory(identity.workspace_binding_id),
         );
         write_executable(dir, "docker-task-fake", &script);
         Self {
@@ -266,10 +267,11 @@ fn fake_docker_script(
     marker: &Path,
     barrier: &Path,
     container_name: &str,
+    task_probe_workdir: &str,
 ) -> String {
     let quote = |path: &Path| shell_quote(path.to_str().expect("UTF-8 test path"));
     format!(
-        "#!/bin/bash\necho \"$@\" >> {}\nmode=$(cat {})\ncheck_barrier() {{ if [ \"$mode\" = require-stop-barrier ] && ! grep -Eq '\"stopped_generation\":[1-9]' {}; then echo 'missing stop barrier' >&2; exit 1; fi; }}\ncase \"$1\" in\n  volume) exit 0 ;;\n  ps) check_barrier; cat {}; if [ -f {} ]; then echo {}; fi; exit 0 ;;\n  inspect) check_barrier; if [ \"$2\" = {} ] && [ -f {} ]; then cat {}; exit 0; fi; if [ \"$2\" != {} ] && grep -Fxq \"$2\" {}; then cat {}; exit 0; fi; echo 'Error: No such container' >&2; exit 1 ;;\n  run) if [ \"$mode\" = fail-run ]; then exit 1; fi; touch {}; exit 0 ;;\n  exec) if [ \"$mode\" = fail-task-probe ] && [[ \"$*\" == *\"--workdir /workspace\"* ]]; then exit 1; fi; exit 0 ;;\n  stop) check_barrier; if [ \"$mode\" = stop-stuck ]; then exit 1; fi; cp {} {}; exit 0 ;;\n  rm) check_barrier; if [ \"$mode\" = stop-stuck ]; then exit 1; fi; rm -f {}; exit 0 ;;\n  *) exit 0 ;;\nesac\n",
+        "#!/bin/bash\necho \"$@\" >> {}\nmode=$(cat {})\ncheck_barrier() {{ if [ \"$mode\" = require-stop-barrier ] && ! grep -Eq '\"stopped_generation\":[1-9]' {}; then echo 'missing stop barrier' >&2; exit 1; fi; }}\ncase \"$1\" in\n  volume) exit 0 ;;\n  ps) check_barrier; cat {}; if [ -f {} ]; then echo {}; fi; exit 0 ;;\n  inspect) check_barrier; if [ \"$2\" = {} ] && [ -f {} ]; then cat {}; exit 0; fi; if [ \"$2\" != {} ] && grep -Fxq \"$2\" {}; then cat {}; exit 0; fi; echo 'Error: No such container' >&2; exit 1 ;;\n  run) if [ \"$mode\" = fail-run ]; then exit 1; fi; touch {}; exit 0 ;;\n  exec) if [ \"$mode\" = fail-task-probe ] && [[ \"$*\" == *\"--workdir {}\"* ]]; then exit 1; fi; exit 0 ;;\n  stop) check_barrier; if [ \"$mode\" = stop-stuck ]; then exit 1; fi; cp {} {}; exit 0 ;;\n  rm) check_barrier; if [ \"$mode\" = stop-stuck ]; then exit 1; fi; rm -f {}; exit 0 ;;\n  *) exit 0 ;;\nesac\n",
         quote(log),
         quote(mode),
         quote(barrier),
@@ -283,6 +285,7 @@ fn fake_docker_script(
         quote(other_names),
         quote(inspect),
         quote(marker),
+        task_probe_workdir,
         quote(stopped_inspect),
         quote(inspect),
         quote(marker),

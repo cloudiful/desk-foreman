@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use runner_protocol::{NativeTaskRuntimeIdentity, RunnerOwner};
+use runner_protocol::{NativeTaskRuntimeIdentity, RunnerOwner, native_task_workspace_directory};
 use serde_json::{Value, json};
 
 pub(super) fn inspect_value(
@@ -28,6 +28,7 @@ pub(super) fn inspect_value(
         "df.native_seed_sha256": task.manifest_sha256,
         "df.native_preparation_generation": task.preparation_generation.to_string(),
     });
+    let workspace_directory = native_task_workspace_directory(task.workspace_binding_id);
     json!({
         "Id": "native-task-container",
         "State": {"Status": status},
@@ -35,7 +36,7 @@ pub(super) fn inspect_value(
             "Image": "test-image",
             "Labels": labels,
             "User": format!("{uid}:{gid}"),
-            "WorkingDir": "/workspace"
+            "WorkingDir": workspace_directory
         },
         "HostConfig": {
             "Privileged": false,
@@ -53,7 +54,7 @@ pub(super) fn inspect_value(
             {
                 "Type": "bind",
                 "Source": host_tree,
-                "Destination": "/workspace",
+                "Destination": workspace_directory,
                 "RW": true
             }
         ]

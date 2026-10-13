@@ -111,6 +111,13 @@ pub struct NativeTaskDescriptor {
     pub task_id: Uuid,
     pub environment_id: Uuid,
     pub workspace_binding_id: i64,
+    /// The directory this task's checkout uses inside its container.
+    ///
+    /// A normative container path derived from `workspace_binding_id` by the
+    /// same helper the manager uses to mount and to verify the checkout, so a
+    /// consumer can key durable per-workspace state on it. It says nothing
+    /// about a container currently running or about any manager address.
+    pub workspace_directory: String,
     /// The authorization generation this task targets.
     pub target_generation: i64,
     /// Checked task state, including preparation and execution transitions.
@@ -133,6 +140,9 @@ impl NativeTaskDescriptor {
             task_id: task.task_id,
             environment_id: task.environment_id,
             workspace_binding_id: task.workspace_binding_id,
+            workspace_directory: runner_protocol::native_task_workspace_directory(
+                task.workspace_binding_id,
+            ),
             target_generation: task.target_generation,
             state: task.state.clone(),
             container_generation: task.container_generation,
@@ -149,9 +159,50 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        AdmitNativeTaskRequest, CancelNativeTaskRequest, ReleaseNativeTaskRequest,
-        TaskExecutionRequestApi,
+        AdmitNativeTaskRequest, CancelNativeTaskRequest, NativeTaskDescriptor,
+        ReleaseNativeTaskRequest, TaskExecutionRequestApi,
     };
+
+    fn stored_task(workspace_binding_id: i64) -> crate::db::execution_environments::NativeTask {
+        crate::db::execution_environments::NativeTask {
+            task_id: uuid::Uuid::from_u128(7),
+            operation_token: "op-1".to_string(),
+            environment_id: uuid::Uuid::from_u128(1),
+            application_id: 1,
+            workspace_binding_id,
+            subject_external_user_id: "user-1".to_string(),
+            target_generation: 4,
+            assigned_manager_id: 7,
+            state: "prepared".to_string(),
+            container_generation: None,
+            prepare_job_id: None,
+            start_job_id: None,
+            stop_job_id: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            terminal_at: None,
+        }
+    }
+
+    #[test]
+    fn the_descriptor_directory_follows_the_stored_binding_only() {
+        let first = NativeTaskDescriptor::from_task(&stored_task(42));
+        assert_eq!(first.workspace_directory, "/workspace/bindings/42");
+        assert_eq!(first.workspace_binding_id, 42);
+
+        let second = NativeTaskDescriptor::from_task(&stored_task(7));
+        assert_eq!(second.workspace_directory, "/workspace/bindings/7");
+        assert_ne!(first.workspace_directory, second.workspace_directory);
+
+        assert_eq!(
+            NativeTaskDescriptor::from_task(&stored_task(42)).workspace_directory,
+            first.workspace_directory,
+            "a later task of one binding reuses its checkout location"
+        );
+
+        let value = serde_json::to_value(&first).expect("descriptor JSON");
+        assert_eq!(value["workspace_directory"], "/workspace/bindings/42");
+    }
 
     #[test]
     fn an_admit_request_denies_unknown_fields() {

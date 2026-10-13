@@ -36,7 +36,8 @@
 ### `GET /api/internal/execution-environments/{environment_id}/tasks/{task_id}`
 
 读取一个归属于本应用的任务、当前状态、候选代次，以及可选的
-`start_job_id` / `stop_job_id` 锚点。
+`start_job_id` / `stop_job_id` 锚点。响应还包含 `workspace_directory`，即该绑定在容器内的
+检出位置，详见[原生任务工作区目录](native-task-workspace-directory.zh-CN.md)。
 
 ### `POST /api/internal/execution-environments/{environment_id}/tasks/{task_id}/cancel`
 
@@ -253,8 +254,9 @@ Manager 收到 `stop_native_task` wire kind 与已存储任务身份。成功停
 候选代次和精确停止作业围栏显式 release。
 
 当本地检出根、Docker daemon 可见根以及现有执行环境配置均已配置时，原始 Manager 可执行
-`prepared` 任务的类型化启动。容器只挂载持久状态卷和 UUID 推导的任务树到 `/workspace`；在探测
-状态目录与任务树可写之前，必须校验精确任务标签、用户、工作目录和两个挂载。`running` 日志允许
+`prepared` 任务的类型化启动。容器只挂载持久状态卷和 UUID 推导的任务树到该绑定的检出目录；
+在探测状态目录与任务树可写之前，必须校验精确任务标签、用户、工作目录和两个挂载，详见
+[原生任务工作区目录](native-task-workspace-directory.zh-CN.md)。`running` 日志允许
 验证后重放，不重建容器，也不将任务修改过的文件与种子比较。被中断的 `starting` 日志会保留且不会
 自动重试。
 
@@ -279,7 +281,7 @@ Manager 收到 `stop_native_task` wire kind 与已存储任务身份。成功停
 
 ```text
 <本地根>/<environment_uuid>/<task_uuid>/tree
-<daemon根>/<environment_uuid>/<task_uuid>/tree -> /workspace
+<daemon根>/<environment_uuid>/<task_uuid>/tree -> /workspace/bindings/<workspace_binding_id>
 ```
 
 新目录权限为 `0700`、新文件为 `0600`，全部以 `create_new` 创建。暂存树发布前会重新计算哈希并与

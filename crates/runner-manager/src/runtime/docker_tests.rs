@@ -70,6 +70,13 @@ fn backend_with_docker_cli(docker_cli: &str) -> Arc<DockerRunnerBackend> {
 /// tests never share process-global env: `ok` (0), `missing` (1 with
 /// "No such container" on stderr, quiescent), `fail` (1 with unrelated
 /// stderr, fail closed), `hang` (sleep 2, bounded by the caller timeout).
+///
+/// The script opens with an exact readiness argument that exits 0 before it
+/// logs anything or looks at its mode. That is the only added line: for
+/// `stop`, `rm`, `missing`, `fail` and `hang` the script is byte-equivalent to
+/// the previous version. The readiness probe exists because a freshly written
+/// fixture can still be held open by a writer when the manager first tries to
+/// execute it, and the kernel then refuses the exec with `ETXTBSY`.
 fn write_fake_docker(
     dir: &std::path::Path,
     name: &str,
@@ -78,7 +85,7 @@ fn write_fake_docker(
 ) -> std::path::PathBuf {
     let path = dir.join(name);
     let script = format!(
-        "#!/bin/bash\necho \"$@\" >> \"{}\"\nmode=\"{}\"\nif [ \"$mode\" = \"hang\" ]; then\n  sleep 2\n  exit 0\nfi\nif [ \"$mode\" = \"missing\" ]; then\n  echo \"Error: No such container: $3\" >&2\n  exit 1\nfi\nif [ \"$mode\" = \"fail\" ]; then\n  echo \"permission denied\" >&2\n  exit 1\nfi\nexit 0\n",
+        "#!/bin/bash\nif [ \"$1\" = \"{READY_ARG}\" ]; then exit 0; fi\necho \"$@\" >> \"{}\"\nmode=\"{}\"\nif [ \"$mode\" = \"hang\" ]; then\n  sleep 2\n  exit 0\nfi\nif [ \"$mode\" = \"missing\" ]; then\n  echo \"Error: No such container: $3\" >&2\n  exit 1\nfi\nif [ \"$mode\" = \"fail\" ]; then\n  echo \"permission denied\" >&2\n  exit 1\nfi\nexit 0\n",
         log.display(),
         mode
     );
@@ -92,7 +99,120 @@ fn write_fake_docker(
         perms.set_mode(0o755);
         std::fs::set_permissions(&path, perms).expect("chmod fake docker");
     }
+    // The fixture is only usable once its published path can really be
+    // executed, so the helper proves that before returning it. The script is
+    // never rewritten after a successful probe.
+    probe_fixture_readiness(&path, spawn_fixture_readiness_probe)
+        .expect("published fake docker must be executable before any test uses it");
     path
+}
+
+/// Exact argument that makes a published fake CLI report readiness and exit.
+const READY_ARG: &str = "__df_fixture_ready";
+/// `ETXTBSY`: the errno returned while a writer still holds the script open.
+const FIXTURE_BUSY_ERRNO: i32 = 26;
+/// Upper bound on readiness probes, so a stuck fixture fails instead of hanging.
+const FIXTURE_READY_MAX_ATTEMPTS: u32 = 64;
+/// Aggregate budget for the whole readiness wait.
+const FIXTURE_READY_BUDGET: std::time::Duration = std::time::Duration::from_secs(1);
+/// Bounded pause between readiness attempts.
+const FIXTURE_READY_BACKOFF: std::time::Duration = std::time::Duration::from_millis(1);
+
+/// Wait until a published fixture can actually be executed.
+///
+/// Only `ETXTBSY` is retried, only here, and only while the bounded budget
+/// lasts; any other spawn error, a non-zero exit or unexpected output fails
+/// immediately so a real defect is never masked. The gate is a real successful
+/// spawn, exit and reap — never elapsed time.
+fn probe_fixture_readiness<F>(path: &std::path::Path, mut probe: F) -> anyhow::Result<()>
+where
+    F: FnMut(&std::path::Path, &str) -> std::io::Result<std::process::Output>,
+{
+    let deadline = std::time::Instant::now() + FIXTURE_READY_BUDGET;
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        match probe(path, READY_ARG) {
+            Ok(output) => {
+                if !output.status.success() {
+                    anyhow::bail!(
+                        "fake docker readiness probe for {} exited with {:?} on attempt {attempt}",
+                        path.display(),
+                        output.status
+                    );
+                }
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if !stdout.trim().is_empty() {
+                    anyhow::bail!(
+                        "fake docker readiness probe for {} produced unexpected output {:?} on attempt {attempt}",
+                        path.display(),
+                        stdout.trim()
+                    );
+                }
+                return Ok(());
+            }
+            Err(error) if error.raw_os_error() == Some(FIXTURE_BUSY_ERRNO) => {
+                if attempt >= FIXTURE_READY_MAX_ATTEMPTS || std::time::Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "fake docker readiness probe for {} was still busy after {attempt} attempts within {FIXTURE_READY_BUDGET:?}: {error}",
+                        path.display()
+                    );
+                }
+                std::thread::sleep(FIXTURE_READY_BACKOFF);
+            }
+            Err(error) => {
+                anyhow::bail!(
+                    "fake docker readiness probe for {} failed on attempt {attempt}: {error}",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+fn spawn_fixture_readiness_probe(
+    path: &std::path::Path,
+    arg: &str,
+) -> std::io::Result<std::process::Output> {
+    std::process::Command::new(path).arg(arg).output()
+}
+
+#[tokio::test]
+async fn a_spawn_failure_names_the_os_class_without_leaking_the_arguments() {
+    // No real Docker: the configured CLI path simply does not exist, so
+    // `Command::output()` fails at spawn.
+    let backend = backend_with_docker_cli("/nonexistent/docker-cli-for-822");
+    let error = backend
+        .docker_output(["stop", "df-secret-container-name"])
+        .await
+        .expect_err("spawning a missing CLI must fail");
+    let chain = format!("{error:#}");
+
+    assert!(
+        chain.starts_with("failed to execute /nonexistent/docker-cli-for-822:"),
+        "unexpected spawn context: {chain}"
+    );
+    // The added classification is a bounded `io::ErrorKind` plus the numeric
+    // OS code. Its exact wording is Rust's, so the test asserts the shape
+    // rather than an English string.
+    let mut segments = chain.splitn(3, ": ");
+    assert_eq!(
+        segments.next(),
+        Some("failed to execute /nonexistent/docker-cli-for-822")
+    );
+    let classification = segments.next().unwrap_or_default();
+    assert!(
+        !classification.is_empty() && classification.ends_with("(os error 2)"),
+        "the bounded OS classification must be present: {chain}"
+    );
+    assert!(
+        segments.next().is_some(),
+        "the original io error stays in the chain as the source: {chain}"
+    );
+    assert!(
+        !chain.contains("df-secret-container-name") && !chain.contains("stop"),
+        "a spawn failure must not echo the argv: {chain}"
+    );
 }
 
 #[test]
@@ -171,6 +291,151 @@ async fn takeover_terminate_removes_task_container_and_preserves_workspace() {
         std::fs::read_to_string(&workspace_file).expect("read workspace"),
         "user data"
     );
+}
+
+#[cfg(unix)]
+fn ready_output(stdout: &[u8], code: i32) -> std::process::Output {
+    use std::os::unix::process::ExitStatusExt;
+    std::process::Output {
+        status: std::process::ExitStatus::from_raw(code),
+        stdout: stdout.to_vec(),
+        stderr: Vec::new(),
+    }
+}
+
+#[test]
+fn fixture_readiness_retries_only_while_the_script_is_busy() {
+    let path = std::path::Path::new("/tmp/docker-fixture-readiness");
+    let mut attempts = 0u32;
+    let outcome = probe_fixture_readiness(path, |_, arg| {
+        attempts += 1;
+        assert_eq!(
+            arg, READY_ARG,
+            "the probe uses the exact readiness argument"
+        );
+        if attempts < 3 {
+            Err(std::io::Error::from_raw_os_error(FIXTURE_BUSY_ERRNO))
+        } else {
+            Ok(ready_output(b"", 0))
+        }
+    });
+
+    assert!(outcome.is_ok(), "ETXTBSY must clear: {outcome:?}");
+    assert_eq!(attempts, 3, "exactly one retry per busy attempt");
+}
+
+#[test]
+fn fixture_readiness_never_retries_another_errno() {
+    let path = std::path::Path::new("/tmp/docker-fixture-readiness");
+    let mut attempts = 0u32;
+    let outcome = probe_fixture_readiness(path, |_, _| {
+        attempts += 1;
+        Err(std::io::Error::from_raw_os_error(13)) // EACCES
+    });
+
+    let message = outcome
+        .expect_err("a denied spawn must fail the fixture")
+        .to_string();
+    assert_eq!(attempts, 1, "only ETXTBSY may be retried");
+    assert!(
+        message.contains("failed on attempt 1") && message.contains("Permission denied"),
+        "the real error must be reported, not retried away: {message}"
+    );
+}
+
+#[test]
+fn fixture_readiness_gives_up_within_its_bounded_budget() {
+    let path = std::path::Path::new("/tmp/docker-fixture-readiness");
+    let mut attempts = 0u32;
+    let started = std::time::Instant::now();
+    let outcome = probe_fixture_readiness(path, |_, _| {
+        attempts += 1;
+        Err(std::io::Error::from_raw_os_error(FIXTURE_BUSY_ERRNO))
+    });
+    let elapsed = started.elapsed();
+
+    let message = outcome
+        .expect_err("a permanently busy fixture must fail")
+        .to_string();
+    assert!(
+        attempts <= FIXTURE_READY_MAX_ATTEMPTS,
+        "attempts must stay bounded: {attempts}"
+    );
+    assert!(attempts > 1, "the budget must actually be used");
+    assert!(
+        elapsed <= FIXTURE_READY_BUDGET + std::time::Duration::from_secs(1),
+        "the readiness wait must stay bounded, took {elapsed:?}"
+    );
+    assert!(
+        message.contains("was still busy") && message.contains(&attempts.to_string()),
+        "the failure must report what was measured: {message}"
+    );
+}
+
+#[test]
+fn fixture_readiness_refuses_a_non_zero_exit_or_any_output() {
+    let path = std::path::Path::new("/tmp/docker-fixture-readiness");
+
+    let failed_exit = probe_fixture_readiness(path, |_, _| Ok(ready_output(b"", 3)))
+        .expect_err("a non-zero readiness exit is a broken fixture");
+    assert!(
+        failed_exit.to_string().contains("exited with"),
+        "{failed_exit}"
+    );
+
+    let unexpected = probe_fixture_readiness(path, |_, _| Ok(ready_output(b"noise\n", 0)))
+        .expect_err("a readiness probe must be silent");
+    assert!(
+        unexpected.to_string().contains("unexpected output"),
+        "{unexpected}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_published_fake_cli_is_ready_without_logging_the_probe_argument() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let log = temp.path().join("docker-ready.log");
+    std::fs::write(&log, "").expect("seed log");
+    // The helper has already probed readiness by the time it returns here.
+    let fake = write_fake_docker(temp.path(), "docker-ready", &log, "ok");
+
+    let after_probe = std::fs::read_to_string(&log).expect("read log");
+    assert!(
+        !after_probe.contains(READY_ARG) && after_probe.is_empty(),
+        "the readiness argument must never reach the argv log: {after_probe}"
+    );
+
+    // The published fixture is a real, reaped executable.
+    let ready = std::process::Command::new(&fake)
+        .arg(READY_ARG)
+        .output()
+        .expect("run the readiness argument");
+    assert!(ready.status.success() && ready.stdout.is_empty());
+    assert!(
+        std::fs::read_to_string(&log).expect("read log").is_empty(),
+        "the readiness branch must exit before logging"
+    );
+
+    // Normal behaviour is unchanged: stop and rm still append their argv.
+    for verb in ["stop", "rm"] {
+        let output = std::process::Command::new(&fake)
+            .arg(verb)
+            .arg("desk-foreman-runner-workspace-binding-42")
+            .output()
+            .expect("run the fake docker");
+        assert!(output.status.success(), "{verb} must still exit 0");
+    }
+    let logged = std::fs::read_to_string(&log).expect("read log");
+    assert!(
+        logged.contains("stop desk-foreman-runner-workspace-binding-42"),
+        "{logged}"
+    );
+    assert!(
+        logged.contains("rm desk-foreman-runner-workspace-binding-42"),
+        "{logged}"
+    );
+    assert!(!logged.contains(READY_ARG), "{logged}");
 }
 
 #[tokio::test]

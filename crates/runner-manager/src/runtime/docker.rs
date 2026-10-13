@@ -346,7 +346,21 @@ impl DockerRunnerBackend {
             .stderr(Stdio::piped())
             .output()
             .await
-            .with_context(|| format!("failed to execute {}", config.docker_cli))?;
+            .map_err(|error| {
+                // Operators need to tell "the daemon is busy" from "that path
+                // is gone" without reading the full error chain. Only the
+                // bounded standard classification is added: never the argv,
+                // the environment or any child output.
+                let kind = error.kind();
+                let os_code = match error.raw_os_error() {
+                    Some(code) => code.to_string(),
+                    None => "none".to_string(),
+                };
+                anyhow::Error::new(error).context(format!(
+                    "failed to execute {}: {kind} (os error {os_code})",
+                    config.docker_cli
+                ))
+            })?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         } else {

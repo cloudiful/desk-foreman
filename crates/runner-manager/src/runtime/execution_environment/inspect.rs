@@ -9,12 +9,15 @@
 
 use std::path::{Component, Path};
 
-use runner_protocol::{NativeTaskRuntimeIdentity, RunnerOwner, execution_environment as protocol};
+use runner_protocol::{
+    NativeTaskRuntimeIdentity, RunnerOwner, execution_environment as protocol,
+    native_task_workspace_directory,
+};
 
 use super::{
     LABEL_ENVIRONMENT, LABEL_GENERATION, LABEL_MANAGED, LABEL_MANAGER, LABEL_NATIVE_BINDING_ID,
     LABEL_NATIVE_PREPARATION_GENERATION, LABEL_NATIVE_SEED_SHA256, LABEL_NATIVE_TASK_ID,
-    LABEL_OWNER, NATIVE_TASK_WORKDIR,
+    LABEL_OWNER, NATIVE_TASK_WORKSPACE_ROOT,
 };
 use crate::runtime::docker::DockerRunnerBackend;
 use crate::runtime::docker_command::is_missing_container_error;
@@ -104,6 +107,11 @@ pub(crate) fn ensure_native_task_labels_match(
 
 /// Require the native identity, exact launch mounts and non-root process
 /// configuration before acknowledging or reusing a start.
+///
+/// The working directory and the single task bind must both equal the
+/// directory derived for the requested task's workspace binding, so a
+/// container created against another binding, against a previous shared-root
+/// checkout, or against an unexpected path is refused instead of reused.
 pub(crate) fn ensure_native_task_container_matches(
     info: &EnvContainerInfo,
     owner: &RunnerOwner,
@@ -117,9 +125,10 @@ pub(crate) fn ensure_native_task_container_matches(
     gid: u32,
 ) -> anyhow::Result<()> {
     ensure_native_task_labels_match(info, owner, manager_id, task)?;
+    let expected_directory = native_task_workspace_directory(task.workspace_binding_id);
     if info.image.as_deref() != Some(expected_image)
         || info.user.as_deref() != Some(format!("{uid}:{gid}").as_str())
-        || info.working_dir.as_deref() != Some(NATIVE_TASK_WORKDIR)
+        || info.working_dir.as_deref() != Some(expected_directory.as_str())
         || info.privileged != Some(false)
         || info.publish_all_ports != Some(false)
         || !info.port_bindings_empty
@@ -141,7 +150,7 @@ pub(crate) fn ensure_native_task_container_matches(
     let has_task = mounts.iter().any(|mount| {
         mount.kind.as_deref() == Some("bind")
             && mount.source.as_deref() == Some(task_source.as_ref())
-            && mount.destination.as_deref() == Some(NATIVE_TASK_WORKDIR)
+            && mount.destination.as_deref() == Some(expected_directory.as_str())
             && mount.read_write == Some(true)
     });
     if mounts.len() != 2 || !has_state || !has_task {
@@ -152,11 +161,17 @@ pub(crate) fn ensure_native_task_container_matches(
 
 /// Validate only the two durable mounts required to identify a native stop
 /// candidate, independent of the current launch profile.
+///
+/// The expected checkout directory comes from the candidate's own binding
+/// label, which every caller has already pinned to the requested task through
+/// `ensure_native_task_labels_match` immediately before this check. A missing
+/// or non-numeric label fails closed rather than guessing a directory.
 pub(crate) fn ensure_native_task_stop_mounts_match(
     info: &EnvContainerInfo,
     state_volume: &str,
     task_source: &Path,
 ) -> anyhow::Result<()> {
+    let expected_directory = expected_binding_directory(info)?;
     let mounts = info
         .mounts
         .as_deref()
@@ -171,21 +186,33 @@ pub(crate) fn ensure_native_task_stop_mounts_match(
                     && !destination
                         .components()
                         .any(|component| component == Component::ParentDir)
-                    && !destination.starts_with(Path::new(NATIVE_TASK_WORKDIR))
-                    && !Path::new(NATIVE_TASK_WORKDIR).starts_with(destination)
+                    && !destination.starts_with(Path::new(NATIVE_TASK_WORKSPACE_ROOT))
+                    && !Path::new(NATIVE_TASK_WORKSPACE_ROOT).starts_with(destination)
             })
             && mount.read_write == Some(true)
     });
     let has_task = mounts.iter().any(|mount| {
         mount.kind.as_deref() == Some("bind")
             && mount.source.as_deref() == Some(task_source.as_ref())
-            && mount.destination.as_deref() == Some(NATIVE_TASK_WORKDIR)
+            && mount.destination.as_deref() == Some(expected_directory.as_str())
             && mount.read_write == Some(true)
     });
     if mounts.len() != 2 || !has_state || !has_task {
         anyhow::bail!("native task stop candidate mounts do not match its task and state volumes");
     }
     Ok(())
+}
+
+fn expected_binding_directory(info: &EnvContainerInfo) -> anyhow::Result<String> {
+    let raw = info.labels.get(LABEL_NATIVE_BINDING_ID).ok_or_else(|| {
+        anyhow::anyhow!(
+            "native task container has no workspace binding label to derive its checkout"
+        )
+    })?;
+    let binding_id = raw.parse::<i64>().map_err(|_| {
+        anyhow::anyhow!("native task container workspace binding label is not a binding id")
+    })?;
+    Ok(native_task_workspace_directory(binding_id))
 }
 
 /// Inspect one environment container within the remaining operation

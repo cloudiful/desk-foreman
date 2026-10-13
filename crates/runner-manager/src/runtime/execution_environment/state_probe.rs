@@ -60,14 +60,24 @@ pub fn build_state_probe_argv(spec: &StateProbeSpec<'_>) -> Vec<String> {
     ]
 }
 
-/// Build a probe for the fixed native task checkout workdir.
-pub fn build_task_workspace_probe_argv(container_name: &str, uid: u32, gid: u32) -> Vec<String> {
+/// Build a probe for the native task checkout of one workspace binding.
+///
+/// The working directory is the same binding-scoped directory the manager
+/// bound and published as the container working directory, so a successful
+/// probe proves the actual bind — not some parent of it — is writable by the
+/// configured non-root user.
+pub fn build_task_workspace_probe_argv(
+    container_name: &str,
+    workspace_binding_id: i64,
+    uid: u32,
+    gid: u32,
+) -> Vec<String> {
     vec![
         "exec".to_string(),
         "--user".to_string(),
         format!("{uid}:{gid}"),
         "--workdir".to_string(),
-        super::NATIVE_TASK_WORKDIR.to_string(),
+        runner_protocol::native_task_workspace_directory(workspace_binding_id),
         container_name.to_string(),
         "sh".to_string(),
         "-c".to_string(),
@@ -118,15 +128,24 @@ pub(crate) async fn confirm_state_writable(
 
 /// Confirm the task bind is writable in the same running container and as the
 /// same manager-matched non-root user as the persistent state volume.
+///
+/// `workspace_binding_id` is the stored task identity's binding, so the probe
+/// runs exactly where the manager mounted the checkout.
 pub(crate) async fn confirm_task_workspace_writable(
     backend: &DockerRunnerBackend,
     container_name: &str,
+    workspace_binding_id: i64,
     process: &EnsureProcessProfile<'_>,
     deadline: &OperationDeadline,
 ) -> anyhow::Result<()> {
     let output = backend
         .docker_output_bounded(
-            build_task_workspace_probe_argv(container_name, process.uid, process.gid),
+            build_task_workspace_probe_argv(
+                container_name,
+                workspace_binding_id,
+                process.uid,
+                process.gid,
+            ),
             deadline.remaining_ms()?,
         )
         .await

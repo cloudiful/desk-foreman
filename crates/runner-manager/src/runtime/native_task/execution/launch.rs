@@ -105,7 +105,14 @@ pub(super) async fn start_prepared_task(
     }
 
     confirm_state_writable(backend, container_name, process, deadline).await?;
-    confirm_task_workspace_writable(backend, container_name, process, deadline).await?;
+    confirm_task_workspace_writable(
+        backend,
+        container_name,
+        request.task.workspace_binding_id,
+        process,
+        deadline,
+    )
+    .await?;
     deadline.remaining_ms()?;
 
     let mut running = starting.clone();

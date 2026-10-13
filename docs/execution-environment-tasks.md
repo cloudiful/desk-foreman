@@ -42,7 +42,9 @@ operation token is replayed with an identical intent.
 ### `GET /api/internal/execution-environments/{environment_id}/tasks/{task_id}`
 
 Reads one owned task and its current state, candidate generation and optional
-`start_job_id` / `stop_job_id` anchors.
+`start_job_id` / `stop_job_id` anchors. The response also carries
+`workspace_directory`, the binding's checkout location inside its container —
+see [native task workspace directories](native-task-workspace-directory.md).
 
 ### `POST /api/internal/execution-environments/{environment_id}/tasks/{task_id}/cancel`
 
@@ -305,12 +307,13 @@ the current generation, candidate generation and exact stop-job fences.
 
 The original manager executes typed native starts for prepared tasks when both
 native roots and the existing execution-environment profile are configured. It
-mounts only the persistent state volume and the UUID-derived task tree at
-`/workspace`, then verifies the exact task labels, user, workdir and two mounts
-before probing state and task-tree writability. A `running` journal allows a
-validated replay without recreating the container or comparing edited task files
-to the seed. An interrupted `starting` journal is retained and never retried
-automatically.
+mounts only the persistent state volume and the UUID-derived task tree at the
+binding's checkout directory, then verifies the exact task labels, user, workdir
+and two mounts before probing state and task-tree writability. See
+[native task workspace directories](native-task-workspace-directory.md). A
+`running` journal allows a validated replay without recreating the container or
+comparing edited task files to the seed. An interrupted `starting` journal is
+retained and never retried automatically.
 
 Native stop persists the generation barrier before Docker inspection, then waits
 for the shared environment and task-workspace locks before claiming preparation
@@ -341,7 +344,7 @@ environment and task UUIDs:
 
 ```text
 <local-root>/<environment_uuid>/<task_uuid>/tree
-<host-root>/<environment_uuid>/<task_uuid>/tree -> /workspace
+<host-root>/<environment_uuid>/<task_uuid>/tree -> /workspace/bindings/<workspace_binding_id>
 ```
 
 New directories are `0700` and new files `0600`, all created with `create_new`.

@@ -99,8 +99,14 @@ pub const LABEL_NATIVE_BINDING_ID: &str = "df.native_binding_id";
 pub const LABEL_NATIVE_SEED_SHA256: &str = "df.native_seed_sha256";
 /// Docker label carrying the task preparation generation.
 pub const LABEL_NATIVE_PREPARATION_GENERATION: &str = "df.native_preparation_generation";
-/// Fixed bind destination for a native task checkout.
-pub const NATIVE_TASK_WORKDIR: &str = "/workspace";
+/// Container-side root that bounds every native task checkout.
+///
+/// A checkout is mounted in its own binding-scoped directory below this root
+/// (`native_task_workspace_directory`), never at the root itself, and the
+/// durable state mount must stay disjoint from this whole root. The value is
+/// the shared protocol constant so the manager and the control-plane
+/// descriptor cannot name different roots.
+pub const NATIVE_TASK_WORKSPACE_ROOT: &str = runner_protocol::NATIVE_TASK_WORKSPACE_ROOT;
 
 #[cfg(test)]
 mod task_mount_tests;

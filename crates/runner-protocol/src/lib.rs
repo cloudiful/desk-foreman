@@ -15,8 +15,9 @@ pub use execution_environment::{
     StopExecutionEnvironmentRequest,
 };
 pub use task_execution::{
-    NativeTaskRuntimeIdentity, StartNativeTaskRequest, StartNativeTaskResult,
-    StopNativeTaskRequest, StopNativeTaskResult,
+    NATIVE_TASK_WORKSPACE_ROOT, NativeTaskRuntimeIdentity, StartNativeTaskRequest,
+    StartNativeTaskResult, StopNativeTaskRequest, StopNativeTaskResult,
+    native_task_workspace_directory,
 };
 pub use task_export::{
     ExportNativeTaskRequest, ExportNativeTaskResult, ExportNativeTaskUpload,

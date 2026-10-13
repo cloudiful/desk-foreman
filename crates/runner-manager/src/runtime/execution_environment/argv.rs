@@ -4,7 +4,8 @@
 //! Pure builders only: no Docker calls here so fake-CLI tests can assert
 //! labels, mounts, and hardening without a daemon. Legacy environment launch
 //! keeps its state-volume-only mount; native launch adds one server-derived
-//! task bind. No published ports or request-supplied host paths are accepted.
+//! task bind at the binding-scoped directory shared with the reuse/stop mount
+//! guards. No published ports or request-supplied host paths are accepted.
 //!
 //! The configured trusted command is appended verbatim as the container
 //! `CMD`, after the image. The image's own `ENTRYPOINT` therefore still
@@ -12,12 +13,12 @@
 //! entrypoint accepts a command of this shape; no entrypoint override is
 //! invented here.
 
-use runner_protocol::NativeTaskRuntimeIdentity;
+use runner_protocol::{NativeTaskRuntimeIdentity, native_task_workspace_directory};
 
 use super::{
     LABEL_ENVIRONMENT, LABEL_GENERATION, LABEL_MANAGED, LABEL_MANAGER, LABEL_NATIVE_BINDING_ID,
     LABEL_NATIVE_PREPARATION_GENERATION, LABEL_NATIVE_SEED_SHA256, LABEL_NATIVE_TASK_ID,
-    LABEL_OWNER, NATIVE_TASK_WORKDIR,
+    LABEL_OWNER,
 };
 use crate::config::RunnerManagerConfig;
 
@@ -63,6 +64,11 @@ pub fn build_environment_run_argv(spec: &EnvironmentRunSpec<'_>) -> Vec<String> 
 }
 
 /// Build one native-task launch with a typed identity and derived task bind.
+///
+/// The bind destination and the container working directory are the same
+/// binding-scoped directory from the shared protocol helper, while the host
+/// source stays the authorized checkout this manager already materialized.
+/// Nothing here is caller-provided.
 pub fn build_native_task_run_argv(
     spec: &EnvironmentRunSpec<'_>,
     task: &NativeTaskRuntimeIdentity,
@@ -80,8 +86,9 @@ pub fn build_native_task_run_argv(
             task.preparation_generation.to_string(),
         ),
     ];
-    let task_mount = format!("type=bind,source={task_tree_source},target={NATIVE_TASK_WORKDIR}");
-    build_environment_run_argv_with(spec, NATIVE_TASK_WORKDIR, &labels, Some(&task_mount))
+    let workspace_directory = native_task_workspace_directory(task.workspace_binding_id);
+    let task_mount = format!("type=bind,source={task_tree_source},target={workspace_directory}");
+    build_environment_run_argv_with(spec, &workspace_directory, &labels, Some(&task_mount))
 }
 
 fn build_environment_run_argv_with(

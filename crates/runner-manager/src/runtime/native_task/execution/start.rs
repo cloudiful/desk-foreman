@@ -152,8 +152,14 @@ pub(crate) async fn start_native_task(
                     credentials.existing(environment_id, generation, &service.auth_env_name)?;
                 }
                 confirm_state_writable(backend, &container_name, &process, &deadline).await?;
-                confirm_task_workspace_writable(backend, &container_name, &process, &deadline)
-                    .await?;
+                confirm_task_workspace_writable(
+                    backend,
+                    &container_name,
+                    request.task.workspace_binding_id,
+                    &process,
+                    &deadline,
+                )
+                .await?;
                 deadline.remaining_ms()?;
                 Ok(start_result(&request, container_name))
             }

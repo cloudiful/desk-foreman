@@ -1,4 +1,4 @@
-use runner_protocol::StartNativeTaskRequest;
+use runner_protocol::{StartNativeTaskRequest, native_task_workspace_directory};
 use serde_json::{Value, json};
 
 use super::{ENVIRONMENT_ID, MANAGER_ID};
@@ -45,7 +45,7 @@ pub(super) fn inspect_json(
             "Image": "test-image",
             "Labels": labels,
             "User": format!("{uid}:{gid}"),
-            "WorkingDir": "/workspace"
+            "WorkingDir": native_task_workspace_directory(task.workspace_binding_id)
         },
         "HostConfig": {
             "Privileged": false,
@@ -63,7 +63,7 @@ pub(super) fn inspect_json(
             {
                 "Type": "bind",
                 "Source": task_source,
-                "Destination": "/workspace",
+                "Destination": native_task_workspace_directory(task.workspace_binding_id),
                 "RW": true
             }
         ]
