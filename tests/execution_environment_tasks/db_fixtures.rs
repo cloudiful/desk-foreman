@@ -86,6 +86,26 @@ pub async fn set_idle_fence(pool: &PgPool, environment_id: Uuid, manager_id: i64
     .expect("write environment fence");
 }
 
+/// Pin the cold shape a public ensure leaves behind: the same idle fence as
+/// [`set_idle_fence`] except that no manager is assigned at all.
+///
+/// Nothing here invents a manager. Admission is what later pins one on the
+/// task, and the native start is what binds it to the environment.
+pub async fn set_cold_fence(pool: &PgPool, environment_id: Uuid, generation: i64) {
+    sqlx::query(
+        "UPDATE execution_environments \
+         SET generation = $2, container_generation = NULL, assigned_manager_id = NULL, \
+             state = 'absent', stop_proof_job_id = NULL, stop_proof_generation = NULL, \
+             active_native_task_id = NULL \
+         WHERE environment_id = $1",
+    )
+    .bind(environment_id)
+    .bind(generation)
+    .execute(pool)
+    .await
+    .expect("write cold environment fence");
+}
+
 /// Create one live code-project resource workspace binding.
 pub async fn create_code_project_binding(
     pool: &PgPool,

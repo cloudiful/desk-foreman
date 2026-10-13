@@ -68,7 +68,7 @@ pub(super) async fn start(
         || binding.lifecycle_blocks_admission()
         || binding.has_legacy_write_owner()
         || environment.active_native_task_id != Some(task_id)
-        || environment.assigned_manager_id != Some(task.assigned_manager_id)
+        || !environment_accepts_start_binding(&environment, task.assigned_manager_id)
         || task.state != "prepared"
         || task.container_generation.is_some()
         || task.subject_external_user_id != environment.external_user_id
@@ -144,6 +144,7 @@ pub(super) async fn start(
         task_id,
         task.target_generation,
         environment.container_generation,
+        task.assigned_manager_id,
     )
     .fetch_optional(&mut *tx)
     .await
@@ -164,6 +165,24 @@ pub(super) async fn start(
 
 fn is_start_for_task(job: &ExecutionEnvironmentJob, task_id: Uuid) -> bool {
     job.job_kind == "start_native_task" && job.native_task_id == Some(task_id)
+}
+
+/// Whether this environment may take the task's original manager now.
+///
+/// A cold environment — never assigned a manager, no candidate generation, and
+/// still absent — may be bound here, which is the whole point of the cold
+/// start: the public ensure leaves the manager unbound and admission pins one
+/// on the task alone. Every other NULL shape stays a conflict, and an
+/// environment that already names a manager is only accepted when it is this
+/// task's own manager, so a foreign manager is never retargeted.
+fn environment_accepts_start_binding(
+    environment: &crate::db::execution_environments::tasks::TaskEnvironment,
+    manager_id: i64,
+) -> bool {
+    match environment.assigned_manager_id {
+        Some(assigned_manager_id) => assigned_manager_id == manager_id,
+        None => environment.state == "absent" && environment.container_generation.is_none(),
+    }
 }
 
 async fn validate_preparation(

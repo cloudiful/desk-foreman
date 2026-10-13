@@ -100,8 +100,7 @@ async fn lock_current<'a>(
         && job.target_generation == environment.generation
         && job.target_generation == task.target_generation
         && environment.active_native_task_id == Some(task_id)
-        && environment.assigned_manager_id == Some(manager_id)
-        && environment.container_generation.is_none()
+        && environment_accepts_preparation_binding(&environment, manager_id)
         && task.assigned_manager_id == manager_id
         && task.state == "preparing"
         && task.prepare_job_id == Some(job_id)
@@ -122,6 +121,27 @@ async fn lock_current<'a>(
         task_id,
         job_id,
     }))
+}
+
+/// Whether this environment may accept the original manager's preparation proof.
+///
+/// A cold environment — no manager assigned yet, still absent and with no
+/// candidate — accepts the proof of the manager the task itself is pinned to.
+/// Every other shape keeps the original rule: the environment must already
+/// name this exact manager, and it must carry no candidate generation in either
+/// branch. Completing a preparation never assigns a manager; the environment
+/// stays unbound until the native start binds the task's own pin atomically.
+fn environment_accepts_preparation_binding(
+    environment: &crate::db::execution_environments::tasks::TaskEnvironment,
+    manager_id: i64,
+) -> bool {
+    if environment.container_generation.is_some() {
+        return false;
+    }
+    match environment.assigned_manager_id {
+        Some(assigned_manager_id) => assigned_manager_id == manager_id,
+        None => environment.state == "absent",
+    }
 }
 
 /// Validate the proof, then record job success and `prepared` atomically.

@@ -119,7 +119,22 @@ impl FakeDocker {
 
 impl ManagerRig {
     pub(crate) async fn prepared(files: &[(&str, &str)]) -> Self {
-        let fixture = PreparationRig::start(files).await;
+        Self::build(files, false).await
+    }
+
+    /// The same start/stop/release pipeline on the genuinely cold environment
+    /// (issue 824 P1): the public ensure left `assigned_manager_id = NULL`, and
+    /// nothing here writes a manager onto it before the native start runs.
+    pub(crate) async fn prepared_cold(files: &[(&str, &str)]) -> Self {
+        Self::build(files, true).await
+    }
+
+    async fn build(files: &[(&str, &str)], cold: bool) -> Self {
+        let fixture = if cold {
+            PreparationRig::start_cold(files).await
+        } else {
+            PreparationRig::start(files).await
+        };
         let prepare_job = fixture.poll().await;
         assert_eq!(prepare_job.kind, "prepare_native_task");
         let prepare_request: runner_protocol::PrepareNativeTaskRequest =
@@ -255,6 +270,18 @@ impl ManagerRig {
 
     pub(crate) fn tree_file(&self, relative: &str) -> PathBuf {
         self.task_tree.join(relative)
+    }
+
+    /// The environment's bound manager, or `None` while it is still cold.
+    pub(crate) async fn environment_manager(&self) -> Option<i64> {
+        let row: (Option<i64>,) = sqlx::query_as(
+            "SELECT assigned_manager_id FROM execution_environments WHERE environment_id = $1",
+        )
+        .bind(self.env_id)
+        .fetch_one(&self.fixture.db.pool)
+        .await
+        .expect("read environment manager");
+        row.0
     }
 }
 

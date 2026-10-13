@@ -107,6 +107,50 @@ async fn native_task_start_stop_release_runs_through_router_and_manager_dispatch
 
 #[tokio::test]
 #[ignore = "requires isolated PostgreSQL; mandatory named gate"]
+async fn a_cold_environment_binds_its_original_manager_at_the_native_start() {
+    let rig = ManagerRig::prepared_cold(FILES).await;
+    // The positive public prepare acknowledgment has already run here, and the
+    // environment is still unbound: no fixture wrote a manager onto it.
+    assert_eq!(
+        rig.environment_manager().await,
+        None,
+        "preparation must leave a cold environment unbound"
+    );
+
+    let (start_job, start_result) = start(&rig).await;
+    assert_eq!(start_result["task"]["task_id"], rig.task_id.to_string());
+    assert_eq!(start_result["environment"]["state"], "running");
+    assert_eq!(
+        rig.environment_manager().await,
+        Some(rig.fixture.manager_id),
+        "the native start binds the task's own original manager"
+    );
+
+    rig.fake.set_mode("require-stop-barrier");
+    let scheduled = rig.schedule("stop", 4, "cold-stop").await;
+    assert_eq!(scheduled.status(), StatusCode::OK);
+    let stop_job = rig.poll("stop_native_task").await;
+    let stop_result = rig.execute(&stop_job).await.expect("manager stop dispatch");
+    assert_eq!(stop_result["preparation_quiescent"], true);
+    assert_eq!(
+        rig.report_success(&stop_job, stop_result).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(rig.fixture.task_state().await, "stopping");
+
+    let released = release(&rig, 5, 4, wire_uuid(&stop_job)).await;
+    assert_eq!(released.status(), StatusCode::OK);
+    assert_eq!(rig.fixture.task_state().await, "released");
+    assert_eq!(
+        rig.environment_manager().await,
+        Some(rig.fixture.manager_id),
+        "the binding survives the task"
+    );
+    let _ = start_job;
+}
+
+#[tokio::test]
+#[ignore = "requires isolated PostgreSQL; mandatory named gate"]
 async fn prepared_task_stop_proves_absence_before_release_without_creating_or_cleaning_tree() {
     let rig = ManagerRig::prepared(FILES).await;
     let before = std::fs::read(rig.tree_file("README.md")).expect("seed checkout");

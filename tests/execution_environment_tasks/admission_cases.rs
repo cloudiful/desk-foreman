@@ -28,8 +28,9 @@ async fn an_admitted_task_records_identity_binding_and_state_only() {
         "P1 never sets a candidate"
     );
     // The response shape is the whole contract: identity, binding, generation
-    // and state. No manager, host path, image, port, state volume, credential
-    // or subject echo may appear.
+    // and state, plus the binding's checkout directory inside its container. No
+    // manager, host path, image, port, state volume, credential or subject
+    // echo may appear.
     let mut keys: Vec<&str> = body
         .as_object()
         .expect("object")
@@ -50,6 +51,7 @@ async fn an_admitted_task_records_identity_binding_and_state_only() {
             "target_generation",
             "task_id",
             "workspace_binding_id",
+            "workspace_directory",
         ],
         "a task descriptor must expose nothing else"
     );

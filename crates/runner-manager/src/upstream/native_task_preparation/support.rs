@@ -114,6 +114,16 @@ pub(super) fn plan_of(files: &[(&str, &str)]) -> runner_protocol::SeedBundle {
 
 /// Ensure the environment and pin it into the exact idle shape a task may bind.
 async fn prepare_environment(pool: &PgPool, app_id: i64, manager_id: i64) -> Uuid {
+    prepare_environment_with(pool, app_id, Some(manager_id)).await
+}
+
+/// The same idle fence, with the manager assignment left optional.
+///
+/// `None` produces the genuinely cold environment a public `ensure` leaves
+/// behind: no manager is written at all, so admission has to pin one on the
+/// task and the native start has to bind it. The default warm shape is
+/// unchanged.
+async fn prepare_environment_with(pool: &PgPool, app_id: i64, manager_id: Option<i64>) -> Uuid {
     let outcome = desk_foreman::db::queries::ensure_execution_environment(
         pool,
         app_id,
@@ -163,10 +173,25 @@ async fn code_project_binding(pool: &PgPool, app_id: i64) -> i64 {
 impl Rig {
     /// Build an admitted, seeded task whose preparation is scheduled.
     pub(crate) async fn start(files: &[(&str, &str)]) -> Self {
+        Self::build(files, false).await
+    }
+
+    /// The same task on the genuinely cold environment (issue 824 P1): the
+    /// environment keeps `assigned_manager_id = NULL`, exactly as a public
+    /// ensure leaves it, and no helper writes a manager onto it.
+    pub(crate) async fn start_cold(files: &[(&str, &str)]) -> Self {
+        Self::build(files, true).await
+    }
+
+    async fn build(files: &[(&str, &str)], cold: bool) -> Self {
         let db = IsolatedDb::setup().await;
         let (app_id, application_token) = create_app(&db.pool, "prep-owner").await;
         let (manager_id, manager_token) = online_manager(&db.pool, "prep-manager").await;
-        let env_id = prepare_environment(&db.pool, app_id, manager_id).await;
+        let env_id = if cold {
+            prepare_environment_with(&db.pool, app_id, None).await
+        } else {
+            prepare_environment(&db.pool, app_id, manager_id).await
+        };
         let binding_id = code_project_binding(&db.pool, app_id).await;
         let temp = tempfile::tempdir().expect("tempdir");
         let state = test_state(db.pool.clone());

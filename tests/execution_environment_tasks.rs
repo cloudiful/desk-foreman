@@ -93,6 +93,12 @@ mod native_execution_helpers;
 #[path = "execution_environment_tasks/native_execution_cases.rs"]
 mod native_execution_cases;
 
+#[path = "execution_environment_tasks/cold_start_cases.rs"]
+mod cold_start_cases;
+
+#[path = "execution_environment_tasks/cold_start_cancel_cases.rs"]
+mod cold_start_cancel_cases;
+
 #[path = "execution_environment_tasks/reviewer_relay_cutoff_cases.rs"]
 mod reviewer_relay_cutoff_cases;
 

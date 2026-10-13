@@ -9,8 +9,8 @@ pub use super::http_client::{HttpOutcome, call};
 
 pub use super::admin_state::{admin_session, test_state_with_admin};
 pub use super::db_fixtures::{
-    create_code_project_binding, create_environment, create_manager, set_idle_fence,
-    set_legacy_lease_owner,
+    create_code_project_binding, create_environment, create_manager, set_cold_fence,
+    set_idle_fence, set_legacy_lease_owner,
 };
 pub use super::task_seed::{active_task_of, confirmed_stop, seed_executed_task, stored_state};
 
@@ -45,6 +45,17 @@ impl TaskFixture {
     /// authorized code-project workspace. The environment has no candidate, so
     /// a task intent is admissible.
     pub async fn setup() -> Self {
+        Self::build(false).await
+    }
+
+    /// The same fixture on the genuinely cold path (issue 824 P1): the
+    /// environment keeps `assigned_manager_id = NULL`, exactly as a public
+    /// ensure leaves it. No helper writes a manager onto the environment.
+    pub async fn setup_cold() -> Self {
+        Self::build(true).await
+    }
+
+    async fn build(cold: bool) -> Self {
         let database = IsolatedDb::setup().await;
         let temp = tempfile::tempdir().expect("tempdir");
         let workspace_root = temp.path().join("workspace");
@@ -56,7 +67,11 @@ impl TaskFixture {
             create_app_with_token(&database.pool, "task-other").await;
         let (manager_id, manager_token) = create_manager(&database.pool, "task-manager").await;
         let environment_id = create_environment(&database.pool, application_id, "task-user").await;
-        set_idle_fence(&database.pool, environment_id, manager_id, 4).await;
+        if cold {
+            set_cold_fence(&database.pool, environment_id, 4).await
+        } else {
+            set_idle_fence(&database.pool, environment_id, manager_id, 4).await
+        }
         let binding_id = create_code_project_binding(
             &database.pool,
             application_id,

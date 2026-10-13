@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Persist a native start candidate without claiming that it is already running.\n--\n-- `$6` is the task's already-pinned original manager. A cold environment that\n-- has never been assigned a manager takes it here, in the same statement and\n-- the same transaction as the `starting` candidate. An environment that\n-- already names a manager is never retargeted: the guard only accepts the task's\n-- own manager, or a NULL manager on the exact absent shape with no candidate.\nUPDATE execution_environments\nSET state = 'starting',\n    assigned_manager_id = COALESCE(assigned_manager_id, $6),\n    container_generation = $4,\n    last_active_at = NOW(),\n    updated_at = NOW()\nWHERE environment_id = $1\n  AND application_id = $2\n  AND active_native_task_id = $3\n  AND generation = $4\n  AND container_generation IS NOT DISTINCT FROM $5\n  AND state IN ('absent', 'replaced')\n  AND (assigned_manager_id = $6\n       OR (assigned_manager_id IS NULL AND state = 'absent' AND container_generation IS NULL))\nRETURNING environment_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "environment_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environments",
+            "name": "environment_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f3d34a400cae7c472119fec3de11883001d90098563e4f21dcf491eb3d7fd327"
+}
