@@ -60,17 +60,45 @@ jobs:
           test -f dist/index.html
           cp -R dist/. ../ci-image-input/frontend-dist/
 
-      - name: Build and push Docker images
+      - name: Build and push runtime image
         uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-targets@v0.4.0
         with:
           context: .
           dockerfile: ./forgejo.Dockerfile
           platform: linux/amd64
           targets: >-
-            [{"target":"runtime","image_suffix":""},
-            {"target":"runner-manager","image_suffix":"-runner-manager"},
-            {"target":"workspace-runner","image_suffix":"-workspace-runner"}]
-          builder_name_prefix: desk-foreman
+            [{"target":"runtime","image_suffix":""}]
+          builder_name_prefix: desk-foreman-runtime
+          inline_cache: "true"
+          inline_cache_tag: latest-amd64
+          publish_latest: "false"
+          username: ${{ github.actor }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - name: Build and push runner-manager image
+        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-targets@v0.4.0
+        with:
+          context: .
+          dockerfile: ./forgejo.Dockerfile
+          platform: linux/amd64
+          targets: >-
+            [{"target":"runner-manager","image_suffix":"-runner-manager"}]
+          builder_name_prefix: desk-foreman-runner-manager
+          inline_cache: "true"
+          inline_cache_tag: latest-amd64
+          publish_latest: "false"
+          username: ${{ github.actor }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - name: Build and push workspace-runner image
+        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-targets@v0.4.0
+        with:
+          context: .
+          dockerfile: ./forgejo.Dockerfile
+          platform: linux/amd64
+          targets: >-
+            [{"target":"workspace-runner","image_suffix":"-workspace-runner"}]
+          builder_name_prefix: desk-foreman-workspace-runner
           inline_cache: "true"
           inline_cache_tag: latest-amd64
           publish_latest: "false"
