@@ -3,6 +3,8 @@ run-name: Docker Publish by ${{ github.actor }}
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
@@ -26,7 +28,7 @@ jobs:
         run: rm -rf ci-image-input
 
       - name: Build Rust artifacts
-        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/build-rust-artifacts@v0.3.5
+        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/build-rust-artifacts@v0.4.0
         with:
           build_command: >-
             cargo build --release
@@ -59,7 +61,7 @@ jobs:
           cp -R dist/. ../ci-image-input/frontend-dist/
 
       - name: Build and push Docker images
-        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-targets@v0.3.5
+        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-targets@v0.4.0
         with:
           context: .
           dockerfile: ./forgejo.Dockerfile
@@ -71,16 +73,18 @@ jobs:
           builder_name_prefix: desk-foreman
           inline_cache: "true"
           inline_cache_tag: latest-amd64
+          publish_latest: "false"
           username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_TOKEN }}
 
       - name: Publish Docker manifests
-        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-manifests@v0.3.5
+        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-manifests@v0.4.0
         with:
           architectures: amd64
           targets: >-
             [{"target":"runtime","image_suffix":""},
             {"target":"runner-manager","image_suffix":"-runner-manager"},
             {"target":"workspace-runner","image_suffix":"-workspace-runner"}]
+          publish_latest: "false"
           username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_TOKEN }}
