@@ -71,7 +71,8 @@ pub(crate) const LEASE_TAKEOVER_GRANTED_TTL_SECONDS: u64 = 600;
         (status = 401, body = crate::error::ErrorResponse),
         (status = 403, body = crate::error::ErrorResponse),
         (status = 404, body = crate::error::ErrorResponse),
-        (status = 409, body = crate::error::ErrorResponse)
+        (status = 409, body = crate::error::ErrorResponse),
+        (status = 503, body = crate::error::ErrorResponse)
     )
 )]
 pub async fn acquire_workspace_binding_lease(
@@ -106,7 +107,8 @@ pub async fn acquire_workspace_binding_lease(
         (status = 401, body = crate::error::ErrorResponse),
         (status = 403, body = crate::error::ErrorResponse),
         (status = 404, body = crate::error::ErrorResponse),
-        (status = 409, body = crate::error::ErrorResponse)
+        (status = 409, body = crate::error::ErrorResponse),
+        (status = 503, body = crate::error::ErrorResponse)
     )
 )]
 pub async fn release_workspace_binding_lease(
@@ -143,7 +145,8 @@ pub async fn release_workspace_binding_lease(
         (status = 200, body = WorkspaceBindingResponse),
         (status = 401, body = crate::error::ErrorResponse),
         (status = 404, body = crate::error::ErrorResponse),
-        (status = 409, body = crate::error::ErrorResponse)
+        (status = 409, body = crate::error::ErrorResponse),
+        (status = 503, body = crate::error::ErrorResponse)
     )
 )]
 pub async fn acquire_resource_workspace_lease(
@@ -192,7 +195,8 @@ pub async fn acquire_resource_workspace_lease(
         (status = 200, body = WorkspaceBindingResponse),
         (status = 401, body = crate::error::ErrorResponse),
         (status = 404, body = crate::error::ErrorResponse),
-        (status = 409, body = crate::error::ErrorResponse)
+        (status = 409, body = crate::error::ErrorResponse),
+        (status = 503, body = crate::error::ErrorResponse)
     )
 )]
 pub async fn release_resource_workspace_lease(
@@ -391,6 +395,70 @@ fn conflict_message(reason: crate::db::types::TakeoverConflictReason) -> String 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ordinary_lease_operations_document_cleanup_failure() {
+        let doc = serde_json::to_value(crate::api::openapi::openapi_document()).unwrap();
+        let paths = [
+            (
+                "/api/admin/workspace-bindings/{binding_id}/lease",
+                "post",
+                &["200", "404", "409"][..],
+                false,
+            ),
+            (
+                "/api/admin/workspace-bindings/{binding_id}/lease",
+                "delete",
+                &["200"][..],
+                false,
+            ),
+            (
+                "/api/internal/workspace-bindings/{binding_id}/lease",
+                "post",
+                &["200", "401", "403", "404", "409"][..],
+                false,
+            ),
+            (
+                "/api/internal/workspace-bindings/{binding_id}/lease",
+                "delete",
+                &["200", "401", "403", "404", "409"][..],
+                false,
+            ),
+            (
+                "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/lease",
+                "post",
+                &["200", "401", "404", "409"][..],
+                true,
+            ),
+            (
+                "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/lease",
+                "delete",
+                &["200", "401", "404", "409"][..],
+                true,
+            ),
+        ];
+        for (path, method, expected, application_bearer) in paths {
+            let operation = &doc["paths"][path][method];
+            for status in expected {
+                assert!(
+                    operation["responses"].get(status).is_some(),
+                    "{method} {path}: missing {status}"
+                );
+            }
+            assert_eq!(
+                operation["responses"]["503"]["content"]["application/json"]["schema"]["$ref"],
+                "#/components/schemas/ErrorResponse"
+            );
+            if application_bearer {
+                assert_eq!(
+                    operation["security"],
+                    serde_json::json!([{"application_bearer": []}])
+                );
+            } else {
+                assert!(operation.get("security").is_none());
+            }
+        }
+    }
+
     #[test]
     fn takeover_constants_stay_deterministic_for_stock_callers() {
         assert_eq!(super::LEASE_TAKEOVER_STALE_THRESHOLD_SECONDS, 180);

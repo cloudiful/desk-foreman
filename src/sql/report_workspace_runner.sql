@@ -11,4 +11,6 @@ WHERE runner_manager_id = $1
       (owner_kind = 'user' AND owner_user_id = $7)
       OR
       (owner_kind = 'workspace_binding' AND owner_workspace_binding_id = $8)
+      OR
+      (owner_kind = 'application_principal' AND owner_workspace_binding_id = $8 AND owner_application_id = $9 AND owner_principal_digest = $10)
   );

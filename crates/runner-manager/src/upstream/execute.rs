@@ -60,6 +60,27 @@ pub(super) async fn execute_job_inner(
             runner.cleanup_runner_owner(owner).await?;
             Ok(Value::Null)
         }
+        "cleanup_workspace_binding_principals" => {
+            let request = serde_json::from_value::<
+                runner_protocol::CleanupWorkspaceBindingPrincipalsRequest,
+            >(payload)?;
+            if request.workspace_binding_id <= 0 {
+                bail!("invalid workspace binding id");
+            }
+            Ok(serde_json::to_value(
+                runner.cleanup_workspace_binding_principals(request).await?,
+            )?)
+        }
+        "stop_workspace_principal" => {
+            let request =
+                serde_json::from_value::<runner_protocol::StopWorkspacePrincipalRequest>(payload)?;
+            if !request.is_valid() {
+                bail!("invalid workspace principal stop request");
+            }
+            Ok(serde_json::to_value(
+                runner.stop_workspace_principal(request).await?,
+            )?)
+        }
         "ensure_execution_environment" => {
             let request = serde_json::from_value::<
                 runner_protocol::EnsureExecutionEnvironmentRequest,
@@ -217,6 +238,172 @@ mod tests {
             max_output_bytes: None,
             network_enabled: false,
         }
+    }
+
+    struct PrincipalRunner(std::sync::atomic::AtomicUsize);
+
+    impl desk_foreman::runner::RunnerService for PrincipalRunner {
+        fn exec_shell<'a>(
+            &'a self,
+            _: runner_protocol::ExecRequest,
+        ) -> desk_foreman::runner::RunnerFuture<'a, anyhow::Result<runner_protocol::ShellToolOutput>>
+        {
+            Box::pin(async { anyhow::bail!("unused") })
+        }
+        fn write_stdin<'a>(
+            &'a self,
+            _: runner_protocol::InputRequest,
+        ) -> desk_foreman::runner::RunnerFuture<'a, anyhow::Result<runner_protocol::ShellToolOutput>>
+        {
+            Box::pin(async { anyhow::bail!("unused") })
+        }
+        fn cancel_session<'a>(
+            &'a self,
+            _: runner_protocol::CancelSessionRequest,
+        ) -> desk_foreman::runner::RunnerFuture<
+            'a,
+            anyhow::Result<runner_protocol::RunnerSessionStatus>,
+        > {
+            Box::pin(async { anyhow::bail!("unused") })
+        }
+        fn list_sessions<'a>(
+            &'a self,
+        ) -> desk_foreman::runner::RunnerFuture<
+            'a,
+            anyhow::Result<Vec<runner_protocol::RunnerSessionStatus>>,
+        > {
+            Box::pin(async { anyhow::bail!("unused") })
+        }
+        fn run_command<'a>(
+            &'a self,
+            _: runner_protocol::RunnerCommandRequest,
+        ) -> desk_foreman::runner::RunnerFuture<'a, anyhow::Result<runner_protocol::CommandOutput>>
+        {
+            Box::pin(async { anyhow::bail!("unused") })
+        }
+        fn cleanup_runner_owner<'a>(
+            &'a self,
+            _: runner_protocol::RunnerOwner,
+        ) -> desk_foreman::runner::RunnerFuture<'a, anyhow::Result<()>> {
+            Box::pin(async { anyhow::bail!("unused") })
+        }
+        fn stop_workspace_principal<'a>(
+            &'a self,
+            request: runner_protocol::StopWorkspacePrincipalRequest,
+        ) -> desk_foreman::runner::RunnerFuture<
+            'a,
+            anyhow::Result<runner_protocol::StopWorkspacePrincipalAck>,
+        > {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async move {
+                Ok(runner_protocol::StopWorkspacePrincipalAck {
+                    state: runner_protocol::StopWorkspacePrincipalState::Busy,
+                    detail: Some(request.principal_id),
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn principal_dispatch_validates_before_delegating() {
+        let runner = PrincipalRunner(std::sync::atomic::AtomicUsize::new(0));
+        let config: SharedRunnerManagerConfig = Arc::new(tokio::sync::RwLock::new(config()));
+        let gate = SessionGate::new();
+        let owner = runner_protocol::workspace_principal::application_principal_owner(
+            1,
+            1,
+            "user",
+            "workspace",
+        )
+        .unwrap();
+        let mut invalid_owner = owner.clone();
+        if let runner_protocol::RunnerOwner::ApplicationPrincipal {
+            workspace_binding_id,
+            ..
+        } = &mut invalid_owner
+        {
+            *workspace_binding_id = 0;
+        }
+        for (test_owner, principal) in [
+            (invalid_owner, "p".to_string()),
+            (
+                runner_protocol::RunnerOwner::WorkspaceBinding {
+                    workspace_binding_id: 1,
+                },
+                "p".to_string(),
+            ),
+            (owner.clone(), String::new()),
+            (
+                owner.clone(),
+                "x".repeat(
+                    runner_protocol::workspace_principal::MAX_CANONICAL_PRINCIPAL_KEY_BYTES + 1,
+                ),
+            ),
+        ] {
+            assert!(
+                super::execute_job_inner(
+                    &runner,
+                    &config,
+                    &gate,
+                    "stop_workspace_principal",
+                    serde_json::json!({"owner":test_owner,"principal_id":principal})
+                )
+                .await
+                .is_err()
+            );
+        }
+        assert_eq!(runner.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let result = super::execute_job_inner(
+            &runner,
+            &config,
+            &gate,
+            "stop_workspace_principal",
+            serde_json::json!({"owner":owner,"principal_id":"p"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, serde_json::json!({"state":"busy","detail":"p"}));
+        assert_eq!(runner.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        use crate::runtime::RunnerBackend;
+        let backend = crate::runtime::DirectRunnerBackend::new();
+        assert!(
+            backend
+                .stop_workspace_principal(runner_protocol::StopWorkspacePrincipalRequest {
+                    owner,
+                    principal_id: "p".into()
+                })
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn binding_cleanup_rejects_invalid_and_defaults_unsupported() {
+        let runner = PrincipalRunner(std::sync::atomic::AtomicUsize::new(0));
+        let config: SharedRunnerManagerConfig = Arc::new(tokio::sync::RwLock::new(config()));
+        let gate = SessionGate::new();
+        for id in [0, -1] {
+            let error = super::execute_job_inner(
+                &runner,
+                &config,
+                &gate,
+                "cleanup_workspace_binding_principals",
+                serde_json::json!({"workspace_binding_id":id}),
+            )
+            .await
+            .unwrap_err();
+            assert!(error.to_string().contains("invalid workspace binding"));
+        }
+        let error = super::execute_job_inner(
+            &runner,
+            &config,
+            &gate,
+            "cleanup_workspace_binding_principals",
+            serde_json::json!({"workspace_binding_id":1}),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("not supported"));
     }
 
     #[test]

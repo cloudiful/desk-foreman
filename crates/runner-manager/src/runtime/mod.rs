@@ -10,6 +10,7 @@ pub mod execution_environment;
 mod janitor;
 mod local_service;
 mod native_task;
+mod principal_admission;
 pub(crate) mod process_termination;
 mod reporter;
 pub(crate) mod session_gate;

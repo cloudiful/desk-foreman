@@ -1,0 +1,1 @@
+INSERT INTO execution_environment_tasks (task_id, operation_token, environment_id, application_id, workspace_binding_id, subject_external_user_id, target_generation, assigned_manager_id) VALUES ('00000000-0000-4000-8000-000000001146', 'p4m-native', '00000000-0000-4000-8000-000000001145', 817301, $1, 'native', 1, 817601);

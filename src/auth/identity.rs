@@ -43,6 +43,11 @@ pub(crate) async fn mcp_actor_from_bearer(
     if let Some((user, token_policy)) =
         queries::find_active_mcp_token_hash(&state.db, &token_hash).await?
     {
+        if super::runner_isolation::requested(headers)? {
+            return Err(AppError::unauthorized(
+                "runner isolation requires application authentication",
+            ));
+        }
         if touch {
             let _ = queries::touch_mcp_token(&state.db, &token_hash).await;
         }
@@ -98,11 +103,34 @@ async fn application_mcp_actor(
     headers: &HeaderMap,
     application: ApplicationTokenRecord,
 ) -> Result<McpActor, AppError> {
-    let external_user_id = header_value(headers, EXTERNAL_USER_HEADER)?
-        .ok_or_else(|| AppError::unauthorized("missing X-DF-External-User-Id header"))?;
-    let workspace_key =
-        header_value(headers, WORKSPACE_KEY_HEADER)?.unwrap_or_else(|| "default".to_string());
-    let lease_owner = header_value(headers, LEASE_OWNER_HEADER)?;
+    let isolated = super::runner_isolation::requested(headers)?;
+    let (external_user_id, workspace_key, lease_owner) = if isolated {
+        let external = super::runner_isolation::required_claim(headers, EXTERNAL_USER_HEADER)?;
+        let workspace = super::runner_isolation::required_claim(headers, WORKSPACE_KEY_HEADER)?;
+        let lease = super::runner_isolation::required_claim(headers, LEASE_OWNER_HEADER)?;
+        if external != lease
+            || parse_resource_workspace_key(&workspace).is_none()
+            || runner_protocol::workspace_principal::application_principal_owner(
+                application.application_id,
+                1,
+                &external,
+                &workspace,
+            )
+            .is_err()
+        {
+            return Err(AppError::unauthorized(
+                "invalid principal workspace identity",
+            ));
+        }
+        (external, workspace, Some(lease))
+    } else {
+        (
+            header_value(headers, EXTERNAL_USER_HEADER)?
+                .ok_or_else(|| AppError::unauthorized("missing X-DF-External-User-Id header"))?,
+            header_value(headers, WORKSPACE_KEY_HEADER)?.unwrap_or_else(|| "default".to_string()),
+            header_value(headers, LEASE_OWNER_HEADER)?,
+        )
+    };
     let application_response = application_response(&application);
     let binding =
         if let Some((resource_kind, resource_id)) = parse_resource_workspace_key(&workspace_key) {
@@ -124,7 +152,21 @@ async fn application_mcp_actor(
             .await?
         };
 
+    let isolated_runner_owner = if isolated {
+        Some(
+            runner_protocol::workspace_principal::application_principal_owner(
+                application.application_id,
+                binding.workspace_binding_id,
+                &external_user_id,
+                &workspace_key,
+            )
+            .map_err(|_| AppError::unauthorized("invalid principal workspace identity"))?,
+        )
+    } else {
+        None
+    };
     Ok(McpActor::ApplicationSubject {
+        isolated_runner_owner,
         application: Box::new(application_response),
         workspace_binding: Box::new(binding),
         external_user_id,

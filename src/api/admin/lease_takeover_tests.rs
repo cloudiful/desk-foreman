@@ -11,13 +11,33 @@ use runner_protocol::{
 };
 
 use super::{
-    cancel_binding_sessions_best_effort,
+    cancel_binding_sessions_with_principal,
     lease_test_support::{FakeRunnerService, binding_session, fake_state},
 };
 use crate::{
     AppState,
     runner::{RunnerFuture, RunnerService},
 };
+
+async fn cancel_binding_sessions_best_effort(
+    state: &AppState,
+    binding_id: i64,
+) -> crate::db::types::WorkspaceLeaseCancellationOutcome {
+    cancel_binding_sessions_with_principal(state, binding_id, async { Ok(()) }).await
+}
+
+#[tokio::test]
+async fn principal_failure_prevents_legacy_cleanup() {
+    let runner = FakeRunnerService::new();
+    runner.sessions.lock().await.push(binding_session(1, 42));
+    let state = fake_state(runner.clone());
+    let outcome =
+        cancel_binding_sessions_with_principal(&state, 42, async { anyhow::bail!("offline") })
+            .await;
+    assert!(!outcome.succeeded);
+    assert!(outcome.error.unwrap().contains("offline"));
+    assert_eq!(runner.sessions.lock().await.len(), 1);
+}
 
 #[tokio::test]
 async fn cancellation_only_touches_sessions_for_target_binding() {

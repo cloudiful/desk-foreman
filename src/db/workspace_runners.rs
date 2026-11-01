@@ -12,6 +12,8 @@ pub struct WorkspaceRunnerRecord {
     pub owner_kind: String,
     pub owner_user_id: Option<i64>,
     pub owner_workspace_binding_id: Option<i64>,
+    pub owner_application_id: Option<i64>,
+    pub owner_principal_digest: Option<String>,
     pub container_name: String,
     pub container_id: Option<String>,
     pub runtime: String,
@@ -40,6 +42,53 @@ pub struct SaveWorkspaceRunner<'a> {
     pub network_enabled: bool,
     pub workspace_root: &'a str,
     pub last_error: Option<&'a str>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn principal_owner_mapping_validates_identity() {
+        let owner = RunnerOwner::ApplicationPrincipal {
+            application_id: 3,
+            workspace_binding_id: 4,
+            principal_digest: "a".repeat(64),
+        };
+        assert_eq!(
+            owner_fields(&owner).unwrap(),
+            (
+                "application_principal",
+                None,
+                Some(4),
+                Some(3),
+                Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            )
+        );
+        for owner in [
+            RunnerOwner::ApplicationPrincipal {
+                application_id: 0,
+                workspace_binding_id: 4,
+                principal_digest: "a".repeat(64),
+            },
+            RunnerOwner::ApplicationPrincipal {
+                application_id: 3,
+                workspace_binding_id: 0,
+                principal_digest: "a".repeat(64),
+            },
+            RunnerOwner::ApplicationPrincipal {
+                application_id: 3,
+                workspace_binding_id: 4,
+                principal_digest: "A".repeat(64),
+            },
+            RunnerOwner::ExecutionEnvironment {
+                environment_id: "e".into(),
+                generation: 0,
+            },
+        ] {
+            assert!(owner_fields(&owner).is_err());
+        }
+    }
 }
 
 pub async fn list_workspace_runners(
@@ -100,30 +149,95 @@ pub async fn operations_summary(
     ))
 }
 
+type OwnerFields<'a> = (
+    &'static str,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<&'a str>,
+);
+
+fn owner_fields(owner: &RunnerOwner) -> anyhow::Result<OwnerFields<'_>> {
+    match owner {
+        RunnerOwner::InternalUser { user_id } => Ok(("user", Some(*user_id), None, None, None)),
+        RunnerOwner::WorkspaceBinding {
+            workspace_binding_id,
+        } => Ok((
+            "workspace_binding",
+            None,
+            Some(*workspace_binding_id),
+            None,
+            None,
+        )),
+        RunnerOwner::ApplicationPrincipal {
+            application_id,
+            workspace_binding_id,
+            principal_digest,
+        } => {
+            if *application_id <= 0
+                || *workspace_binding_id <= 0
+                || principal_digest.len() != 64
+                || !principal_digest
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                anyhow::bail!("invalid application principal owner");
+            }
+            Ok((
+                "application_principal",
+                None,
+                Some(*workspace_binding_id),
+                Some(*application_id),
+                Some(principal_digest),
+            ))
+        }
+        RunnerOwner::ExecutionEnvironment { .. } => anyhow::bail!(
+            "execution environment owners are not persisted through workspace_runners"
+        ),
+    }
+}
+
+pub async fn list_workspace_runner_owners_by_binding(
+    pool: &PgPool,
+    binding_id: i64,
+) -> anyhow::Result<Vec<RunnerOwner>> {
+    let rows: Vec<(i64, i64, String)> = sqlx::query_as(include_str!(
+        "../sql/list_workspace_runner_owners_by_binding.sql"
+    ))
+    .bind(binding_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(application_id, workspace_binding_id, principal_digest)| {
+            RunnerOwner::ApplicationPrincipal {
+                application_id,
+                workspace_binding_id,
+                principal_digest,
+            }
+        })
+        .collect())
+}
+
 pub async fn save_workspace_runner(
     pool: &PgPool,
     input: SaveWorkspaceRunner<'_>,
 ) -> anyhow::Result<WorkspaceRunnerRecord> {
-    let (owner_kind, owner_user_id, owner_workspace_binding_id) = match input.owner {
-        RunnerOwner::InternalUser { user_id } => ("user", Some(*user_id), None),
-        RunnerOwner::WorkspaceBinding {
-            workspace_binding_id,
-        } => ("workspace_binding", None, Some(*workspace_binding_id)),
-        // Compile-only compatibility: the legacy workspace_runners table has
-        // no environment owner columns. Fail closed instead of mapping to a
-        // user/workspace identity or writing an invalid row.
-        RunnerOwner::ExecutionEnvironment { .. } => {
-            anyhow::bail!(
-                "execution environment owners are not persisted through legacy workspace_runners"
-            );
-        }
-    };
+    let (
+        owner_kind,
+        owner_user_id,
+        owner_workspace_binding_id,
+        owner_application_id,
+        owner_principal_digest,
+    ) = owner_fields(input.owner)?;
 
     sqlx::query_as::<_, WorkspaceRunnerRecord>(include_str!("../sql/save_workspace_runner.sql"))
         .bind(input.runner_manager_id)
         .bind(owner_kind)
         .bind(owner_user_id)
         .bind(owner_workspace_binding_id)
+        .bind(owner_application_id)
+        .bind(owner_principal_digest)
         .bind(input.container_name)
         .bind(input.container_id)
         .bind(input.runtime)
@@ -143,16 +257,13 @@ pub async fn report_workspace_runner(
     runner_manager_id: i64,
     event: &runner_protocol::RunnerLifecycleEvent,
 ) -> anyhow::Result<()> {
-    // Compile-only compatibility: environment lifecycle never flows through
-    // the legacy table. Reject explicitly instead of writing invalid rows.
-    if matches!(
-        event.owner,
-        runner_protocol::RunnerOwner::ExecutionEnvironment { .. }
-    ) {
-        anyhow::bail!(
-            "execution environment owners are not reported through legacy workspace_runners"
-        );
-    }
+    let (
+        owner_kind,
+        owner_user_id,
+        owner_workspace_binding_id,
+        owner_application_id,
+        owner_principal_digest,
+    ) = owner_fields(&event.owner)?;
     let status = event.status.as_str();
     if status == "running" {
         let input = SaveWorkspaceRunner {
@@ -175,24 +286,14 @@ pub async fn report_workspace_runner(
     sqlx::query(include_str!("../sql/report_workspace_runner.sql"))
         .bind(runner_manager_id)
         .bind(&event.container_name)
-        .bind(event.owner.kind())
+        .bind(owner_kind)
         .bind(status)
         .bind(event.container_id.as_deref())
         .bind(event.last_error.as_deref())
-        .bind(match event.owner {
-            runner_protocol::RunnerOwner::InternalUser { user_id } => Some(user_id),
-            runner_protocol::RunnerOwner::WorkspaceBinding { .. } => None,
-            // Unreachable: rejected above. Never map to a user identity.
-            runner_protocol::RunnerOwner::ExecutionEnvironment { .. } => None,
-        })
-        .bind(match event.owner {
-            runner_protocol::RunnerOwner::InternalUser { .. } => None,
-            runner_protocol::RunnerOwner::WorkspaceBinding {
-                workspace_binding_id,
-            } => Some(workspace_binding_id),
-            // Unreachable: rejected above. Never write an invalid row.
-            runner_protocol::RunnerOwner::ExecutionEnvironment { .. } => None,
-        })
+        .bind(owner_user_id)
+        .bind(owner_workspace_binding_id)
+        .bind(owner_application_id)
+        .bind(owner_principal_digest)
         .execute(pool)
         .await?;
     Ok(())

@@ -57,6 +57,8 @@ pub(crate) const APPLICATION_BEARER_SCHEME: &str = "application_bearer";
         super::internal::lease::takeover_resource_workspace_lease,
         super::internal::lease::resource_workspace_lease_status,
         super::internal::resource_binding::ensure_resource_workspace_binding,
+        super::internal::workspace_principal::principal_workspace_capabilities,
+        super::internal::workspace_principal::stop_workspace_principal,
         super::internal::application::application_capabilities,
         super::internal::application::sync_resource_workspace_git,
         super::internal::execution_environments::handlers::ensure_execution_environment,
@@ -86,6 +88,7 @@ pub(crate) const APPLICATION_BEARER_SCHEME: &str = "application_bearer";
         super::internal::execution_environments::service::handler::execution_environment_service_delete,
         super::internal::execution_environments::service::handler::execution_environment_service_head,
         super::internal::execution_environments::service::handler::execution_environment_service_options,
+        super::internal::runner_principal_admission::principal_admission,
         super::internal::runner_manager::runner_manager_config,
         super::internal::runner_manager::next_runner_job,
         super::internal::runner_manager::complete_runner_job,
@@ -134,6 +137,9 @@ pub(crate) const APPLICATION_BEARER_SCHEME: &str = "application_bearer";
             ApplicationTokenResponse,
              WorkspaceBindingResponse,
              ApplicationCapabilitiesResponse,
+             crate::api::internal::workspace_principal::PrincipalWorkspaceCapabilitiesResponse,
+             crate::api::internal::workspace_principal::StopWorkspacePrincipalRequest,
+             crate::api::internal::workspace_principal::StopWorkspacePrincipalResponse,
              RunnerManagerResponse,
              CreateRunnerManagerRequest,
              CreateRunnerManagerResponse,
@@ -185,6 +191,7 @@ pub(crate) const APPLICATION_BEARER_SCHEME: &str = "application_bearer";
             WorkspaceRunnerResponse,
              RunnerSessionResponse,
              runner_protocol::RunnerLifecycleEvent,
+             runner_protocol::PrincipalAdmissionRequest,
             OperationsSummary,
              UserResponse,
             Page<UserResponse>,
@@ -233,6 +240,18 @@ struct ApplicationBearer;
 
 impl Modify for ApplicationBearer {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        openapi
+            .components
+            .get_or_insert_with(Default::default)
+            .add_security_scheme(
+                "runner_manager_bearer",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some("Bearer token of an enabled runner manager."))
+                        .build(),
+                ),
+            );
         openapi
             .components
             .get_or_insert_with(Default::default)

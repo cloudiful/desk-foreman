@@ -91,6 +91,9 @@ impl DockerRunnerBackend {
         let host_workspace_root = Self::host_workspace_root(&config, workspace_root)?;
         let mut inspected = self.inspect_container_metadata(&container_name).await?;
         if let Some(metadata) = &inspected {
+            if matches!(owner, RunnerOwner::ApplicationPrincipal { .. }) {
+                super::principal_admission::verified_id(self, owner, metadata)?;
+            }
             if metadata.manager_id.as_deref() == Some(self.manager_id.as_str())
                 && metadata.owner_key.as_deref() == Some(owner.stable_key().as_str())
             {
@@ -127,9 +130,16 @@ impl DockerRunnerBackend {
             format!("runner container {container_name} could not be inspected after creation")
         })?;
 
+        if matches!(owner, RunnerOwner::ApplicationPrincipal { .. }) {
+            super::principal_admission::verified_id(self, owner, &inspected)?;
+        }
         if inspected.status != "running" {
-            self.docker_status(["start", container_name.as_str()])
-                .await?;
+            let target = if matches!(owner, RunnerOwner::ApplicationPrincipal { .. }) {
+                super::principal_admission::verified_id(self, owner, &inspected)?
+            } else {
+                container_name.as_str()
+            };
+            self.docker_status(["start", target]).await?;
             inspected = self
                 .inspect_container_metadata(&container_name)
                 .await?
@@ -138,80 +148,20 @@ impl DockerRunnerBackend {
                 })?;
         }
 
+        let target = if matches!(owner, RunnerOwner::ApplicationPrincipal { .. }) {
+            let id = super::principal_admission::verified_id(self, owner, &inspected)?;
+            super::principal_admission::admit(self, owner, id).await?;
+            id.to_owned()
+        } else {
+            container_name.clone()
+        };
         self.observe_running(owner, workspace_root, network_enabled, &config, &inspected);
         self.last_active
             .lock()
             .expect("runner activity map poisoned")
             .insert(owner.stable_key(), Instant::now());
 
-        Ok(container_name)
-    }
-
-    async fn create_runner(
-        &self,
-        owner: &RunnerOwner,
-        workspace_root: &Path,
-        host_workspace_root: &Path,
-        container_name: &str,
-        network_enabled: bool,
-        config: &RunnerManagerConfig,
-    ) -> anyhow::Result<()> {
-        // Ownership is read from the workspace as visible to runner-manager;
-        // the host path is only meaningful to the docker daemon for the bind
-        // mount below.
-        let user_spec = workspace_owner_user_spec(workspace_root).with_context(|| {
-            format!(
-                "failed to resolve workspace owner for {}",
-                workspace_root.display()
-            )
-        })?;
-        let mut args = vec![
-            "run".to_string(),
-            "-d".to_string(),
-            "--name".to_string(),
-            container_name.to_string(),
-            "--user".to_string(),
-            user_spec,
-            "--label".to_string(),
-            format!("desk-foreman.owner={}", owner.stable_key()),
-            "--label".to_string(),
-            "desk-foreman.managed=true".to_string(),
-            "--label".to_string(),
-            format!("desk-foreman.manager={}", self.manager_id),
-            "-e".to_string(),
-            format!("WORKSPACE_ROOT={}", config.workdir),
-            "-v".to_string(),
-            format!("{}:{}", host_workspace_root.display(), config.workdir),
-            "-w".to_string(),
-            config.workdir.clone(),
-            "--read-only".to_string(),
-            "--tmpfs".to_string(),
-            "/tmp:rw,nosuid,size=256m".to_string(),
-            "--cap-drop".to_string(),
-            "ALL".to_string(),
-            "--security-opt".to_string(),
-            "no-new-privileges:true".to_string(),
-            "--pids-limit".to_string(),
-            config.pids_limit.to_string(),
-            "--memory".to_string(),
-            config.memory_limit.clone(),
-            "--cpus".to_string(),
-            config.cpu_limit.clone(),
-        ];
-        if let Some(runtime_class) = &config.runtime_class {
-            args.push("--runtime".to_string());
-            args.push(runtime_class.clone());
-        }
-        if !network_enabled {
-            args.push("--network".to_string());
-            args.push("none".to_string());
-        }
-        args.push(config.image.clone());
-        args.push("sleep".to_string());
-        args.push("infinity".to_string());
-
-        let output = self.docker_output_owned(args, None, None).await?;
-        ensure_docker_command_succeeded("create runner container", &output)
+        Ok(target)
     }
 
     /// Bounded container termination for lease-takeover quiescence.
@@ -410,7 +360,7 @@ pub(super) fn docker_host_env(config: &RunnerManagerConfig) -> Vec<(String, Stri
 /// directory ownership as seen by runner-manager, so the container process can
 /// write to the bind-mounted workspace without running as root.
 #[cfg(unix)]
-fn workspace_owner_user_spec(host_workspace_root: &Path) -> anyhow::Result<String> {
+pub(super) fn workspace_owner_user_spec(host_workspace_root: &Path) -> anyhow::Result<String> {
     use std::os::unix::fs::MetadataExt;
     let metadata = std::fs::metadata(host_workspace_root)
         .with_context(|| format!("failed to stat {}", host_workspace_root.display()))?;

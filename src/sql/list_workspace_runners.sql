@@ -4,6 +4,8 @@ SELECT
     wr.owner_kind,
     wr.owner_user_id,
     wr.owner_workspace_binding_id,
+    wr.owner_application_id,
+    wr.owner_principal_digest,
     wr.container_name,
     wr.container_id,
     wr.runtime,

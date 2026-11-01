@@ -1,0 +1,1 @@
+INSERT INTO execution_environments (environment_id, application_id, external_user_id, runtime_kind, state_volume_ref) VALUES ('00000000-0000-4000-8000-000000001145', 817301, 'native', 'test', 'test');

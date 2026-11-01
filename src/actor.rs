@@ -22,6 +22,7 @@ use runner_protocol::RunnerOwner;
 pub enum ActorMode {
     InternalUser,
     ApplicationSubject,
+    IsolatedApplicationPrincipal(RunnerOwner),
 }
 
 #[derive(Clone, Debug)]
@@ -68,7 +69,8 @@ impl ActorContext {
     }
 
     pub fn runner_owner(&self) -> RunnerOwner {
-        match self.mode {
+        match &self.mode {
+            ActorMode::IsolatedApplicationPrincipal(owner) => owner.clone(),
             ActorMode::InternalUser => RunnerOwner::InternalUser {
                 user_id: self
                     .user
@@ -95,6 +97,7 @@ pub enum McpActor {
         external_user_id: String,
         token: Box<ApplicationTokenRecord>,
         lease_owner: Option<String>,
+        isolated_runner_owner: Option<RunnerOwner>,
     },
 }
 
@@ -211,14 +214,44 @@ pub(crate) fn actor_from_mcp_actor(
             external_user_id,
             token,
             lease_owner,
-        } => actor_from_application_binding(
-            state,
-            *application,
-            *workspace_binding,
-            external_user_id,
-            *token,
-            lease_owner,
-        ),
+            isolated_runner_owner,
+        } => {
+            if let Some(owner) = &isolated_runner_owner {
+                let resource = crate::workspace::parse_resource_workspace_key(
+                    &workspace_binding.workspace_key,
+                );
+                let valid_resource = resource.as_ref().is_some_and(|(kind, id)| {
+                    workspace_binding.resource_kind.as_deref() == Some(kind.as_str())
+                        && workspace_binding.resource_id.as_deref() == Some(id.as_str())
+                });
+                let expected = runner_protocol::workspace_principal::application_principal_owner(
+                    application.application_id,
+                    workspace_binding.workspace_binding_id,
+                    &external_user_id,
+                    &workspace_binding.workspace_key,
+                );
+                if !valid_resource
+                    || workspace_binding.application_id != application.application_id
+                    || token.application_id != application.application_id
+                    || lease_owner.as_deref() != Some(external_user_id.as_str())
+                    || expected.as_ref() != Ok(owner)
+                {
+                    return Err(AppError::unauthorized("invalid isolated principal context"));
+                }
+            }
+            let mut actor = actor_from_application_binding(
+                state,
+                *application,
+                *workspace_binding,
+                external_user_id,
+                *token,
+                lease_owner,
+            )?;
+            if let Some(owner) = isolated_runner_owner {
+                actor.mode = ActorMode::IsolatedApplicationPrincipal(owner);
+            }
+            Ok(actor)
+        }
     }
 }
 

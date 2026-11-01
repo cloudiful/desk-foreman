@@ -86,6 +86,10 @@ pub async fn list_runner_sessions(
                 (&session.owner, kind.as_str()),
                 (RunnerOwner::InternalUser { .. }, "user")
                     | (RunnerOwner::WorkspaceBinding { .. }, "workspace_binding")
+                    | (
+                        RunnerOwner::ApplicationPrincipal { .. },
+                        "application_principal"
+                    )
             ),
             None => true,
         })
@@ -156,6 +160,8 @@ fn workspace_runner_response(
         owner_kind: row.owner_kind,
         owner_user_id: row.owner_user_id,
         owner_workspace_binding_id: row.owner_workspace_binding_id,
+        owner_application_id: row.owner_application_id,
+        owner_principal_digest: row.owner_principal_digest,
         container_name: row.container_name,
         container_id: row.container_id,
         runtime: row.runtime,
@@ -172,20 +178,56 @@ fn workspace_runner_response(
     }
 }
 
+#[cfg(test)]
+mod principal_tests {
+    use super::*;
+
+    #[test]
+    fn principal_session_response_retains_identity() {
+        let response = session_response(RunnerSessionStatus {
+            session_id: 1,
+            owner: RunnerOwner::ApplicationPrincipal {
+                application_id: 2,
+                workspace_binding_id: 3,
+                principal_digest: "a".repeat(64),
+            },
+            session_key: None,
+            state: "running".into(),
+            exit_code: None,
+            timed_out: false,
+            wall_time_seconds: 0.0,
+        });
+        assert_eq!(response.owner_kind, "application_principal");
+        assert_eq!(response.owner_id, 3);
+        assert_eq!(response.owner_application_id, Some(2));
+        assert_eq!(response.owner_principal_digest, Some("a".repeat(64)));
+    }
+}
+
 fn session_response(row: RunnerSessionStatus) -> RunnerSessionResponse {
-    let (owner_kind, owner_id) = match row.owner {
-        RunnerOwner::InternalUser { user_id } => ("user".to_string(), user_id),
+    let (owner_kind, owner_id, owner_application_id, owner_principal_digest) = match row.owner {
+        RunnerOwner::InternalUser { user_id } => ("user", user_id, None, None),
         RunnerOwner::WorkspaceBinding {
             workspace_binding_id,
-        } => ("workspace_binding".to_string(), workspace_binding_id),
-        // Compile-only compatibility: unreachable via the explicit skip
-        // above. Never map to a user/workspace identity.
-        RunnerOwner::ExecutionEnvironment { .. } => ("execution_environment".to_string(), -1),
+        } => ("workspace_binding", workspace_binding_id, None, None),
+        RunnerOwner::ApplicationPrincipal {
+            application_id,
+            workspace_binding_id,
+            principal_digest,
+        } => (
+            "application_principal",
+            workspace_binding_id,
+            Some(application_id),
+            Some(principal_digest),
+        ),
+        RunnerOwner::ExecutionEnvironment { .. } => ("execution_environment", -1, None, None),
     };
     RunnerSessionResponse {
         session_id: row.session_id,
-        owner_kind,
+        owner_kind: owner_kind.to_string(),
         owner_id,
+        owner_application_id,
+        owner_principal_digest,
         session_key: row.session_key,
         state: row.state,
         exit_code: row.exit_code,

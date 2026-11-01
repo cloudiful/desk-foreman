@@ -119,6 +119,14 @@ pub async fn find_enabled_runner_manager(
     .await?)
 }
 
+pub async fn list_registered_runner_manager_ids(pool: &PgPool) -> anyhow::Result<Vec<i64>> {
+    Ok(sqlx::query_scalar(include_str!(
+        "../sql/list_registered_runner_manager_ids.sql"
+    ))
+    .fetch_all(pool)
+    .await?)
+}
+
 pub async fn list_live_runner_manager_ids(pool: &PgPool) -> anyhow::Result<Vec<i64>> {
     Ok(
         sqlx::query_scalar(include_str!("../sql/list_live_runner_manager_ids.sql"))

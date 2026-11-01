@@ -1,11 +1,16 @@
+use crate::config::RunnerManagerConfig;
+use anyhow::Context;
 use desk_foreman::runner::RunnerFuture;
 use runner_protocol::{
-    CommandOutput, EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest,
-    NativeTaskPreparedResult, PrepareNativeTaskRequest, RunnerCommandRequest, RunnerOwner,
-    RunnerShellRequest, SeedBundle, StartNativeTaskRequest, StartNativeTaskResult,
-    StopExecutionEnvironmentAck, StopExecutionEnvironmentRequest, StopNativeTaskRequest,
-    StopNativeTaskResult, execution_environment as protocol,
+    CleanupWorkspaceBindingPrincipalsAck, CleanupWorkspaceBindingPrincipalsRequest, CommandOutput,
+    EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest, NativeTaskPreparedResult,
+    PrepareNativeTaskRequest, RunnerCommandRequest, RunnerOwner, RunnerShellRequest, SeedBundle,
+    StartNativeTaskRequest, StartNativeTaskResult, StopExecutionEnvironmentAck,
+    StopExecutionEnvironmentRequest, StopNativeTaskRequest, StopNativeTaskResult,
+    StopWorkspacePrincipalAck, StopWorkspacePrincipalRequest, StopWorkspacePrincipalState,
+    execution_environment as protocol,
 };
+use std::path::Path;
 
 use super::{
     ProcessSpawnTarget, RunnerBackend, backend::BorrowedRunnerOperationLease,
@@ -13,7 +18,41 @@ use super::{
     shell_spawn::append_shell_args,
 };
 
+#[path = "workspace_binding_principal_cleanup.rs"]
+mod workspace_binding_principal_cleanup;
+
 impl RunnerBackend for DockerRunnerBackend {
+    fn supports_workspace_binding_principal_cleanup(&self) -> bool {
+        true
+    }
+
+    fn cleanup_workspace_binding_principals<'a>(
+        &'a self,
+        request: CleanupWorkspaceBindingPrincipalsRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<CleanupWorkspaceBindingPrincipalsAck>> {
+        Box::pin(async move { self.cleanup_binding_principals(request).await })
+    }
+
+    fn supports_workspace_principal_stop(&self) -> bool {
+        true
+    }
+
+    fn stop_workspace_principal<'a>(
+        &'a self,
+        request: StopWorkspacePrincipalRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<StopWorkspacePrincipalAck>> {
+        Box::pin(async move {
+            let ack = |state, detail: Option<String>| StopWorkspacePrincipalAck { state, detail };
+            if !request.is_valid() {
+                return Ok(ack(
+                    StopWorkspacePrincipalState::Conflict,
+                    Some("invalid principal owner".into()),
+                ));
+            }
+            self.stop_isolated_principal(request.owner).await
+        })
+    }
+
     fn reconcile<'a>(&'a self) -> RunnerFuture<'a, anyhow::Result<()>> {
         Box::pin(async move { self.reconcile_containers().await })
     }
@@ -201,6 +240,71 @@ impl RunnerBackend for DockerRunnerBackend {
 }
 
 impl DockerRunnerBackend {
+    pub(super) async fn create_runner(
+        &self,
+        owner: &RunnerOwner,
+        workspace_root: &Path,
+        host_workspace_root: &Path,
+        container_name: &str,
+        network_enabled: bool,
+        config: &RunnerManagerConfig,
+    ) -> anyhow::Result<()> {
+        // Ownership is resolved from the manager-visible workspace; the mount uses the host path.
+        let user_spec =
+            super::docker::workspace_owner_user_spec(workspace_root).with_context(|| {
+                format!(
+                    "failed to resolve workspace owner for {}",
+                    workspace_root.display()
+                )
+            })?;
+        let mut args = vec![
+            "run".to_string(),
+            "-d".to_string(),
+            "--name".to_string(),
+            container_name.to_string(),
+            "--user".to_string(),
+            user_spec,
+            "--label".to_string(),
+            format!("desk-foreman.owner={}", owner.stable_key()),
+            "--label".to_string(),
+            "desk-foreman.managed=true".to_string(),
+            "--label".to_string(),
+            format!("desk-foreman.manager={}", self.manager_id),
+            "-e".to_string(),
+            format!("WORKSPACE_ROOT={}", config.workdir),
+            "-v".to_string(),
+            format!("{}:{}", host_workspace_root.display(), config.workdir),
+            "-w".to_string(),
+            config.workdir.clone(),
+            "--read-only".to_string(),
+            "--tmpfs".to_string(),
+            "/tmp:rw,nosuid,size=256m".to_string(),
+            "--cap-drop".to_string(),
+            "ALL".to_string(),
+            "--security-opt".to_string(),
+            "no-new-privileges:true".to_string(),
+            "--pids-limit".to_string(),
+            config.pids_limit.to_string(),
+            "--memory".to_string(),
+            config.memory_limit.clone(),
+            "--cpus".to_string(),
+            config.cpu_limit.clone(),
+        ];
+        if let Some(runtime_class) = &config.runtime_class {
+            args.push("--runtime".to_string());
+            args.push(runtime_class.clone());
+        }
+        if !network_enabled {
+            args.push("--network".to_string());
+            args.push("none".to_string());
+        }
+        args.push(config.image.clone());
+        args.push("sleep".to_string());
+        args.push("infinity".to_string());
+        let output = self.docker_output_owned(args, None, None).await?;
+        super::docker_command::ensure_docker_command_succeeded("create runner container", &output)
+    }
+
     /// Run one filesystem-only preparation under the shared environment fence.
     pub(crate) async fn prepare_native_task_checkout(
         &self,

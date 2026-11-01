@@ -1,4 +1,5 @@
 mod backend;
+pub mod principal_stop;
 mod pull;
 mod pull_cancellation;
 mod service;
