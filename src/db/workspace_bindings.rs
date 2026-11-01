@@ -11,6 +11,11 @@
 pub(crate) mod native_task_guard;
 
 use chrono::{DateTime, Utc};
+use std::{future::Future, time::Duration};
+
+#[cfg(test)]
+#[path = "workspace_lease_principal_tests.rs"]
+mod principal_lease_tests;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 
@@ -98,78 +103,134 @@ pub async fn find_workspace_binding_by_resource(
     .map_err(Into::into)
 }
 
-pub async fn acquire_workspace_write_lease(
-    pool: &PgPool,
-    workspace_binding_id: i64,
-    owner: &str,
-    ttl_seconds: u64,
-) -> anyhow::Result<Option<WorkspaceBindingResponse>> {
-    // Same transaction for lock, guard and lease update: a native task that
-    // commits while we wait is seen here, and no expiry can slip a takeover
-    // past a task that already owns the workspace.
-    let mut tx = pool.begin().await?;
-    let locked = sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
-        "../sql/lock_workspace_binding_for_write.sql"
-    ))
-    .bind(workspace_binding_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    if locked.is_none() {
-        return Ok(None);
-    }
-    if native_task_guard::native_task_holds_binding(&mut tx, workspace_binding_id)
-        .await?
-        .is_some()
-    {
-        return Ok(None);
-    }
-    let acquired = sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
-        "../sql/acquire_workspace_write_lease.sql"
-    ))
-    .bind(owner)
-    .bind(i64::try_from(ttl_seconds).unwrap_or(i64::MAX))
-    .bind(workspace_binding_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    Ok(acquired)
+#[derive(Debug)]
+pub enum PrincipalLeaseOutcome {
+    Updated(WorkspaceBindingResponse),
+    NotFound,
+    Conflict,
+    PrincipalCleanupFailed,
 }
 
-pub async fn release_workspace_write_lease(
+async fn change_lease<F: Future<Output = anyhow::Result<()>>>(
     pool: &PgPool,
-    workspace_binding_id: i64,
+    binding_id: i64,
     owner: &str,
-) -> anyhow::Result<Option<WorkspaceBindingResponse>> {
-    // Same shape as acquire: lock the binding row, re-read the native-task
-    // guard inside the same transaction, then run the release on that
-    // transaction. A native task owns this workspace outright, so its legacy
-    // lease state is not this caller's to clear; nothing here ever writes the
-    // native task table or the environment's active-task reference.
+    ttl: Option<u64>,
+    cleanup: F,
+) -> anyhow::Result<PrincipalLeaseOutcome> {
     let mut tx = pool.begin().await?;
     let locked = sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
         "../sql/lock_workspace_binding_for_write.sql"
     ))
-    .bind(workspace_binding_id)
+    .bind(binding_id)
     .fetch_optional(&mut *tx)
     .await?;
-    if locked.is_none() {
-        return Ok(None);
-    }
-    if native_task_guard::native_task_holds_binding(&mut tx, workspace_binding_id)
-        .await?
-        .is_some()
+    let Some(locked) = locked else {
+        return Ok(PrincipalLeaseOutcome::NotFound);
+    };
+    if !locked.is_active
+        || locked.lifecycle_state != "active"
+        || native_task_guard::native_task_holds_binding(&mut tx, binding_id)
+            .await?
+            .is_some()
     {
-        return Ok(None);
+        return Ok(PrincipalLeaseOutcome::Conflict);
     }
-    let released = sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
+    let updated = if let Some(ttl) = ttl {
+        sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
+            "../sql/acquire_workspace_write_lease.sql"
+        ))
+        .bind(owner)
+        .bind(i64::try_from(ttl).unwrap_or(i64::MAX))
+        .bind(binding_id)
+        .fetch_optional(&mut *tx)
+        .await?
+    } else {
+        sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
+            "../sql/release_workspace_write_lease.sql"
+        ))
+        .bind(binding_id)
+        .bind(owner)
+        .fetch_optional(&mut *tx)
+        .await?
+    };
+    let Some(updated) = updated else {
+        return Ok(PrincipalLeaseOutcome::Conflict);
+    };
+    if (ttl.is_none() || locked.write_lease_owner.as_deref() != Some(owner))
+        && !matches!(
+            tokio::time::timeout(Duration::from_secs(25), cleanup).await,
+            Ok(Ok(()))
+        )
+    {
+        return Ok(PrincipalLeaseOutcome::PrincipalCleanupFailed);
+    }
+    tx.commit().await?;
+    Ok(PrincipalLeaseOutcome::Updated(updated))
+}
+
+pub async fn acquire_workspace_write_lease_with_cleanup<F: Future<Output = anyhow::Result<()>>>(
+    pool: &PgPool,
+    binding_id: i64,
+    owner: &str,
+    ttl: u64,
+    cleanup: F,
+) -> anyhow::Result<PrincipalLeaseOutcome> {
+    change_lease(pool, binding_id, owner, Some(ttl), cleanup).await
+}
+pub async fn release_workspace_write_lease_with_cleanup<F: Future<Output = anyhow::Result<()>>>(
+    pool: &PgPool,
+    binding_id: i64,
+    owner: &str,
+    cleanup: F,
+) -> anyhow::Result<PrincipalLeaseOutcome> {
+    change_lease(pool, binding_id, owner, None, cleanup).await
+}
+pub async fn acquire_workspace_write_lease(
+    pool: &PgPool,
+    binding_id: i64,
+    owner: &str,
+    ttl: u64,
+) -> anyhow::Result<Option<WorkspaceBindingResponse>> {
+    Ok(
+        match acquire_workspace_write_lease_with_cleanup(pool, binding_id, owner, ttl, async {
+            Ok(())
+        })
+        .await?
+        {
+            PrincipalLeaseOutcome::Updated(row) => Some(row),
+            _ => None,
+        },
+    )
+}
+pub async fn release_workspace_write_lease(
+    pool: &PgPool,
+    binding_id: i64,
+    owner: &str,
+) -> anyhow::Result<Option<WorkspaceBindingResponse>> {
+    Ok(
+        match release_workspace_write_lease_with_cleanup(pool, binding_id, owner, async { Ok(()) })
+            .await?
+        {
+            PrincipalLeaseOutcome::Updated(row) => Some(row),
+            _ => None,
+        },
+    )
+}
+
+pub async fn release_workspace_write_lease_in_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    binding_id: i64,
+    owner: &str,
+) -> anyhow::Result<Option<WorkspaceBindingResponse>> {
+    sqlx::query_as::<_, WorkspaceBindingResponse>(include_str!(
         "../sql/release_workspace_write_lease.sql"
     ))
-    .bind(workspace_binding_id)
+    .bind(binding_id)
     .bind(owner)
-    .fetch_optional(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    Ok(released)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(Into::into)
 }
 
 /// Lock the workspace binding row for fenced write admission.

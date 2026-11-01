@@ -1,0 +1,3 @@
+INSERT INTO runner_managers (runner_manager_id, name, endpoint, access_token_hash) VALUES (817301, 'p4k2-native', 'test', 'p4k2-native');
+INSERT INTO execution_environments (environment_id, application_id, external_user_id, runtime_kind, state_volume_ref) VALUES ('00000000-0000-4000-8000-000000000302', 817301, 'native', 'test', 'test');
+INSERT INTO execution_environment_tasks (task_id, operation_token, environment_id, application_id, workspace_binding_id, subject_external_user_id, target_generation, assigned_manager_id) VALUES ('00000000-0000-4000-8000-000000000303', 'p4k2-native', '00000000-0000-4000-8000-000000000302', 817301, 817307, 'native', 1, 817301);

@@ -707,6 +707,8 @@ pub struct GitWorkspaceSyncRequest {
     #[validate(custom(function = "validate_non_blank"))]
     pub remote_url: String,
     pub branch: Option<String>,
+    #[serde(default)]
+    pub preserve_existing: bool,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -797,6 +799,8 @@ pub struct WorkspaceRunnerResponse {
     pub owner_kind: String,
     pub owner_user_id: Option<i64>,
     pub owner_workspace_binding_id: Option<i64>,
+    pub owner_application_id: Option<i64>,
+    pub owner_principal_digest: Option<String>,
     pub container_name: String,
     pub container_id: Option<String>,
     pub runtime: String,
@@ -817,6 +821,8 @@ pub struct RunnerSessionResponse {
     pub session_id: u64,
     pub owner_kind: String,
     pub owner_id: i64,
+    pub owner_application_id: Option<i64>,
+    pub owner_principal_digest: Option<String>,
     pub session_key: Option<String>,
     pub state: String,
     pub exit_code: Option<i32>,

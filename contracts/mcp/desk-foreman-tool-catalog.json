@@ -1,0 +1,688 @@
+{
+  "schema_version": 1,
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Apply a Codex patch to files in the managed workspace. The patchText value must use the Codex patch DSL.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "patchText": {
+            "description": "Codex patch DSL text to apply inside the workspace.",
+            "examples": [
+              "*** Begin Patch\n*** Add File: example.txt\n+content\n*** End Patch\n"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "patchText"
+        ],
+        "title": "ApplyPatchParams",
+        "type": "object"
+      },
+      "name": "apply_patch"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Terminate an active managed workspace shell session.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "description": "Identifier of the active shell session to terminate.",
+            "examples": [
+              1
+            ],
+            "format": "uint64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "CancelSessionParams",
+        "type": "object"
+      },
+      "name": "cancel_session",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "exit_code": {
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "session_id": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "timed_out": {
+            "type": "boolean"
+          },
+          "wall_time_seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "session_id",
+          "state",
+          "timed_out",
+          "wall_time_seconds"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Find workspace files by glob pattern.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Workspace-relative directory to search under. Defaults to `.`.",
+            "examples": [
+              "."
+            ],
+            "type": "string"
+          },
+          "pattern": {
+            "description": "Glob pattern used to find workspace files.",
+            "examples": [
+              "**/*.rs"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "title": "GlobParams",
+        "type": "object"
+      },
+      "name": "glob",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "matches": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "path": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "pattern",
+          "matches",
+          "truncated"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Search workspace file contents with ripgrep.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "include": {
+            "default": null,
+            "description": "Optional ripgrep file include glob.",
+            "examples": [
+              "*.rs"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "default": ".",
+            "description": "Workspace-relative file or directory to search. Defaults to `.`.",
+            "examples": [
+              "."
+            ],
+            "type": "string"
+          },
+          "pattern": {
+            "description": "Regular expression pattern to search for in file contents.",
+            "examples": [
+              "WorkspaceFileTools"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "title": "GrepParams",
+        "type": "object"
+      },
+      "name": "grep",
+      "outputSchema": {
+        "$defs": {
+          "SearchMatch": {
+            "additionalProperties": false,
+            "properties": {
+              "line": {
+                "type": "string"
+              },
+              "line_number": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "line_number",
+              "line"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "matches": {
+            "items": {
+              "$ref": "#/$defs/SearchMatch"
+            },
+            "type": "array"
+          },
+          "path": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "pattern",
+          "matches",
+          "truncated"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read a file or directory from the managed workspace with bounded, paginated output.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "filePath": {
+            "description": "Workspace-relative or workspace-contained absolute path to read.",
+            "examples": [
+              "README.md"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "default": null,
+            "description": "Maximum number of lines to return. Defaults to 2000.",
+            "examples": [
+              2000
+            ],
+            "format": "uint",
+            "maximum": 2000,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "offset": {
+            "default": null,
+            "description": "First 1-based line number to include. Defaults to 1.",
+            "examples": [
+              10
+            ],
+            "format": "uint",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "filePath"
+        ],
+        "title": "ReadParams",
+        "type": "object"
+      },
+      "name": "read",
+      "outputSchema": {
+        "$defs": {
+          "DirectoryEntry": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "kind"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/$defs/DirectoryEntry"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "offset": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "total": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "kind",
+          "entries",
+          "offset",
+          "total",
+          "truncated"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Execute a shell command inside the managed workspace. Use workdir and timeout instead of changing directories or relying on an unbounded command.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "description": "Shell command to execute inside the workspace.",
+            "examples": [
+              "pwd"
+            ],
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "default": null,
+            "description": "Approximate output token budget for the returned chunk.",
+            "examples": [
+              4000
+            ],
+            "format": "uint",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "timeout": {
+            "default": null,
+            "description": "Optional timeout in milliseconds.",
+            "examples": [
+              120000
+            ],
+            "format": "uint64",
+            "maximum": 600000,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "workdir": {
+            "default": null,
+            "description": "Workspace-relative directory to run the command from. Defaults to the workspace root when omitted.",
+            "examples": [
+              "src"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "ShellParams",
+        "type": "object"
+      },
+      "name": "shell",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "chunk_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exit_code": {
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "original_token_count": {
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output": {
+            "type": "string"
+          },
+          "output_is_combined": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "stderr_bytes": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "stdout_bytes": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "timed_out": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "wall_time_seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "wall_time_seconds",
+          "output",
+          "stdout",
+          "stderr",
+          "output_is_combined",
+          "truncated",
+          "has_more",
+          "stdout_bytes",
+          "stderr_bytes",
+          "timed_out"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Write to an existing managed workspace shell session or poll for more output. Pair with `shell` for interactive command streaming.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "chars": {
+            "default": "",
+            "description": "Characters to write to the session. Omit or pass an empty string to poll for more output without writing.",
+            "examples": [
+              "help\n"
+            ],
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "default": null,
+            "description": "Approximate output token budget for the returned chunk.",
+            "examples": [
+              4000
+            ],
+            "format": "uint",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "session_id": {
+            "description": "Identifier of the existing shell session to write to or poll.",
+            "examples": [
+              1
+            ],
+            "format": "uint64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "yield_time_ms": {
+            "default": null,
+            "description": "Milliseconds to wait before returning more output from the session.",
+            "examples": [
+              1000
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "WriteStdinParams",
+        "type": "object"
+      },
+      "name": "write_stdin",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "chunk_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exit_code": {
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "original_token_count": {
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output": {
+            "type": "string"
+          },
+          "output_is_combined": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "stderr_bytes": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "stdout_bytes": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "timed_out": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "wall_time_seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "wall_time_seconds",
+          "output",
+          "stdout",
+          "stderr",
+          "output_is_combined",
+          "truncated",
+          "has_more",
+          "stdout_bytes",
+          "stderr_bytes",
+          "timed_out"
+        ],
+        "type": "object"
+      }
+    }
+  ]
+}

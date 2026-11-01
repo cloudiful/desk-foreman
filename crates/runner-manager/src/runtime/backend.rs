@@ -2,11 +2,13 @@ use std::sync::Arc;
 
 use desk_foreman::runner::RunnerFuture;
 use runner_protocol::{
-    CommandOutput, EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest,
-    ExportNativeTaskRequest, NativeTaskExportContent, NativeTaskPreparedResult,
-    PrepareNativeTaskRequest, RunnerCommandRequest, RunnerOwner, RunnerShellRequest, SeedBundle,
-    StartNativeTaskRequest, StartNativeTaskResult, StopExecutionEnvironmentAck,
-    StopExecutionEnvironmentRequest, StopNativeTaskRequest, StopNativeTaskResult,
+    CleanupWorkspaceBindingPrincipalsAck, CleanupWorkspaceBindingPrincipalsRequest, CommandOutput,
+    EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest, ExportNativeTaskRequest,
+    NativeTaskExportContent, NativeTaskPreparedResult, PrepareNativeTaskRequest,
+    RunnerCommandRequest, RunnerOwner, RunnerShellRequest, SeedBundle, StartNativeTaskRequest,
+    StartNativeTaskResult, StopExecutionEnvironmentAck, StopExecutionEnvironmentRequest,
+    StopNativeTaskRequest, StopNativeTaskResult, StopWorkspacePrincipalAck,
+    StopWorkspacePrincipalRequest,
 };
 
 pub trait RunnerBackend: Send + Sync {
@@ -26,6 +28,34 @@ pub trait RunnerBackend: Send + Sync {
         &'a self,
         owner: RunnerOwner,
     ) -> RunnerFuture<'a, anyhow::Result<()>>;
+
+    fn supports_workspace_binding_principal_cleanup(&self) -> bool {
+        false
+    }
+
+    fn cleanup_workspace_binding_principals<'a>(
+        &'a self,
+        _request: CleanupWorkspaceBindingPrincipalsRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<CleanupWorkspaceBindingPrincipalsAck>> {
+        Box::pin(async {
+            anyhow::bail!(
+                "workspace binding principal cleanup is not supported by this runner backend"
+            )
+        })
+    }
+
+    fn supports_workspace_principal_stop(&self) -> bool {
+        false
+    }
+
+    fn stop_workspace_principal<'a>(
+        &'a self,
+        _request: StopWorkspacePrincipalRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<StopWorkspacePrincipalAck>> {
+        Box::pin(async move {
+            anyhow::bail!("workspace principal stop is not supported by this runner backend")
+        })
+    }
 
     /// Agent-neutral environment ensure. Default fails closed; the Docker
     /// backend overrides with the trusted-profile implementation.

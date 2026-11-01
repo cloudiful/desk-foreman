@@ -220,9 +220,9 @@ pub(super) fn spawn_tool_audit(
     };
     let actor_user_id = actor.user.as_ref().map(|user| user.user_id);
     let actor_application_id = actor.application.as_ref().map(|app| app.application_id);
-    let actor_type = match actor.mode {
+    let actor_type = match &actor.mode {
         ActorMode::InternalUser => "user",
-        ActorMode::ApplicationSubject => "application",
+        ActorMode::ApplicationSubject | ActorMode::IsolatedApplicationPrincipal(_) => "application",
     };
     let target_id = actor.principal_id.clone();
     let workspace_binding_id = Some(actor.workspace_binding_id);

@@ -40,6 +40,27 @@ fn tool_signature_snapshot(service: &DeskForemanService) -> String {
 }
 
 #[tokio::test]
+async fn exported_catalog_matches_serving_registry() {
+    let temp = tempdir().expect("tempdir");
+    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()));
+    let mut registered = service.tool_router.list_all();
+    registered.sort_by(|a, b| a.name.cmp(&b.name));
+    let catalog = DeskForemanService::tool_catalog();
+    assert!(!catalog.is_empty());
+    assert!(catalog.windows(2).all(|pair| pair[0].name < pair[1].name));
+    assert!(catalog.iter().all(|tool| !tool.input_schema.is_empty()));
+    assert_eq!(
+        serde_json::to_value(&catalog).unwrap(),
+        serde_json::to_value(&registered).unwrap()
+    );
+    let exported: Value = serde_json::from_str(include_str!(
+        "../../../contracts/mcp/desk-foreman-tool-catalog.json"
+    ))
+    .unwrap();
+    assert_eq!(exported, json!({"schema_version": 1, "tools": registered}));
+}
+
+#[tokio::test]
 async fn tool_schemas_match_expected_surface() {
     let temp = tempdir().expect("tempdir");
     let service = DeskForemanService::new(app_state(temp.path().to_path_buf()));

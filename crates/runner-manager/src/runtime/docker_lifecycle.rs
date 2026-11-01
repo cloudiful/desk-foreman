@@ -57,7 +57,19 @@ impl DockerRunnerBackend {
                     .map(PathBuf::from)
                 })
             });
+        let name = value
+            .get("Name")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let managed = value
+            .get("Config")
+            .and_then(|config| config.get("Labels"))
+            .and_then(|labels| labels.get("desk-foreman.managed"))
+            .and_then(Value::as_str)
+            == Some("true");
         Ok(Some(ContainerMetadata {
+            name,
+            managed,
             status,
             container_id,
             manager_id,
@@ -107,9 +119,21 @@ impl DockerRunnerBackend {
                 .as_deref()
                 .and_then(owner_from_stable_key)
                 .is_some_and(|owner| owner.container_name() == container_name);
+            let principal = metadata
+                .owner_key
+                .as_deref()
+                .and_then(owner_from_stable_key)
+                .filter(|owner| matches!(owner, RunnerOwner::ApplicationPrincipal { .. }));
+            if let Some(owner) = &principal {
+                if !metadata.matches_principal(owner, container_name, &self.manager_id) {
+                    tracing::warn!(container = %container_name, "skipping principal container with unverified ownership");
+                    continue;
+                }
+            }
             let manager_owned =
                 owner_matches && metadata.manager_id.as_deref() == Some(self.manager_id.as_str());
-            let legacy_owned = owner_matches
+            let legacy_owned = principal.is_none()
+                && owner_matches
                 && metadata.manager_id.is_none()
                 && legacy_workspace_mount_matches(&config, metadata.workspace_source.as_deref());
             if !manager_owned && !legacy_owned {
@@ -123,7 +147,15 @@ impl DockerRunnerBackend {
             {
                 continue;
             }
-            if let Err(error) = self.stop_and_remove(container_name).await {
+            let target = if principal.is_some() {
+                metadata
+                    .container_id
+                    .as_deref()
+                    .expect("principal metadata validated")
+            } else {
+                container_name
+            };
+            if let Err(error) = self.stop_and_remove(target).await {
                 self.report_cleanup_failed_metadata(&metadata, container_name, &error);
                 tracing::warn!(
                     container = %container_name,
@@ -173,7 +205,26 @@ impl DockerRunnerBackend {
                 continue;
             }
             let container = owner.container_name();
-            match self.stop_and_remove(&container).await {
+            let target = if matches!(owner, RunnerOwner::ApplicationPrincipal { .. }) {
+                match self.inspect_container_metadata(&container).await {
+                    Ok(Some(metadata))
+                        if metadata.matches_principal(&owner, &container, &self.manager_id) =>
+                    {
+                        metadata.container_id.expect("principal metadata validated")
+                    }
+                    Ok(_) => {
+                        tracing::warn!(container = %container, "skipping principal container with unverified ownership");
+                        continue;
+                    }
+                    Err(error) => {
+                        tracing::warn!(container = %container, error = %error, "failed to inspect principal container during idle reclaim");
+                        continue;
+                    }
+                }
+            } else {
+                container.clone()
+            };
+            match self.stop_and_remove(&target).await {
                 Ok(()) => {
                     self.report_removed(&container);
                     self.last_active
@@ -368,7 +419,7 @@ impl DockerRunnerBackend {
     }
 }
 
-fn owner_from_stable_key(key: &str) -> Option<RunnerOwner> {
+pub(crate) fn owner_from_stable_key(key: &str) -> Option<RunnerOwner> {
     if let Some(rest) = key.strip_prefix("user:") {
         Some(RunnerOwner::InternalUser {
             user_id: rest.parse().ok()?,
@@ -377,18 +428,108 @@ fn owner_from_stable_key(key: &str) -> Option<RunnerOwner> {
         Some(RunnerOwner::WorkspaceBinding {
             workspace_binding_id: rest.parse().ok()?,
         })
+    } else if let Some(rest) = key.strip_prefix("application_principal:") {
+        let mut parts = rest.split(':');
+        let app = parts.next()?;
+        let binding = parts.next()?;
+        let digest = parts.next()?;
+        if parts.next().is_some()
+            || digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return None;
+        }
+        let application_id: i64 = app.parse().ok()?;
+        let workspace_binding_id: i64 = binding.parse().ok()?;
+        if application_id <= 0
+            || workspace_binding_id <= 0
+            || application_id.to_string() != app
+            || workspace_binding_id.to_string() != binding
+        {
+            return None;
+        }
+        Some(RunnerOwner::ApplicationPrincipal {
+            application_id,
+            workspace_binding_id,
+            principal_digest: digest.to_owned(),
+        })
     } else {
         None
     }
 }
 
+#[cfg(test)]
+mod principal_parser_tests {
+    use super::*;
+
+    #[test]
+    fn principal_keys_are_canonical_and_roundtrip() {
+        let owner = RunnerOwner::ApplicationPrincipal {
+            application_id: 123,
+            workspace_binding_id: 456,
+            principal_digest: "ab".repeat(32),
+        };
+        assert_eq!(owner_from_stable_key(&owner.stable_key()), Some(owner));
+        for key in [
+            format!("application_principal:01:2:{}", "a".repeat(64)),
+            format!("application_principal:+1:2:{}", "a".repeat(64)),
+            format!("application_principal:1:0:{}", "a".repeat(64)),
+            format!("application_principal:1: 2:{}", "a".repeat(64)),
+            format!("application_principal:1:2:{}", "A".repeat(64)),
+            format!("application_principal:1:2:{}:x", "a".repeat(64)),
+            format!("application_principal:1:2:{}", "a".repeat(63)),
+            format!("application_principal:1:2:{}", "g".repeat(64)),
+            format!(
+                "application_principal:9223372036854775808:2:{}",
+                "a".repeat(64)
+            ),
+        ] {
+            assert!(owner_from_stable_key(&key).is_none(), "{key}");
+        }
+        assert_eq!(
+            owner_from_stable_key("user:01"),
+            Some(RunnerOwner::InternalUser { user_id: 1 })
+        );
+        assert_eq!(
+            owner_from_stable_key("workspace_binding:02"),
+            Some(RunnerOwner::WorkspaceBinding {
+                workspace_binding_id: 2
+            })
+        );
+        assert_eq!(owner_from_stable_key("execution_environment:x:1"), None);
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct ContainerMetadata {
+    name: Option<String>,
+    managed: bool,
     pub(crate) status: String,
     pub(crate) container_id: Option<String>,
     pub(crate) manager_id: Option<String>,
     pub(crate) owner_key: Option<String>,
     pub(crate) workspace_source: Option<PathBuf>,
+}
+
+impl ContainerMetadata {
+    pub(crate) fn matches_principal(
+        &self,
+        owner: &RunnerOwner,
+        name: &str,
+        manager_id: &str,
+    ) -> bool {
+        self.managed
+            && self
+                .container_id
+                .as_deref()
+                .is_some_and(|id| !id.is_empty())
+            && owner.container_name() == name
+            && self.name.as_deref().and_then(|s| s.strip_prefix('/')) == Some(name)
+            && self.owner_key.as_deref() == Some(owner.stable_key().as_str())
+            && self.manager_id.as_deref() == Some(manager_id)
+    }
 }
 
 pub(crate) fn legacy_workspace_mount_matches(

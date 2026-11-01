@@ -40,6 +40,20 @@ fields.
 | `404` | The calling application does not exist. |
 | `500` | The workspace could not be materialized. |
 
+## Principal-isolated execution
+
+Authenticated application resource requests can select isolated execution with `X-DF-Runner-Isolation: principal`. Supply one `X-DF-External-User-Id`, `X-DF-Workspace-Key` and `X-DF-Lease-Owner`; the external user and lease owner must match and the workspace key must identify a resource. Existing write-lease and scope checks still apply. Execution requires a Docker-backed runner manager. A principal stop fence is permanent for that identity; a new lifecycle needs a fresh identity. Without the isolation header, existing runner ownership remains unchanged.
+
+## Principal stop and protocol discovery
+
+`GET /api/internal/principal-workspace-capabilities` requires an application bearer and returns `protocol_version: 1`; it describes the server protocol, not runner availability.
+
+`POST /api/internal/resource-workspaces/{resource_kind}/{resource_id}/workspace-sessions/stop` requires the application bearer, `workspace.shell` scope, `X-DF-Runner-Isolation: principal`, and matching external-user, workspace-key and lease-owner headers. Its JSON body is `{ "expected_lease_owner": "..." }`, matching the external-user and lease-owner headers. A successful response confirms that principal stopped and reports whether its lease was released. A different or absent current lease is not changed. An unconfirmed stop returns a retryable error; the permanent principal fence may persist even when the lease is retained. Start a new lifecycle with a fresh identity.
+
+## Git sync
+
+`POST /api/internal/resource-workspaces/{resource_kind}/{resource_id}/git/sync` requires the resource write lease, shell scope, and network access. Supply `remote_url` and optionally `branch`. The optional `preserve_existing` flag defaults to `false`: an existing checkout must be clean and is pulled fast-forward only. With `true`, an existing checkout is not fetched or pulled, and its work and branch are retained. An empty workspace is cloned normally. Successful sync sets the managed origin fetch and push URLs to the supplied URL and reports the current HEAD, branch and dirty state.
+
 ## Ownership boundary
 
 Resolving a binding grants no permission at all:

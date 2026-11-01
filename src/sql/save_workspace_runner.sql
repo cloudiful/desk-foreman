@@ -3,6 +3,8 @@ INSERT INTO workspace_runners (
     owner_kind,
     owner_user_id,
     owner_workspace_binding_id,
+    owner_application_id,
+    owner_principal_digest,
     container_name,
     container_id,
     runtime,
@@ -17,8 +19,8 @@ INSERT INTO workspace_runners (
     last_error
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-    NOW(), NOW(), NOW(), $13
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+    NOW(), NOW(), NOW(), $15
 )
 ON CONFLICT (runner_manager_id, container_name) DO UPDATE
 SET
@@ -26,6 +28,8 @@ SET
     owner_kind = EXCLUDED.owner_kind,
     owner_user_id = EXCLUDED.owner_user_id,
     owner_workspace_binding_id = EXCLUDED.owner_workspace_binding_id,
+    owner_application_id = EXCLUDED.owner_application_id,
+    owner_principal_digest = EXCLUDED.owner_principal_digest,
     container_id = EXCLUDED.container_id,
     runtime = EXCLUDED.runtime,
     runtime_class = EXCLUDED.runtime_class,
@@ -37,4 +41,9 @@ SET
     updated_at = NOW(),
     last_observed_at = NOW(),
     last_error = EXCLUDED.last_error
+WHERE (workspace_runners.owner_kind <> 'application_principal' AND EXCLUDED.owner_kind <> 'application_principal')
+   OR (workspace_runners.owner_kind = 'application_principal' AND EXCLUDED.owner_kind = 'application_principal'
+       AND workspace_runners.owner_application_id = EXCLUDED.owner_application_id
+       AND workspace_runners.owner_workspace_binding_id = EXCLUDED.owner_workspace_binding_id
+       AND workspace_runners.owner_principal_digest = EXCLUDED.owner_principal_digest)
 RETURNING *;

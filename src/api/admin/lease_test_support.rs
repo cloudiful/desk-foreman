@@ -5,7 +5,10 @@
 
 use std::{
     path::PathBuf,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, SystemTime},
 };
 
@@ -29,6 +32,8 @@ use crate::{
 #[derive(Default)]
 pub(crate) struct FakeRunnerService {
     pub(crate) sessions: Mutex<Vec<RunnerSessionStatus>>,
+    pub(crate) fail_principal: AtomicBool,
+    pub(crate) fail_cleanup: AtomicBool,
 }
 
 impl FakeRunnerService {
@@ -84,11 +89,32 @@ impl RunnerService for FakeRunnerService {
         Box::pin(async move { anyhow::bail!("run_command not supported in fake") })
     }
 
+    fn cleanup_workspace_binding_principals<'a>(
+        &'a self,
+        _: runner_protocol::CleanupWorkspaceBindingPrincipalsRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::CleanupWorkspaceBindingPrincipalsAck>>
+    {
+        Box::pin(async move {
+            Ok(runner_protocol::CleanupWorkspaceBindingPrincipalsAck {
+                state: if self.fail_principal.load(Ordering::SeqCst) {
+                    runner_protocol::StopWorkspacePrincipalState::Failed
+                } else {
+                    runner_protocol::StopWorkspacePrincipalState::Stopped
+                },
+                owners: vec![],
+                detail: None,
+            })
+        })
+    }
+
     fn cleanup_runner_owner<'a>(
         &'a self,
         owner: RunnerOwner,
     ) -> RunnerFuture<'a, anyhow::Result<()>> {
         Box::pin(async move {
+            if self.fail_cleanup.load(Ordering::SeqCst) {
+                anyhow::bail!("injected cleanup failure");
+            }
             self.sessions
                 .lock()
                 .await

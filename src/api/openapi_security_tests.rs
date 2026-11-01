@@ -115,11 +115,30 @@ fn only_the_guarded_operations_declare_security() {
     guarded.sort_unstable();
 
     let mut expected: Vec<(&str, &str, &str)> = APPLICATION_BEARER_OPERATIONS.to_vec();
+    expected.push((
+        "/api/internal/runner-manager/principal-admission",
+        "post",
+        "principal_admission",
+    ));
     expected.sort_unstable();
 
     assert_eq!(
         guarded, expected,
         "the bearer requirement must not spread to or vanish from other routes"
+    );
+}
+
+#[test]
+fn principal_admission_requires_manager_bearer_and_request_schema() {
+    let doc = document();
+    let scheme = &doc["components"]["securitySchemes"]["runner_manager_bearer"];
+    assert_eq!(scheme["type"], "http");
+    assert_eq!(scheme["scheme"], "bearer");
+    let op = &doc["paths"]["/api/internal/runner-manager/principal-admission"]["post"];
+    assert_eq!(op["security"], json!([{"runner_manager_bearer": []}]));
+    assert_eq!(
+        op["requestBody"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/PrincipalAdmissionRequest"
     );
 }
 

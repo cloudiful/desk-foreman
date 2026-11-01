@@ -36,6 +36,12 @@ impl DeskForemanService {
         }
     }
 
+    pub fn tool_catalog() -> Vec<rmcp::model::Tool> {
+        let mut tools = Self::tool_router_for_state().list_all();
+        tools.sort_by(|a, b| a.name.cmp(&b.name));
+        tools
+    }
+
     fn tool_router_for_state() -> ToolRouter<Self> {
         let mut router = ToolRouter::new();
         readonly::register_routes(&mut router);

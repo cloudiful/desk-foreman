@@ -44,6 +44,32 @@ pub async fn cleanup_archived_workspaces(state: &AppState) -> anyhow::Result<()>
             cleanup.release().await?;
             continue;
         }
+        let Some(current) =
+            db::queries::find_workspace_binding_by_id(&state.db, binding.workspace_binding_id)
+                .await?
+        else {
+            cleanup.release().await?;
+            continue;
+        };
+        if current.is_active
+            || current.lifecycle_state != "archived"
+            || current
+                .archived_at
+                .is_none_or(|archived| archived >= before)
+        {
+            cleanup.release().await?;
+            continue;
+        }
+        if let Err(error) = crate::runner::principal_stop::cleanup_binding_admitted_work(
+            &state.db,
+            state.runner.as_ref(),
+            binding.workspace_binding_id,
+        )
+        .await
+        {
+            tracing::warn!(workspace_binding_id = binding.workspace_binding_id, %error, "failed to clean up admitted principal work");
+            continue;
+        }
         let owner = runner_protocol::RunnerOwner::WorkspaceBinding {
             workspace_binding_id: binding.workspace_binding_id,
         };
@@ -55,7 +81,7 @@ pub async fn cleanup_archived_workspaces(state: &AppState) -> anyhow::Result<()>
             );
             continue;
         }
-        if let Err(error) = fs::remove_dir_all(&binding.workspace_root)
+        if let Err(error) = fs::remove_dir_all(&current.workspace_root)
             && error.kind() != std::io::ErrorKind::NotFound
         {
             tracing::warn!(

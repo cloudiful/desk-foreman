@@ -1,8 +1,9 @@
 use runner_protocol::{
-    CancelSessionRequest, CommandOutput, EnsureExecutionEnvironmentAck,
+    CancelSessionRequest, CleanupWorkspaceBindingPrincipalsAck,
+    CleanupWorkspaceBindingPrincipalsRequest, CommandOutput, EnsureExecutionEnvironmentAck,
     EnsureExecutionEnvironmentRequest, ExecRequest, InputRequest, RunnerCommandRequest,
     RunnerOwner, RunnerSessionStatus, ShellToolOutput, StopExecutionEnvironmentAck,
-    StopExecutionEnvironmentRequest,
+    StopExecutionEnvironmentRequest, StopWorkspacePrincipalAck, StopWorkspacePrincipalRequest,
 };
 
 use crate::runner::RunnerFuture;
@@ -34,6 +35,26 @@ pub trait RunnerService: Send + Sync {
         &'a self,
         owner: RunnerOwner,
     ) -> RunnerFuture<'a, anyhow::Result<()>>;
+
+    fn cleanup_workspace_binding_principals<'a>(
+        &'a self,
+        _request: CleanupWorkspaceBindingPrincipalsRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<CleanupWorkspaceBindingPrincipalsAck>> {
+        Box::pin(async {
+            anyhow::bail!(
+                "workspace binding principal cleanup is not supported by this runner service"
+            )
+        })
+    }
+
+    fn stop_workspace_principal<'a>(
+        &'a self,
+        _request: StopWorkspacePrincipalRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<StopWorkspacePrincipalAck>> {
+        Box::pin(async move {
+            anyhow::bail!("workspace principal stop is not supported by this runner service")
+        })
+    }
 
     /// Agent-neutral ensure. Default fails closed so existing
     /// `PullRunnerService` and test fakes keep compiling without behavior

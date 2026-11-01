@@ -35,6 +35,20 @@
 | `404` | 调用方应用不存在。 |
 | `500` | 无法创建工作区。 |
 
+## 主体隔离执行
+
+经过应用认证的资源请求可通过 `X-DF-Runner-Isolation: principal` 选择隔离执行。分别提供一个 `X-DF-External-User-Id`、`X-DF-Workspace-Key` 和 `X-DF-Lease-Owner`；外部用户与租约所有者必须相同，工作区键必须指向资源。现有写租约和权限范围检查仍然有效。执行需要 Docker 后端的运行管理器。主体停止围栏对该身份永久有效；新的生命周期需要新身份。不提供隔离请求头时，运行器归属保持不变。
+
+## 主体停止和协议发现
+
+`GET /api/internal/principal-workspace-capabilities` 需要应用 Bearer 凭据，返回 `protocol_version: 1`；该版本描述服务器协议，不代表运行器可用。
+
+`POST /api/internal/resource-workspaces/{resource_kind}/{resource_id}/workspace-sessions/stop` 需要应用 Bearer 凭据、`workspace.shell` 权限、`X-DF-Runner-Isolation: principal` 和匹配的外部用户、工作区键及租约所有者请求头。JSON 请求体为 `{ "expected_lease_owner": "..." }`，其值须与外部用户及租约所有者相同。成功响应确认该主体已停止，并指明是否释放了租约；其他所有者或空租约不会被修改。停止未确认时返回可重试错误，租约保留但永久主体围栏可能已生效。新的生命周期需要新身份。
+
+## Git 同步
+
+`POST /api/internal/resource-workspaces/{resource_kind}/{resource_id}/git/sync` 需要资源写租约、shell 权限和网络访问。提供 `remote_url`，可选提供 `branch`。可选的 `preserve_existing` 默认为 `false`：已有检出必须干净，并仅执行快进拉取。为 `true` 时，已有检出不会获取或拉取，工作内容和分支保持不变。空工作区仍正常克隆。成功同步会将受管理的 origin 拉取和推送地址设为提供的地址，并返回当前 HEAD、分支和修改状态。
+
 ## 归属边界
 
 解析绑定**不授予任何权限**：

@@ -9,6 +9,13 @@ pub mod task_execution;
 pub mod task_export;
 pub mod task_preparation;
 pub mod task_seed;
+pub mod workspace_principal;
+
+pub use workspace_principal::{
+    CleanupWorkspaceBindingPrincipalsAck, CleanupWorkspaceBindingPrincipalsRequest,
+    PrincipalAdmissionRequest, StopWorkspacePrincipalAck, StopWorkspacePrincipalRequest,
+    StopWorkspacePrincipalState, WorkspacePrincipalCleanupResult,
+};
 
 pub use execution_environment::{
     EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest, StopExecutionEnvironmentAck,
@@ -96,6 +103,11 @@ pub enum RunnerOwner {
         environment_id: String,
         generation: i64,
     },
+    ApplicationPrincipal {
+        application_id: i64,
+        workspace_binding_id: i64,
+        principal_digest: String,
+    },
 }
 
 impl RunnerOwner {
@@ -104,6 +116,7 @@ impl RunnerOwner {
             Self::InternalUser { .. } => "user",
             Self::WorkspaceBinding { .. } => "workspace_binding",
             Self::ExecutionEnvironment { .. } => "execution_environment",
+            Self::ApplicationPrincipal { .. } => "application_principal",
         }
     }
 
@@ -117,6 +130,13 @@ impl RunnerOwner {
                 environment_id,
                 generation,
             } => format!("execution_environment:{environment_id}:{generation}"),
+            Self::ApplicationPrincipal {
+                application_id,
+                workspace_binding_id,
+                principal_digest,
+            } => format!(
+                "application_principal:{application_id}:{workspace_binding_id}:{principal_digest}"
+            ),
         }
     }
 

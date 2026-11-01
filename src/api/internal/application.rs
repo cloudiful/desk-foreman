@@ -15,6 +15,7 @@ use super::shared::valid_resource_path_component;
     get,
     path = "/api/internal/application/capabilities",
     tag = "internal",
+    security(("application_bearer" = [])),
     responses(
         (status = 200, body = crate::db::types::ApplicationCapabilitiesResponse),
         (status = 401, body = crate::error::ErrorResponse)
@@ -59,6 +60,7 @@ pub async fn application_capabilities(
     post,
     path = "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/git/sync",
     tag = "internal",
+    security(("application_bearer" = [])),
     params(
         ("resource_kind" = String, Path, description = "Resource workspace kind"),
         ("resource_id" = String, Path, description = "Resource workspace identifier")
@@ -154,13 +156,11 @@ pub async fn sync_resource_workspace_git(
         ));
     }
     if !needs_initialization {
-        let status = run_git_command(
-            &state,
-            &actor,
-            vec!["status".to_string(), "--porcelain".to_string()],
-        )
-        .await?;
-        if status.exit_code != Some(0) || !status.stdout.trim().is_empty() {
+        let status =
+            run_git_command(&state, &actor, vec!["status".into(), "--porcelain".into()]).await?;
+        require_git_success(&status)?;
+        let dirty = !status.stdout.is_empty();
+        if dirty && !request.preserve_existing {
             return Err(AppError::conflict("workspace has uncommitted changes"));
         }
     }
@@ -175,8 +175,10 @@ pub async fn sync_resource_workspace_git(
             validate_git_branch(branch)?;
             args.extend(["--branch".to_string(), branch.to_string()]);
         }
-        args.extend([remote_url, ".".to_string()]);
-        run_git_command(&state, &actor, args).await?
+        args.extend([remote_url.clone(), ".".to_string()]);
+        Some(run_git_command(&state, &actor, args).await?)
+    } else if request.preserve_existing {
+        None
     } else {
         let branch = if let Some(branch) = request
             .branch
@@ -193,6 +195,7 @@ pub async fn sync_resource_workspace_git(
                 vec!["branch".to_string(), "--show-current".to_string()],
             )
             .await?;
+            require_git_success(&current_branch)?;
             let current_branch = current_branch.stdout.trim();
             if current_branch.is_empty() {
                 return Err(AppError::conflict(
@@ -205,16 +208,28 @@ pub async fn sync_resource_workspace_git(
         let args = vec![
             "pull".to_string(),
             "--ff-only".to_string(),
-            remote_url,
+            remote_url.clone(),
             branch,
         ];
-        run_git_command(&state, &actor, args).await?
+        Some(run_git_command(&state, &actor, args).await?)
     };
-    if output.exit_code != Some(0) {
-        return Err(AppError::conflict(format!(
-            "git sync failed: {}",
-            redact_git_output(&output.output)
-        )));
+    if let Some(output) = output {
+        require_git_success(&output)?;
+    }
+    for key in ["remote.origin.url", "remote.origin.pushurl"] {
+        let output = run_git_command(
+            &state,
+            &actor,
+            vec![
+                "config".into(),
+                "--local".into(),
+                "--replace-all".into(),
+                key.into(),
+                remote_url.clone(),
+            ],
+        )
+        .await?;
+        require_git_success(&output)?;
     }
     let head = run_git_command(
         &state,
@@ -232,6 +247,22 @@ pub async fn sync_resource_workspace_git(
         ],
     )
     .await?;
+    require_git_success(&head)?;
+    require_git_success(&branch)?;
+    let head_commit = head.stdout.trim();
+    if head_commit.is_empty() {
+        return Err(AppError::conflict("git sync failed: missing HEAD"));
+    }
+    let branch_name = branch.stdout.trim();
+    if branch_name.is_empty() {
+        return Err(AppError::conflict(
+            "git sync failed: missing branch metadata",
+        ));
+    }
+    let status =
+        run_git_command(&state, &actor, vec!["status".into(), "--porcelain".into()]).await?;
+    require_git_success(&status)?;
+    let dirty = !status.stdout.is_empty();
     // The fence was held across every runner command above; release it
     // only after the sync fully succeeded so no takeover can interleave
     // mid-sync.
@@ -241,9 +272,9 @@ pub async fn sync_resource_workspace_git(
     Ok(Json(crate::db::types::GitWorkspaceSyncResponse {
         status: "ready".to_string(),
         cloned: needs_initialization,
-        dirty: false,
-        branch: Some(branch.stdout.trim().to_string()),
-        head_commit: Some(head.stdout.trim().to_string()),
+        dirty,
+        branch: (branch_name != "HEAD").then(|| branch_name.to_string()),
+        head_commit: Some(head_commit.to_string()),
     }))
 }
 
@@ -266,7 +297,7 @@ async fn run_git_command(
         })
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "workspace runner command failed");
+            tracing::error!(error = %redact_git_output(&error.to_string()), "workspace runner command failed");
             AppError::service_unavailable("workspace runner is unavailable")
         })
 }
@@ -295,54 +326,20 @@ fn validate_git_branch(value: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-fn redact_git_output(value: &str) -> String {
-    value
-        .lines()
-        .map(|line| line.replace("Authorization:", "Authorization:[redacted]"))
-        .collect::<Vec<_>>()
-        .join("\n")
+fn require_git_success(output: &runner_protocol::CommandOutput) -> Result<(), AppError> {
+    if output.exit_code != Some(0) {
+        return Err(AppError::conflict(format!(
+            "git sync failed: {}",
+            redact_git_output(&output.output)
+        )));
+    }
+    Ok(())
+}
+
+fn redact_git_output(_value: &str) -> String {
+    "[redacted]".to_string()
 }
 
 #[cfg(test)]
-mod tests {
-    use chrono::{Duration, Utc};
-
-    use crate::db::types::WorkspaceBindingResponse;
-
-    fn resource_binding_with_lease(
-        lease_owner: &str,
-        now: chrono::DateTime<Utc>,
-    ) -> WorkspaceBindingResponse {
-        WorkspaceBindingResponse {
-            workspace_binding_id: 7,
-            application_id: 1,
-            external_user_id: "__resource__".to_string(),
-            workspace_key: "code_project:abc".to_string(),
-            external_user_hash: "hash".to_string(),
-            workspace_root: "/tmp/ws".to_string(),
-            is_active: true,
-            last_used_at: now,
-            created_at: now,
-            updated_at: now,
-            lifecycle_state: "active".to_string(),
-            archived_at: None,
-            resource_kind: Some("code_project".to_string()),
-            resource_id: Some("abc".to_string()),
-            write_lease_owner: Some(lease_owner.to_string()),
-            write_lease_acquired_at: Some(now),
-            write_lease_expires_at: Some(now + Duration::minutes(10)),
-        }
-    }
-
-    #[test]
-    fn git_sync_fenced_gate_denies_displaced_owner_after_handover() {
-        // Pins the git-sync admission contract to the same locked-row
-        // fence as the MCP mutating tools: the sync handler validates the
-        // locked fresh row, so an already-admitted old owner cannot cross
-        // a force takeover mid-sync.
-        let now = Utc::now();
-        let fresh = resource_binding_with_lease("conversation:2", now);
-        assert!(crate::actor::admit_fenced_write(Some(&fresh), Some("conversation:1")).is_err());
-        assert!(crate::actor::admit_fenced_write(Some(&fresh), Some("conversation:2")).is_ok());
-    }
-}
+#[path = "application_git_sync_tests.rs"]
+mod tests;

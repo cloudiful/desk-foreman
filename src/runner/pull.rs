@@ -8,9 +8,11 @@ use tokio::time::{Duration, interval, timeout};
 use uuid::Uuid;
 
 use runner_protocol::{
-    CancelSessionRequest, CommandOutput, ExecRequest, InputRequest, RUNNER_JOB_TIMEOUT_SECS,
-    RUNNER_MANAGER_HEARTBEAT_TTL_SECS, RunnerCommandRequest, RunnerJob, RunnerJobResult,
-    RunnerOwner, RunnerSessionStatus, ShellToolOutput,
+    CancelSessionRequest, CleanupWorkspaceBindingPrincipalsAck,
+    CleanupWorkspaceBindingPrincipalsRequest, CommandOutput, ExecRequest, InputRequest,
+    RUNNER_JOB_TIMEOUT_SECS, RUNNER_MANAGER_HEARTBEAT_TTL_SECS, RunnerCommandRequest, RunnerJob,
+    RunnerJobResult, RunnerOwner, RunnerSessionStatus, ShellToolOutput, StopWorkspacePrincipalAck,
+    StopWorkspacePrincipalRequest,
 };
 
 use crate::{
@@ -20,6 +22,9 @@ use crate::{
         service_relay::RelayRegistry,
     },
 };
+
+#[path = "principal_cleanup.rs"]
+mod principal_cleanup;
 
 struct QueuedJob {
     job: RunnerJob,
@@ -329,6 +334,20 @@ impl RunnerService for PullRunnerService {
         request: CancelSessionRequest,
     ) -> RunnerFuture<'a, anyhow::Result<RunnerSessionStatus>> {
         Box::pin(async move { self.broker.submit("cancel_session", &request).await })
+    }
+
+    fn stop_workspace_principal<'a>(
+        &'a self,
+        request: StopWorkspacePrincipalRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<StopWorkspacePrincipalAck>> {
+        Box::pin(async move { self.broker.stop_principal_all(request).await })
+    }
+
+    fn cleanup_workspace_binding_principals<'a>(
+        &'a self,
+        request: CleanupWorkspaceBindingPrincipalsRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<CleanupWorkspaceBindingPrincipalsAck>> {
+        Box::pin(async move { self.broker.cleanup_binding_principals_all(request).await })
     }
 
     fn list_sessions<'a>(&'a self) -> RunnerFuture<'a, anyhow::Result<Vec<RunnerSessionStatus>>> {

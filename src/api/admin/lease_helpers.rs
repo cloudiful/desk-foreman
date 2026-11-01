@@ -39,6 +39,26 @@ pub async fn cancel_binding_sessions_best_effort(
     state: &AppState,
     binding_id: i64,
 ) -> WorkspaceLeaseCancellationOutcome {
+    cancel_binding_sessions_with_principal(state, binding_id, async {
+        crate::runner::principal_stop::cleanup_binding_admitted_work(
+            &state.db,
+            state.runner.as_ref(),
+            binding_id,
+        )
+        .await
+        .map(|_| ())
+    })
+    .await
+}
+
+async fn cancel_binding_sessions_with_principal<F>(
+    state: &AppState,
+    binding_id: i64,
+    principal: F,
+) -> WorkspaceLeaseCancellationOutcome
+where
+    F: std::future::Future<Output = anyhow::Result<()>>,
+{
     let mut outcome = WorkspaceLeaseCancellationOutcome {
         attempted: true,
         // Default to success; failure paths explicitly flip this to false.
@@ -46,6 +66,11 @@ pub async fn cancel_binding_sessions_best_effort(
         sessions_cancelled: 0,
         error: None,
     };
+    if let Err(error) = principal.await {
+        outcome.succeeded = false;
+        outcome.error = Some(format!("principal cleanup failed: {error}"));
+        return outcome;
+    }
     let sessions = match state.runner.list_sessions().await {
         Ok(sessions) => sessions,
         Err(error) => {

@@ -16,10 +16,13 @@ use crate::{
     error::AppError,
     workspace::resolve_workspace_binding_root,
 };
-use runner_protocol::{CancelSessionRequest, RunnerOwner};
 use serde_json::json;
 
 pub(crate) mod native_task_guard;
+
+#[cfg(test)]
+#[path = "workspace_binding_principal_tests.rs"]
+mod principal_tests;
 
 use native_task_guard::lock_binding_for_transition;
 
@@ -86,7 +89,7 @@ pub async fn get_workspace_binding(
     path = "/api/admin/workspace-bindings/{binding_id}/archive",
     tag = "admin-users",
     params(("binding_id" = i64, Path, description = "Workspace binding identifier")),
-    responses((status = 200, body = WorkspaceBindingResponse))
+    responses((status = 200, body = WorkspaceBindingResponse), (status = 503, body = crate::error::ErrorResponse))
 )]
 pub async fn archive_workspace_binding(
     State(state): State<AppState>,
@@ -116,7 +119,7 @@ pub async fn restore_workspace_binding(
     path = "/api/admin/workspace-bindings/{binding_id}/reset",
     tag = "admin-users",
     params(("binding_id" = i64, Path, description = "Workspace binding identifier")),
-    responses((status = 200, body = WorkspaceBindingResponse))
+    responses((status = 200, body = WorkspaceBindingResponse), (status = 503, body = crate::error::ErrorResponse))
 )]
 pub async fn reset_workspace_binding(
     State(state): State<AppState>,
@@ -202,10 +205,10 @@ async fn transition_workspace_binding(
     else {
         return Err(AppError::not_found("workspace binding not found"));
     };
-    guard.commit().await?;
     if lifecycle_state == "archived" {
         cancel_binding_sessions(state, binding_id).await?;
     }
+    guard.commit().await?;
     record_admin_audit(
         state,
         &admin,
@@ -231,7 +234,8 @@ async fn transition_workspace_binding(
     responses(
         (status = 200, body = WorkspaceBindingResponse),
         (status = 404, body = crate::error::ErrorResponse),
-        (status = 409, body = crate::error::ErrorResponse)
+        (status = 409, body = crate::error::ErrorResponse),
+        (status = 503, body = crate::error::ErrorResponse)
     )
 )]
 pub async fn acquire_workspace_binding_lease(
@@ -261,7 +265,7 @@ pub async fn acquire_workspace_binding_lease(
     tag = "admin-users",
     params(("binding_id" = i64, Path, description = "Workspace binding identifier")),
     request_body = WorkspaceLeaseReleaseRequest,
-    responses((status = 200, body = WorkspaceBindingResponse))
+    responses((status = 200, body = WorkspaceBindingResponse), (status = 503, body = crate::error::ErrorResponse))
 )]
 pub async fn release_workspace_binding_lease(
     State(state): State<AppState>,
@@ -297,20 +301,34 @@ pub async fn acquire_binding_lease(
     if binding.lifecycle_state != "active" || !binding.is_active {
         return Err(AppError::conflict("workspace binding is not active"));
     }
-    crate::db::queries::acquire_workspace_write_lease(&state.db, binding_id, owner, ttl_seconds)
-        .await?
-        .map(|updated| {
-            // Defensive read in case the SQL UPDATE didn't return a row
-            // (shouldn't happen because the binding is locked, but we
-            // want the post-update state without an extra round-trip
-            // when the CAS succeeds).
-            updated
-        })
-        .or_else(|| {
-            // CAS failure: the lease is held by someone else.
-            None
-        })
-        .ok_or_else(|| AppError::conflict("workspace write lease is held by another owner"))
+    match crate::db::queries::acquire_workspace_write_lease_with_cleanup(
+        &state.db,
+        binding_id,
+        owner,
+        ttl_seconds,
+        async {
+            crate::runner::principal_stop::cleanup_binding_admitted_work(
+                &state.db,
+                state.runner.as_ref(),
+                binding_id,
+            )
+            .await
+            .map(|_| ())
+        },
+    )
+    .await?
+    {
+        crate::db::queries::PrincipalLeaseOutcome::Updated(binding) => Ok(binding),
+        crate::db::queries::PrincipalLeaseOutcome::NotFound => {
+            Err(AppError::not_found("workspace binding not found"))
+        }
+        crate::db::queries::PrincipalLeaseOutcome::Conflict => Err(AppError::conflict(
+            "workspace write lease is held by another owner",
+        )),
+        crate::db::queries::PrincipalLeaseOutcome::PrincipalCleanupFailed => Err(
+            AppError::service_unavailable("principal cleanup unconfirmed"),
+        ),
+    }
 }
 
 pub async fn release_binding_lease(
@@ -326,27 +344,44 @@ pub async fn release_binding_lease(
     if binding.lifecycle_state != "active" || !binding.is_active {
         return Err(AppError::conflict("workspace binding is not active"));
     }
-    crate::db::queries::release_workspace_write_lease(&state.db, binding_id, owner)
-        .await?
-        .ok_or_else(|| AppError::conflict("workspace write lease is held by a different owner"))
+    match crate::db::queries::release_workspace_write_lease_with_cleanup(
+        &state.db,
+        binding_id,
+        owner,
+        async {
+            crate::runner::principal_stop::cleanup_binding_admitted_work(
+                &state.db,
+                state.runner.as_ref(),
+                binding_id,
+            )
+            .await
+            .map(|_| ())
+        },
+    )
+    .await?
+    {
+        crate::db::queries::PrincipalLeaseOutcome::Updated(binding) => Ok(binding),
+        crate::db::queries::PrincipalLeaseOutcome::NotFound => {
+            Err(AppError::not_found("workspace binding not found"))
+        }
+        crate::db::queries::PrincipalLeaseOutcome::Conflict => Err(AppError::conflict(
+            "workspace write lease is held by a different owner",
+        )),
+        crate::db::queries::PrincipalLeaseOutcome::PrincipalCleanupFailed => Err(
+            AppError::service_unavailable("principal cleanup unconfirmed"),
+        ),
+    }
 }
 
 async fn cancel_binding_sessions(state: &AppState, binding_id: i64) -> Result<(), AppError> {
-    for session in state.runner.list_sessions().await? {
-        if session.owner
-            == (RunnerOwner::WorkspaceBinding {
-                workspace_binding_id: binding_id,
-            })
-        {
-            let _ = state
-                .runner
-                .cancel_session(CancelSessionRequest {
-                    owner: session.owner,
-                    session_key: session.session_key,
-                    session_id: session.session_id,
-                })
-                .await;
-        }
+    let outcome =
+        super::lease_helpers::cancel_binding_sessions_best_effort(state, binding_id).await;
+    if !outcome.succeeded {
+        return Err(AppError::service_unavailable(
+            outcome
+                .error
+                .unwrap_or_else(|| "workspace cleanup unconfirmed".into()),
+        ));
     }
     Ok(())
 }

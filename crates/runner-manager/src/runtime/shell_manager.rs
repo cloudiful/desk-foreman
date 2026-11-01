@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -31,6 +30,10 @@ pub struct ShellManager {
     session_gate: Arc<SessionGate>,
     next_session_id: AtomicU64,
     sessions: Mutex<HashMap<u64, Arc<ManagedSession>>>,
+    #[cfg(test)]
+    fail_next_cancel: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    expire_before_cancel: std::sync::atomic::AtomicBool,
 }
 
 impl ShellManager {
@@ -44,10 +47,35 @@ impl ShellManager {
             session_gate: SessionGate::new(),
             next_session_id: AtomicU64::new(1),
             sessions: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            fail_next_cancel: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            expire_before_cancel: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
+    #[cfg(test)]
+    pub(super) async fn hold_session_map_for_test(&self) -> impl Drop + '_ {
+        self.sessions.lock().await
+    }
+
+    #[cfg(test)]
+    pub(super) fn fail_next_cancel_for_test(&self) {
+        self.fail_next_cancel.store(true, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(super) async fn expire_before_cancel_for_test(&self) {
+        self.config.write().await.idle_ttl = Duration::ZERO;
+        self.expire_before_cancel.store(true, Ordering::SeqCst);
+    }
+
     pub async fn exec(&self, request: ExecRequest) -> anyhow::Result<ShellToolOutput> {
+        if matches!(request.owner, RunnerOwner::ApplicationPrincipal { .. })
+            && !self.runner.supports_workspace_principal_stop()
+        {
+            anyhow::bail!("principal execution is unsupported by this backend");
+        }
         self.cleanup_expired_sessions().await;
 
         let slot = self.session_gate.acquire(&self.config).await;
@@ -59,27 +87,41 @@ impl ShellManager {
         )?;
         let session_id = self.next_session_id.fetch_add(1, Ordering::Relaxed);
         let operation = RunnerOperationLease::new(Arc::clone(&self.runner), request.owner.clone());
-        let session = ShellSession::spawn(
-            session_id,
-            &*self.runner,
-            &request,
-            working_dir,
-            config
-                .max_output_bytes
-                .min(request.max_output_bytes.unwrap_or(config.max_output_bytes)),
-        )
-        .await?;
-
-        self.sessions.lock().await.insert(
-            session_id,
-            Arc::new(ManagedSession {
+        let target = self
+            .runner
+            .prepare_shell_spawn(RunnerShellRequest {
                 owner: request.owner.clone(),
-                session_key: request.session_key.clone(),
-                session: Arc::clone(&session),
-                _operation: operation,
-                _slot: slot,
-            }),
-        );
+                workspace_root: request.workspace_root.clone(),
+                working_dir,
+                shell: request.shell.clone(),
+                login: request.login,
+                tty: request.tty,
+                command: request.cmd.clone(),
+                network_enabled: request.network_enabled,
+            })
+            .await?;
+        let session = {
+            let mut sessions = self.sessions.lock().await;
+            let session = ShellSession::spawn(
+                session_id,
+                target,
+                &request,
+                config
+                    .max_output_bytes
+                    .min(request.max_output_bytes.unwrap_or(config.max_output_bytes)),
+            )?;
+            sessions.insert(
+                session_id,
+                Arc::new(ManagedSession {
+                    owner: request.owner.clone(),
+                    session_key: request.session_key.clone(),
+                    session: Arc::clone(&session),
+                    _operation: operation,
+                    _slot: slot,
+                }),
+            );
+            session
+        };
         let interact = session.interact(
             "",
             request.yield_time_ms,
@@ -178,6 +220,10 @@ impl ShellManager {
         &self,
         request: CancelSessionRequest,
     ) -> anyhow::Result<RunnerSessionStatus> {
+        #[cfg(test)]
+        if self.expire_before_cancel.swap(false, Ordering::SeqCst) {
+            self.cleanup_expired_sessions().await;
+        }
         // Retain-on-failure: look up without removing so a failed
         // termination keeps the entry and later `list_sessions`
         // quiescence checks still observe the live session. Removing
@@ -194,6 +240,10 @@ impl ShellManager {
             }
             managed
         };
+        #[cfg(test)]
+        if self.fail_next_cancel.swap(false, Ordering::SeqCst) {
+            anyhow::bail!("injected cancellation failure");
+        }
         // Group-aware kill plus bounded reap; Err retains the map entry.
         // For Docker this reaps the local `docker exec` CLI; the in-container
         // shell is stopped by the takeover helper's `cleanup_runner_owner`
@@ -209,6 +259,10 @@ impl ShellManager {
 
     pub async fn list_sessions(&self) -> anyhow::Result<Vec<RunnerSessionStatus>> {
         self.cleanup_expired_sessions().await;
+        self.snapshot_sessions().await
+    }
+
+    pub(super) async fn snapshot_sessions(&self) -> anyhow::Result<Vec<RunnerSessionStatus>> {
         let sessions = self.sessions.lock().await;
         let mut result = Vec::with_capacity(sessions.len());
         for managed in sessions.values() {
@@ -270,25 +324,12 @@ impl ManagedSession {
 }
 
 impl ShellSession {
-    async fn spawn(
+    fn spawn(
         session_id: u64,
-        runner: &dyn RunnerBackend,
+        target: super::ProcessSpawnTarget,
         request: &ExecRequest,
-        working_dir: PathBuf,
         max_output_bytes: usize,
     ) -> anyhow::Result<Arc<Self>> {
-        let target = runner
-            .prepare_shell_spawn(RunnerShellRequest {
-                owner: request.owner.clone(),
-                workspace_root: request.workspace_root.clone(),
-                working_dir,
-                shell: request.shell.clone(),
-                login: request.login,
-                tty: request.tty,
-                command: request.cmd.clone(),
-                network_enabled: request.network_enabled,
-            })
-            .await?;
         if request.tty {
             let (pty, pts) = open_pty()?;
             let command = build_pty_command(&target);

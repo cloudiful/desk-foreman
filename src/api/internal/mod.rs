@@ -21,7 +21,9 @@ pub(super) mod runner_manager;
 pub(super) mod runner_manager_environment_jobs;
 pub(super) mod runner_manager_service_relay;
 pub(super) mod runner_manager_task_exports;
+pub(super) mod runner_principal_admission;
 pub(super) mod shared;
+pub(super) mod workspace_principal;
 
 pub(super) use application::{application_capabilities, sync_resource_workspace_git};
 /// Every relayed method, bound onto the gateway's single route.
@@ -55,9 +57,15 @@ pub(super) use runner_manager_task_exports::upload_native_task_export_handler;
 
 pub(super) fn router() -> axum::Router<crate::AppState> {
     axum::Router::new()
+        .route("/api/internal/principal-workspace-capabilities", axum::routing::get(workspace_principal::principal_workspace_capabilities))
+        .route("/api/internal/resource-workspaces/{resource_kind}/{resource_id}/workspace-sessions/stop", axum::routing::post(workspace_principal::stop_workspace_principal))
         .route(
             "/api/internal/application/capabilities",
             axum::routing::get(application_capabilities),
+        )
+        .route(
+            "/api/internal/runner-manager/principal-admission",
+            axum::routing::post(runner_principal_admission::principal_admission),
         )
         .route(
             "/api/internal/runner-manager/config",

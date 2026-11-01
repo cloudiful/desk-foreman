@@ -1,4 +1,5 @@
 pub(crate) mod identity;
+pub(crate) mod runner_isolation;
 
 use argon2::{
     Argon2,
