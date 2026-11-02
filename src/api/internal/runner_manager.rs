@@ -37,14 +37,17 @@ pub(crate) async fn runner_manager_from_token(
     let token = authorization
         .strip_prefix("Bearer ")
         .ok_or_else(|| AppError::unauthorized("invalid runner manager token"))?;
-    let manager = crate::db::queries::find_runner_manager_by_token(&state.db, token)
+    let manager = crate::db::queries::find_runner_manager_auth_by_token(&state.db, token)
         .await?
         .ok_or_else(|| AppError::not_found("runner manager is not registered"))?;
-    if !manager.enabled {
+    if !manager.manager.enabled {
         return Err(AppError::forbidden("runner manager is disabled"));
     }
-    crate::db::queries::touch_runner_manager(&state.db, manager.runner_manager_id).await?;
-    Ok(manager)
+    let record = manager.manager;
+    if manager.heartbeat_due {
+        crate::db::queries::touch_runner_manager(&state.db, record.runner_manager_id).await?;
+    }
+    Ok(record)
 }
 
 #[utoipa::path(

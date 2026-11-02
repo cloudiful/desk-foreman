@@ -16,7 +16,12 @@ SELECT
     status,
     last_seen_at,
     created_at,
-    updated_at
+    updated_at,
+    (
+        status <> 'online'
+        OR last_seen_at IS NULL
+        OR last_seen_at <= NOW() - ($2::double precision * INTERVAL '1 second')
+    ) AS heartbeat_due
 FROM runner_managers
 WHERE access_token_hash = $1
 LIMIT 1;

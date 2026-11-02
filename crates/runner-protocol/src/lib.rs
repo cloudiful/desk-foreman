@@ -43,6 +43,7 @@ pub use task_seed::{
 pub const RUNNER_JOB_TIMEOUT_SECS: u64 = 3_660;
 pub const RUNNER_JOB_POLL_TIMEOUT_SECS: u64 = 10;
 pub const RUNNER_MANAGER_HEARTBEAT_TTL_SECS: u64 = 30;
+pub const RUNNER_MANAGER_HEARTBEAT_WRITE_INTERVAL_SECS: u64 = 10;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
