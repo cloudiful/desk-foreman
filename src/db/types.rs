@@ -879,6 +879,13 @@ pub struct RunnerManagerRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Debug, FromRow)]
+pub struct RunnerManagerAuthRecord {
+    #[sqlx(flatten)]
+    pub manager: RunnerManagerRecord,
+    pub heartbeat_due: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
 pub struct CreateRunnerManagerRequest {
     #[validate(custom(function = "validate_non_blank"))]

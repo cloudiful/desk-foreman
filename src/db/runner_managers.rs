@@ -1,12 +1,14 @@
-use runner_protocol::RUNNER_MANAGER_HEARTBEAT_TTL_SECS;
+use runner_protocol::{
+    RUNNER_MANAGER_HEARTBEAT_TTL_SECS, RUNNER_MANAGER_HEARTBEAT_WRITE_INTERVAL_SECS,
+};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{
     auth::hash_bearer_token,
     db::types::{
-        CreateRunnerManagerRequest, ListRunnerManagersParams, Page, RunnerManagerRecord,
-        RunnerManagerResponse, UpdateRunnerManagerRequest,
+        CreateRunnerManagerRequest, ListRunnerManagersParams, Page, RunnerManagerAuthRecord,
+        RunnerManagerRecord, RunnerManagerResponse, UpdateRunnerManagerRequest,
     },
 };
 
@@ -96,16 +98,26 @@ pub async fn update_runner_manager(
     )
 }
 
+pub async fn find_runner_manager_auth_by_token(
+    pool: &PgPool,
+    token: &str,
+) -> anyhow::Result<Option<RunnerManagerAuthRecord>> {
+    Ok(
+        sqlx::query_as(include_str!("../sql/find_runner_manager_by_token.sql"))
+            .bind(hash_bearer_token(token))
+            .bind(RUNNER_MANAGER_HEARTBEAT_WRITE_INTERVAL_SECS as i64)
+            .fetch_optional(pool)
+            .await?,
+    )
+}
+
 pub async fn find_runner_manager_by_token(
     pool: &PgPool,
     token: &str,
 ) -> anyhow::Result<Option<RunnerManagerRecord>> {
-    Ok(
-        sqlx::query_as(include_str!("../sql/find_runner_manager_by_token.sql"))
-            .bind(hash_bearer_token(token))
-            .fetch_optional(pool)
-            .await?,
-    )
+    Ok(find_runner_manager_auth_by_token(pool, token)
+        .await?
+        .map(|auth| auth.manager))
 }
 
 pub async fn find_enabled_runner_manager(
@@ -139,6 +151,7 @@ pub async fn list_live_runner_manager_ids(pool: &PgPool) -> anyhow::Result<Vec<i
 pub async fn touch_runner_manager(pool: &PgPool, manager_id: i64) -> anyhow::Result<()> {
     sqlx::query(include_str!("../sql/touch_runner_manager.sql"))
         .bind(manager_id)
+        .bind(RUNNER_MANAGER_HEARTBEAT_WRITE_INTERVAL_SECS as i64)
         .execute(pool)
         .await?;
     Ok(())
