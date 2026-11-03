@@ -160,9 +160,6 @@ fn map_readonly_sdk_error(error: WorkspaceSdkError) -> ToolError {
     let message = error.to_string();
     match error {
         WorkspaceSdkError::InvalidInput(message) => ToolError::InvalidInput(message),
-        WorkspaceSdkError::PatchContextNotFound(message) => {
-            ToolError::PatchContextNotFound(message)
-        }
         WorkspaceSdkError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
             ToolError::NotFound(message)
         }

@@ -1,4 +1,5 @@
 mod behavior;
+mod patch;
 mod schema;
 
 use std::{

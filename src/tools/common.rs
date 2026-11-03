@@ -9,9 +9,9 @@ use rmcp::{
     handler::server::{tool::schema_for_output, wrapper::Parameters},
     model::{CallToolResult, ContentBlock, JsonObject, Tool, ToolAnnotations},
 };
-use schemars::JsonSchema;
+use schemars::{JsonSchema, Schema};
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use validator::Validate;
@@ -23,19 +23,320 @@ use crate::{
     db::{self, audit::AuditLogEntry},
 };
 use runner_protocol::{CommandOutput, RunnerCommandRequest, ShellToolOutput};
+use utoipa::ToSchema;
+
+use desk_foreman_workspace_sdk::{
+    ApplyPatchOperation, ApplyPatchStatus, PatchCode, PatchDiagnostic, PatchEffect, PatchResult,
+    PatchStage, PatchWrites,
+};
 
 #[derive(Debug, Error)]
 pub enum ToolError {
     #[error("{0}")]
     InvalidInput(String),
     #[error("{0}")]
-    PatchContextNotFound(String),
-    #[error("{0}")]
     NotFound(String),
     #[error("{0}")]
     Forbidden(String),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
+}
+
+/// Every field of these always-serialized patch objects is part of the wire
+/// contract, including null-valued optionals. Derive the required names from
+/// the generated properties so the schema cannot drift from the object shape.
+fn require_all_object_properties(schema: &mut Schema) {
+    let object = schema
+        .as_object_mut()
+        .unwrap_or_else(|| panic!("patch object schema must be an object"));
+    let properties = object
+        .get("properties")
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("patch object schema must contain object properties"));
+    let required = properties.keys().cloned().map(Value::String).collect();
+    object.insert("required".to_string(), Value::Array(required));
+}
+
+/// Strict wire result shared by the MCP and HTTP patch tools.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum PatchResultOutput {
+    Applied(PatchAppliedOutput),
+    Rejected(PatchRejectedOutput),
+    Incomplete(PatchIncompleteOutput),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct PatchAppliedOutput {
+    #[schemars(length(min = 1))]
+    #[schema(min_items = 1)]
+    pub changes: Vec<PatchChangeOutput>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct PatchRejectedOutput {
+    pub diagnostic: PatchDiagnosticOutput,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct PatchIncompleteOutput {
+    pub writes: PatchWritesOutput,
+    pub changes: Vec<PatchChangeOutput>,
+    pub diagnostic: PatchDiagnosticOutput,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields, transform = require_all_object_properties)]
+pub struct PatchChangeOutput {
+    pub operation: PatchOperationOutput,
+    pub path: String,
+    #[schema(required = true)]
+    pub destination: Option<String>,
+    pub status: PatchStatusOutput,
+    pub effect: PatchEffectOutput,
+    #[schema(required = true)]
+    pub error: Option<PatchChangeErrorOutput>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct PatchChangeErrorOutput {
+    pub code: PatchCodeOutput,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields, transform = require_all_object_properties)]
+pub struct PatchDiagnosticOutput {
+    pub code: PatchCodeOutput,
+    pub stage: PatchStageOutput,
+    #[schema(required = true)]
+    pub path: Option<String>,
+    #[schema(required = true)]
+    pub operation: Option<PatchOperationOutput>,
+    #[schema(required = true)]
+    pub hunk: Option<u32>,
+    pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchOperationOutput {
+    Add,
+    Delete,
+    Update,
+    Move,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchStatusOutput {
+    Applied,
+    Failed,
+    Skipped,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchEffectOutput {
+    Changed,
+    Unchanged,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchWritesOutput {
+    None,
+    All,
+    Partial,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchStageOutput {
+    Params,
+    Parse,
+    Plan,
+    Commit,
+    Fence,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchCodeOutput {
+    PatchArgInvalid,
+    PatchTooLarge,
+    PatchBoundaryInvalid,
+    PatchHunkInvalid,
+    PatchPathInvalid,
+    PatchPathProtected,
+    PatchTargetMissing,
+    PatchTargetExists,
+    PatchTargetNotRegular,
+    PatchNotUtf8Text,
+    PatchContextNotFound,
+    PatchContextAmbiguous,
+    PatchMoveConflict,
+    PatchDuplicateTarget,
+    PatchTargetChanged,
+    PatchSourceChanged,
+    PatchWriteFailed,
+    PatchFenceFailed,
+}
+
+impl From<PatchResult> for PatchResultOutput {
+    fn from(result: PatchResult) -> Self {
+        match result {
+            PatchResult::Applied(applied) => Self::Applied(PatchAppliedOutput {
+                changes: applied.changes.into_iter().map(Into::into).collect(),
+            }),
+            PatchResult::Rejected(rejected) => Self::Rejected(PatchRejectedOutput {
+                diagnostic: rejected.diagnostic.into(),
+            }),
+            PatchResult::Incomplete(incomplete) => Self::Incomplete(PatchIncompleteOutput {
+                writes: incomplete.writes.into(),
+                changes: incomplete.changes.into_iter().map(Into::into).collect(),
+                diagnostic: incomplete.diagnostic.into(),
+            }),
+        }
+    }
+}
+
+impl From<ApplyPatchOperation> for PatchOperationOutput {
+    fn from(operation: ApplyPatchOperation) -> Self {
+        match operation {
+            ApplyPatchOperation::Add => Self::Add,
+            ApplyPatchOperation::Delete => Self::Delete,
+            ApplyPatchOperation::Update => Self::Update,
+            ApplyPatchOperation::Move => Self::Move,
+        }
+    }
+}
+
+impl From<ApplyPatchStatus> for PatchStatusOutput {
+    fn from(status: ApplyPatchStatus) -> Self {
+        match status {
+            ApplyPatchStatus::Applied => Self::Applied,
+            ApplyPatchStatus::Failed => Self::Failed,
+            ApplyPatchStatus::Skipped => Self::Skipped,
+        }
+    }
+}
+
+impl From<PatchEffect> for PatchEffectOutput {
+    fn from(effect: PatchEffect) -> Self {
+        match effect {
+            PatchEffect::Changed => Self::Changed,
+            PatchEffect::Unchanged => Self::Unchanged,
+            PatchEffect::Unknown => Self::Unknown,
+        }
+    }
+}
+
+impl From<PatchWrites> for PatchWritesOutput {
+    fn from(writes: PatchWrites) -> Self {
+        match writes {
+            PatchWrites::None => Self::None,
+            PatchWrites::All => Self::All,
+            PatchWrites::Partial => Self::Partial,
+            PatchWrites::Unknown => Self::Unknown,
+        }
+    }
+}
+
+impl From<PatchStage> for PatchStageOutput {
+    fn from(stage: PatchStage) -> Self {
+        match stage {
+            PatchStage::Params => Self::Params,
+            PatchStage::Parse => Self::Parse,
+            PatchStage::Plan => Self::Plan,
+            PatchStage::Commit => Self::Commit,
+            PatchStage::Fence => Self::Fence,
+        }
+    }
+}
+
+impl From<PatchCode> for PatchCodeOutput {
+    fn from(code: PatchCode) -> Self {
+        match code {
+            PatchCode::PatchArgInvalid => Self::PatchArgInvalid,
+            PatchCode::PatchTooLarge => Self::PatchTooLarge,
+            PatchCode::PatchBoundaryInvalid => Self::PatchBoundaryInvalid,
+            PatchCode::PatchHunkInvalid => Self::PatchHunkInvalid,
+            PatchCode::PatchPathInvalid => Self::PatchPathInvalid,
+            PatchCode::PatchPathProtected => Self::PatchPathProtected,
+            PatchCode::PatchTargetMissing => Self::PatchTargetMissing,
+            PatchCode::PatchTargetExists => Self::PatchTargetExists,
+            PatchCode::PatchTargetNotRegular => Self::PatchTargetNotRegular,
+            PatchCode::PatchNotUtf8Text => Self::PatchNotUtf8Text,
+            PatchCode::PatchContextNotFound => Self::PatchContextNotFound,
+            PatchCode::PatchContextAmbiguous => Self::PatchContextAmbiguous,
+            PatchCode::PatchMoveConflict => Self::PatchMoveConflict,
+            PatchCode::PatchDuplicateTarget => Self::PatchDuplicateTarget,
+            PatchCode::PatchTargetChanged => Self::PatchTargetChanged,
+            PatchCode::PatchSourceChanged => Self::PatchSourceChanged,
+            PatchCode::PatchWriteFailed => Self::PatchWriteFailed,
+            PatchCode::PatchFenceFailed => Self::PatchFenceFailed,
+        }
+    }
+}
+
+impl From<desk_foreman_workspace_sdk::PatchChange> for PatchChangeOutput {
+    fn from(change: desk_foreman_workspace_sdk::PatchChange) -> Self {
+        Self {
+            operation: change.operation.into(),
+            path: change.path,
+            destination: change.destination,
+            status: change.status.into(),
+            effect: change.effect.into(),
+            error: change.error.map(Into::into),
+        }
+    }
+}
+
+impl From<desk_foreman_workspace_sdk::PatchChangeError> for PatchChangeErrorOutput {
+    fn from(error: desk_foreman_workspace_sdk::PatchChangeError) -> Self {
+        Self {
+            code: error.code.into(),
+            message: error.message().to_string(),
+        }
+    }
+}
+
+impl From<PatchDiagnostic> for PatchDiagnosticOutput {
+    fn from(diagnostic: PatchDiagnostic) -> Self {
+        let message = diagnostic.message().to_string();
+        Self {
+            code: diagnostic.code.into(),
+            stage: diagnostic.stage.into(),
+            path: diagnostic.path,
+            operation: diagnostic.operation.map(Into::into),
+            hunk: diagnostic.hunk,
+            message,
+        }
+    }
+}
+
+pub(super) fn patch_call_result(
+    output: &PatchResultOutput,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    let structured = serde_json::to_value(output).map_err(internal_error)?;
+    let text = serde_json::to_string(output).map_err(internal_error)?;
+    let mut result = CallToolResult::success(vec![ContentBlock::text(text)]);
+    result.structured_content = Some(structured);
+    result.is_error = Some(!matches!(output, PatchResultOutput::Applied(_)));
+    Ok(result)
 }
 
 pub(super) fn readonly_tool<I, O>(name: &'static str, description: &'static str) -> Tool
@@ -273,13 +574,6 @@ pub(super) fn tool_error_result(error: ToolError) -> Result<CallToolResult, rmcp
             message,
             true,
             "fix_arguments_and_retry",
-        ),
-        ToolError::PatchContextNotFound(message) => (
-            "patch_context_not_found",
-            "tool_input",
-            message,
-            true,
-            "read_current_contents_and_regenerate_patch",
         ),
         ToolError::NotFound(message) => (
             "not_found",

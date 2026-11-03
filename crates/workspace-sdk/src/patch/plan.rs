@@ -5,10 +5,11 @@ use std::{
 };
 
 use crate::{
-    ApplyPatchOperation, ParsedPatch, PatchOperation, WorkspaceSdkError, resolve_workspace_path,
+    ApplyPatchOperation, ParsedPatch, PatchCode, PatchDiagnostic, PatchOperation, PatchStage,
+    patch_path_is_protected, resolve_workspace_path,
 };
 
-use super::matching::{TextDocument, apply_hunks, count_lines};
+use super::matching::{TextDocument, apply_hunks};
 
 #[derive(Debug)]
 pub(crate) enum ExpectedState {
@@ -47,28 +48,29 @@ pub(crate) struct PlannedChange {
     pub path: String,
     pub destination: Option<String>,
     pub action: PlannedAction,
-    pub added_lines: usize,
-    pub deleted_lines: usize,
 }
 
 pub(crate) fn plan_patch(
     root: &Path,
     parsed: &ParsedPatch,
-) -> Result<Vec<PlannedChange>, WorkspaceSdkError> {
+) -> Result<Vec<PlannedChange>, PatchDiagnostic> {
     let mut reserved = HashSet::new();
     let mut planned = Vec::with_capacity(parsed.operations.len());
 
     for operation in &parsed.operations {
         match operation {
             PatchOperation::Add { path, lines } => {
-                let absolute = resolve_workspace_path(root, path)?;
-                reject_reserved(&mut reserved, &absolute, path)?;
-                if path_exists(&absolute).map_err(|error| {
-                    WorkspaceSdkError::io(format!("failed to inspect {path}"), error)
-                })? {
-                    return Err(WorkspaceSdkError::invalid_input(format!(
-                        "cannot add existing file: {path}"
-                    )));
+                let absolute = resolve_patch_path(root, path, ApplyPatchOperation::Add)?;
+                reject_protected(path, ApplyPatchOperation::Add)?;
+                reject_reserved(&mut reserved, &absolute, path, ApplyPatchOperation::Add)?;
+                if path_exists(&absolute)
+                    .map_err(|_| path_failure(path, ApplyPatchOperation::Add))?
+                {
+                    return Err(target_failure(
+                        PatchCode::PatchTargetExists,
+                        path,
+                        ApplyPatchOperation::Add,
+                    ));
                 }
                 let content = render_added_lines(lines).into_bytes();
                 planned.push(PlannedChange {
@@ -82,14 +84,13 @@ pub(crate) fn plan_patch(
                         content,
                         permissions: None,
                     },
-                    added_lines: lines.len(),
-                    deleted_lines: 0,
                 });
             }
             PatchOperation::Delete { path } => {
-                let absolute = resolve_workspace_path(root, path)?;
-                reject_reserved(&mut reserved, &absolute, path)?;
-                let snapshot = read_snapshot(root, &absolute, path)?;
+                let absolute = resolve_patch_path(root, path, ApplyPatchOperation::Delete)?;
+                reject_protected(path, ApplyPatchOperation::Delete)?;
+                reject_reserved(&mut reserved, &absolute, path, ApplyPatchOperation::Delete)?;
+                let snapshot = read_snapshot(&absolute, path, ApplyPatchOperation::Delete)?;
                 planned.push(PlannedChange {
                     operation: ApplyPatchOperation::Delete,
                     path: path.clone(),
@@ -97,10 +98,8 @@ pub(crate) fn plan_patch(
                     action: PlannedAction::Delete {
                         path: absolute,
                         relative_path: path.clone(),
-                        expected: snapshot.bytes.clone(),
+                        expected: snapshot.bytes,
                     },
-                    added_lines: 0,
-                    deleted_lines: count_lines(&snapshot.bytes),
                 });
             }
             PatchOperation::Update {
@@ -108,37 +107,50 @@ pub(crate) fn plan_patch(
                 move_to,
                 hunks,
             } => {
-                let source = resolve_workspace_path(root, path)?;
-                reject_reserved(&mut reserved, &source, path)?;
-                let snapshot = read_snapshot(root, &source, path)?;
-                let document = TextDocument::decode(&snapshot.bytes).map_err(|message| {
-                    WorkspaceSdkError::invalid_input(format!("failed to update {path}: {message}"))
+                let update_operation = if move_to.is_some() {
+                    ApplyPatchOperation::Move
+                } else {
+                    ApplyPatchOperation::Update
+                };
+                let source = resolve_patch_path(root, path, update_operation)?;
+                reject_protected(path, update_operation)?;
+                reject_reserved(&mut reserved, &source, path, update_operation)?;
+                let snapshot = read_snapshot(&source, path, update_operation)?;
+                let document = TextDocument::decode(&snapshot.bytes).map_err(|diagnostic| {
+                    diagnostic
+                        .with_path(Some(path.clone()))
+                        .with_operation(Some(update_operation))
                 })?;
-                let (updated, added_lines, deleted_lines) =
-                    apply_hunks(&document, hunks).map_err(|message| {
-                        WorkspaceSdkError::patch_context_not_found(format!(
-                            "failed to apply hunks to {path}: {message}"
-                        ))
-                    })?;
+                let updated = apply_hunks(&document, hunks).map_err(|diagnostic| {
+                    diagnostic
+                        .with_path(Some(path.clone()))
+                        .with_operation(Some(update_operation))
+                })?;
                 let content = updated.into_bytes();
 
                 if let Some(target_relative_path) = move_to {
-                    let target = resolve_workspace_path(root, target_relative_path)?;
+                    let target =
+                        resolve_patch_path(root, target_relative_path, ApplyPatchOperation::Move)?;
+                    reject_protected(target_relative_path, ApplyPatchOperation::Move)?;
                     if target == source {
-                        return Err(WorkspaceSdkError::invalid_input(format!(
-                            "move source and destination must differ: {path}"
-                        )));
+                        return Err(move_failure(
+                            target_relative_path,
+                            ApplyPatchOperation::Move,
+                        ));
                     }
-                    reject_reserved(&mut reserved, &target, target_relative_path)?;
-                    if path_exists(&target).map_err(|error| {
-                        WorkspaceSdkError::io(
-                            format!("failed to inspect {target_relative_path}"),
-                            error,
-                        )
+                    reject_reserved(
+                        &mut reserved,
+                        &target,
+                        target_relative_path,
+                        ApplyPatchOperation::Move,
+                    )?;
+                    if path_exists(&target).map_err(|_| {
+                        path_failure(target_relative_path, ApplyPatchOperation::Move)
                     })? {
-                        return Err(WorkspaceSdkError::invalid_input(format!(
-                            "cannot move over existing file: {target_relative_path}"
-                        )));
+                        return Err(move_failure(
+                            target_relative_path,
+                            ApplyPatchOperation::Move,
+                        ));
                     }
                     planned.push(PlannedChange {
                         operation: ApplyPatchOperation::Move,
@@ -153,8 +165,6 @@ pub(crate) fn plan_patch(
                             content,
                             permissions: Some(snapshot.permissions),
                         },
-                        added_lines,
-                        deleted_lines,
                     });
                 } else {
                     planned.push(PlannedChange {
@@ -168,8 +178,6 @@ pub(crate) fn plan_patch(
                             content,
                             permissions: Some(snapshot.permissions),
                         },
-                        added_lines,
-                        deleted_lines,
                     });
                 }
             }
@@ -184,21 +192,44 @@ struct FileSnapshot {
     permissions: fs::Permissions,
 }
 
+fn resolve_patch_path(
+    root: &Path,
+    relative: &str,
+    operation: ApplyPatchOperation,
+) -> Result<PathBuf, PatchDiagnostic> {
+    resolve_workspace_path(root, relative).map_err(|_| {
+        PatchDiagnostic::new(PatchCode::PatchPathInvalid, PatchStage::Plan)
+            .with_operation(Some(operation))
+    })
+}
+
+fn reject_protected(relative: &str, operation: ApplyPatchOperation) -> Result<(), PatchDiagnostic> {
+    if patch_path_is_protected(relative) {
+        return Err(
+            PatchDiagnostic::new(PatchCode::PatchPathProtected, PatchStage::Plan)
+                .with_path(Some(relative.to_string()))
+                .with_operation(Some(operation)),
+        );
+    }
+    Ok(())
+}
+
 fn read_snapshot(
-    _root: &Path,
     path: &Path,
     display_path: &str,
-) -> Result<FileSnapshot, WorkspaceSdkError> {
-    let metadata = fs::metadata(path).map_err(|error| {
-        WorkspaceSdkError::io(format!("failed to inspect {display_path}"), error)
-    })?;
+    operation: ApplyPatchOperation,
+) -> Result<FileSnapshot, PatchDiagnostic> {
+    let metadata = fs::metadata(path)
+        .map_err(|_| target_failure(PatchCode::PatchTargetMissing, display_path, operation))?;
     if !metadata.is_file() {
-        return Err(WorkspaceSdkError::invalid_input(format!(
-            "patch target is not a regular file: {display_path}"
-        )));
+        return Err(target_failure(
+            PatchCode::PatchTargetNotRegular,
+            display_path,
+            operation,
+        ));
     }
     let bytes = fs::read(path)
-        .map_err(|error| WorkspaceSdkError::io(format!("failed to read {display_path}"), error))?;
+        .map_err(|_| target_failure(PatchCode::PatchTargetMissing, display_path, operation))?;
     Ok(FileSnapshot {
         bytes,
         permissions: metadata.permissions(),
@@ -208,7 +239,12 @@ fn read_snapshot(
 pub(crate) fn path_exists(path: &Path) -> Result<bool, std::io::Error> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                || error.kind() == std::io::ErrorKind::NotADirectory =>
+        {
+            Ok(false)
+        }
         Err(error) => Err(error),
     }
 }
@@ -217,13 +253,34 @@ fn reject_reserved(
     reserved: &mut HashSet<PathBuf>,
     path: &Path,
     display_path: &str,
-) -> Result<(), WorkspaceSdkError> {
+    operation: ApplyPatchOperation,
+) -> Result<(), PatchDiagnostic> {
     if !reserved.insert(path.to_path_buf()) {
-        return Err(WorkspaceSdkError::invalid_input(format!(
-            "patch contains conflicting operations for: {display_path}"
-        )));
+        return Err(target_failure(
+            PatchCode::PatchDuplicateTarget,
+            display_path,
+            operation,
+        ));
     }
     Ok(())
+}
+
+fn target_failure(code: PatchCode, path: &str, operation: ApplyPatchOperation) -> PatchDiagnostic {
+    PatchDiagnostic::new(code, PatchStage::Plan)
+        .with_path(Some(path.to_string()))
+        .with_operation(Some(operation))
+}
+
+fn path_failure(path: &str, operation: ApplyPatchOperation) -> PatchDiagnostic {
+    PatchDiagnostic::new(PatchCode::PatchPathInvalid, PatchStage::Plan)
+        .with_path(Some(path.to_string()))
+        .with_operation(Some(operation))
+}
+
+fn move_failure(path: &str, operation: ApplyPatchOperation) -> PatchDiagnostic {
+    PatchDiagnostic::new(PatchCode::PatchMoveConflict, PatchStage::Plan)
+        .with_path(Some(path.to_string()))
+        .with_operation(Some(operation))
 }
 
 fn render_added_lines(lines: &[String]) -> String {

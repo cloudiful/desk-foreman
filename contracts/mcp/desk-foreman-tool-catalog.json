@@ -8,13 +8,13 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Apply a Codex patch to files in the managed workspace. The patchText value must use the Codex patch DSL.",
+      "description": "Apply a Codex patch to workspace files. Syntax: add/update/delete/move. All operations are parsed and planned before writes; commit failures may leave earlier effects and are reported truthfully. There is no automatic rollback, save, push, or run.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
         "properties": {
           "patchText": {
-            "description": "Codex patch DSL text to apply inside the workspace.",
+            "description": "Codex patch DSL text to apply inside the workspace. Empty patches are rejected as a typed patch result.",
             "examples": [
               "*** Begin Patch\n*** Add File: example.txt\n+content\n*** End Patch\n"
             ],
@@ -27,7 +27,252 @@
         "title": "ApplyPatchParams",
         "type": "object"
       },
-      "name": "apply_patch"
+      "name": "apply_patch",
+      "outputSchema": {
+        "$defs": {
+          "PatchChangeErrorOutput": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "$ref": "#/$defs/PatchCodeOutput"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "PatchChangeOutput": {
+            "additionalProperties": false,
+            "properties": {
+              "destination": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "effect": {
+                "$ref": "#/$defs/PatchEffectOutput"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/PatchChangeErrorOutput"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "operation": {
+                "$ref": "#/$defs/PatchOperationOutput"
+              },
+              "path": {
+                "type": "string"
+              },
+              "status": {
+                "$ref": "#/$defs/PatchStatusOutput"
+              }
+            },
+            "required": [
+              "destination",
+              "effect",
+              "error",
+              "operation",
+              "path",
+              "status"
+            ],
+            "type": "object"
+          },
+          "PatchCodeOutput": {
+            "enum": [
+              "patch_arg_invalid",
+              "patch_too_large",
+              "patch_boundary_invalid",
+              "patch_hunk_invalid",
+              "patch_path_invalid",
+              "patch_path_protected",
+              "patch_target_missing",
+              "patch_target_exists",
+              "patch_target_not_regular",
+              "patch_not_utf8_text",
+              "patch_context_not_found",
+              "patch_context_ambiguous",
+              "patch_move_conflict",
+              "patch_duplicate_target",
+              "patch_target_changed",
+              "patch_source_changed",
+              "patch_write_failed",
+              "patch_fence_failed"
+            ],
+            "type": "string"
+          },
+          "PatchDiagnosticOutput": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "$ref": "#/$defs/PatchCodeOutput"
+              },
+              "hunk": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "operation": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/PatchOperationOutput"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stage": {
+                "$ref": "#/$defs/PatchStageOutput"
+              }
+            },
+            "required": [
+              "code",
+              "hunk",
+              "message",
+              "operation",
+              "path",
+              "stage"
+            ],
+            "type": "object"
+          },
+          "PatchEffectOutput": {
+            "enum": [
+              "changed",
+              "unchanged",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "PatchOperationOutput": {
+            "enum": [
+              "add",
+              "delete",
+              "update",
+              "move"
+            ],
+            "type": "string"
+          },
+          "PatchStageOutput": {
+            "enum": [
+              "params",
+              "parse",
+              "plan",
+              "commit",
+              "fence"
+            ],
+            "type": "string"
+          },
+          "PatchStatusOutput": {
+            "enum": [
+              "applied",
+              "failed",
+              "skipped"
+            ],
+            "type": "string"
+          },
+          "PatchWritesOutput": {
+            "enum": [
+              "none",
+              "all",
+              "partial",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "changes": {
+                "items": {
+                  "$ref": "#/$defs/PatchChangeOutput"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "outcome": {
+                "const": "applied",
+                "type": "string"
+              }
+            },
+            "required": [
+              "outcome",
+              "changes"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "diagnostic": {
+                "$ref": "#/$defs/PatchDiagnosticOutput"
+              },
+              "outcome": {
+                "const": "rejected",
+                "type": "string"
+              }
+            },
+            "required": [
+              "outcome",
+              "diagnostic"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "changes": {
+                "items": {
+                  "$ref": "#/$defs/PatchChangeOutput"
+                },
+                "type": "array"
+              },
+              "diagnostic": {
+                "$ref": "#/$defs/PatchDiagnosticOutput"
+              },
+              "outcome": {
+                "const": "incomplete",
+                "type": "string"
+              },
+              "writes": {
+                "$ref": "#/$defs/PatchWritesOutput"
+              }
+            },
+            "required": [
+              "outcome",
+              "writes",
+              "changes",
+              "diagnostic"
+            ],
+            "type": "object"
+          }
+        ]
+      }
     },
     {
       "annotations": {

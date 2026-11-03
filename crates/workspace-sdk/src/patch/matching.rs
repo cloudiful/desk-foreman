@@ -1,3 +1,5 @@
+use crate::{PatchCode, PatchDiagnostic, PatchStage};
+
 use super::{Hunk, HunkLine};
 
 #[derive(Debug, Clone, Copy)]
@@ -17,9 +19,9 @@ pub(crate) struct TextDocument {
 }
 
 impl TextDocument {
-    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, String> {
+    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, PatchDiagnostic> {
         let mut content = String::from_utf8(bytes.to_vec())
-            .map_err(|_| "file is not valid UTF-8 text".to_string())?;
+            .map_err(|_| PatchDiagnostic::new(PatchCode::PatchNotUtf8Text, PatchStage::Plan))?;
         let bom = content.starts_with('\u{feff}');
         if bom {
             content = content[3..].to_string();
@@ -56,13 +58,11 @@ impl TextDocument {
 pub(crate) fn apply_hunks(
     document: &TextDocument,
     hunks: &[Hunk],
-) -> Result<(String, usize, usize), String> {
+) -> Result<String, PatchDiagnostic> {
     let mut result = Vec::<String>::new();
     let mut cursor = 0usize;
-    let mut added_lines = 0usize;
-    let mut deleted_lines = 0usize;
 
-    for hunk in hunks {
+    for (index, hunk) in hunks.iter().enumerate() {
         let needle = hunk
             .lines
             .iter()
@@ -71,7 +71,10 @@ pub(crate) fn apply_hunks(
                 HunkLine::Context(text) | HunkLine::Delete(text) => Some(text.clone()),
             })
             .collect::<Vec<_>>();
-        let (start, mode) = find_match(&document.lines, &needle, cursor, hunk.end_of_file)?;
+        let (start, mode) = find_match(&document.lines, &needle, cursor, hunk.end_of_file)
+            .map_err(|code| {
+                PatchDiagnostic::new(code, PatchStage::Plan).with_hunk(Some(index as u32))
+            })?;
 
         result.extend(document.lines[cursor..start].iter().cloned());
         let mut position = start;
@@ -79,31 +82,25 @@ pub(crate) fn apply_hunks(
             match line {
                 HunkLine::Context(expected) => {
                     let Some(current) = document.lines.get(position) else {
-                        return Err("patch context ran past end of file".to_string());
+                        return Err(hunk_failure(index, PatchCode::PatchContextNotFound));
                     };
                     if !matches_line(current, expected, mode) {
-                        return Err(format!(
-                            "context mismatch: expected {expected:?}, found {current:?}"
-                        ));
+                        return Err(hunk_failure(index, PatchCode::PatchContextNotFound));
                     }
                     result.push(current.clone());
                     position += 1;
                 }
                 HunkLine::Delete(expected) => {
                     let Some(current) = document.lines.get(position) else {
-                        return Err("patch deletion ran past end of file".to_string());
+                        return Err(hunk_failure(index, PatchCode::PatchContextNotFound));
                     };
                     if !matches_line(current, expected, mode) {
-                        return Err(format!(
-                            "delete mismatch: expected {expected:?}, found {current:?}"
-                        ));
+                        return Err(hunk_failure(index, PatchCode::PatchContextNotFound));
                     }
                     position += 1;
-                    deleted_lines += 1;
                 }
                 HunkLine::Add(text) => {
                     result.push(text.clone());
-                    added_lines += 1;
                 }
             }
         }
@@ -111,15 +108,11 @@ pub(crate) fn apply_hunks(
     }
 
     result.extend(document.lines[cursor..].iter().cloned());
-    Ok((document.render(&result), added_lines, deleted_lines))
+    Ok(document.render(&result))
 }
 
-pub(crate) fn count_lines(bytes: &[u8]) -> usize {
-    if bytes.is_empty() {
-        0
-    } else {
-        bytes.iter().filter(|byte| **byte == b'\n').count() + usize::from(!bytes.ends_with(b"\n"))
-    }
+fn hunk_failure(index: usize, code: PatchCode) -> PatchDiagnostic {
+    PatchDiagnostic::new(code, PatchStage::Plan).with_hunk(Some(index as u32))
 }
 
 fn split_lines(input: &str) -> Vec<String> {
@@ -141,25 +134,25 @@ fn find_match(
     needle: &[String],
     cursor: usize,
     end_of_file: bool,
-) -> Result<(usize, MatchMode), String> {
+) -> Result<(usize, MatchMode), PatchCode> {
     if needle.is_empty() {
         return if end_of_file {
             if cursor == original.len() {
                 Ok((cursor, MatchMode::Exact))
             } else {
-                Err("end-of-file hunk does not start at end of file".to_string())
+                Err(PatchCode::PatchContextNotFound)
             }
         } else {
             Ok((cursor, MatchMode::Exact))
         };
     }
     if needle.len() > original.len() {
-        return Err("patch pattern is longer than the file".to_string());
+        return Err(PatchCode::PatchContextNotFound);
     }
 
     let last_start = original.len() - needle.len();
     if cursor > last_start {
-        return Err("unable to find patch context".to_string());
+        return Err(PatchCode::PatchContextNotFound);
     }
 
     for mode in [
@@ -181,15 +174,10 @@ fn find_match(
         match candidates.as_slice() {
             [] => {}
             [start] => return Ok((*start, mode)),
-            _ => {
-                return Err(format!(
-                    "ambiguous patch context: found {} matches",
-                    candidates.len()
-                ));
-            }
+            _ => return Err(PatchCode::PatchContextAmbiguous),
         }
     }
-    Err("unable to find patch context".to_string())
+    Err(PatchCode::PatchContextNotFound)
 }
 
 fn matches_line(actual: &str, expected: &str, mode: MatchMode) -> bool {
