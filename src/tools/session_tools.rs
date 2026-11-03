@@ -14,8 +14,8 @@ use crate::{
     tools::{
         DeskForemanService,
         common::{
-            parse_and_validate_tool_params, schema_for_input, shell_call_result,
-            structured_text_result, tool_error_result, write_annotations,
+            PatchResultOutput, parse_and_validate_tool_params, patch_call_result, schema_for_input,
+            shell_call_result, structured_text_result, tool_error_result, write_annotations,
         },
         params::{ApplyPatchParams, CancelSessionParams, ShellParams, WriteStdinParams},
         shared,
@@ -84,15 +84,17 @@ fn cancel_session_route() -> rmcp::handler::server::router::tool::ToolRoute<Desk
 }
 
 fn apply_patch_route() -> rmcp::handler::server::router::tool::ToolRoute<DeskForemanService> {
+    let output_schema = schema_for_output::<PatchResultOutput>();
     ToolRoute::new_dyn(
         Tool::new_with_raw(
             "apply_patch",
             Some(Cow::Borrowed(
-                "Apply a Codex patch to files in the managed workspace. The patchText value must use the Codex patch DSL.",
+                "Apply a Codex patch to workspace files. Syntax: add/update/delete/move. All operations are parsed and planned before writes; commit failures may leave earlier effects and are reported truthfully. There is no automatic rollback, save, push, or run.",
             )),
             schema_for_input::<ApplyPatchParams>(),
         )
-        .with_annotations(write_annotations()),
+        .with_annotations(write_annotations())
+        .with_raw_output_schema(output_schema),
         |ctx| Box::pin(async move { apply_patch_handler(ctx).await.map(CallToolResponse::from) }),
     )
 }
@@ -146,5 +148,5 @@ async fn apply_patch_handler(
         Ok(output) => output,
         Err(error) => return tool_error_result(error),
     };
-    structured_text_result(output.summary.clone(), &output)
+    patch_call_result(&output)
 }

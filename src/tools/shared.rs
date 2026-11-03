@@ -1,7 +1,9 @@
 use std::time::Instant;
 
 use desk_foreman_workspace_sdk::{
-    ApplyPatchSummary, PatchOperation, WorkspaceFileTools, WorkspaceSdkError, parse_patch,
+    PatchCode, PatchDiagnostic, PatchOperation, PatchRejected, PatchResult, PatchStage,
+    WorkspaceFileTools, WorkspaceSdkError, parse_patch, patch_path_is_protected,
+    resolve_workspace_path,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -9,6 +11,11 @@ use serde_json::json;
 use utoipa::ToSchema;
 
 pub use super::fenced_write::{FencedWrite, admit_workspace_write};
+pub use crate::tools::common::{
+    PatchAppliedOutput, PatchChangeErrorOutput, PatchChangeOutput, PatchCodeOutput,
+    PatchDiagnosticOutput, PatchEffectOutput, PatchIncompleteOutput, PatchOperationOutput,
+    PatchRejectedOutput, PatchResultOutput, PatchStageOutput, PatchStatusOutput, PatchWritesOutput,
+};
 
 use crate::{
     AppState,
@@ -35,28 +42,6 @@ const DEFAULT_SHELL_TIMEOUT_MS: u64 = 120_000;
 #[derive(Clone, Debug, Serialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
-pub struct ApplyPatchOutput {
-    pub summary: String,
-    pub partial: bool,
-    pub changes: Vec<ApplyPatchChangeOutput>,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema, ToSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
-pub struct ApplyPatchChangeOutput {
-    pub operation: String,
-    pub path: String,
-    pub destination: Option<String>,
-    pub status: String,
-    pub error: Option<String>,
-    pub added_lines: usize,
-    pub deleted_lines: usize,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema, ToSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(deny_unknown_fields)]
 pub struct CancelSessionOutput {
     pub session_id: u64,
     pub state: String,
@@ -65,36 +50,8 @@ pub struct CancelSessionOutput {
     pub wall_time_seconds: f64,
 }
 
-impl From<ApplyPatchSummary> for ApplyPatchOutput {
-    fn from(summary: ApplyPatchSummary) -> Self {
-        Self {
-            summary: summary.summary,
-            partial: summary.partial,
-            changes: summary
-                .changes
-                .into_iter()
-                .map(|change| ApplyPatchChangeOutput {
-                    operation: change.operation.as_str().to_string(),
-                    path: change.path,
-                    destination: change.destination,
-                    status: change.status.as_str().to_string(),
-                    error: change.error,
-                    added_lines: change.added_lines,
-                    deleted_lines: change.deleted_lines,
-                })
-                .collect(),
-        }
-    }
-}
-
 fn workspace_tools(actor: &ActorContext) -> Result<WorkspaceFileTools, ToolError> {
-    WorkspaceFileTools::new(&actor.workspace_root).map_err(|error| match error {
-        WorkspaceSdkError::InvalidInput(message) => ToolError::InvalidInput(message),
-        WorkspaceSdkError::PatchContextNotFound(message) => {
-            ToolError::PatchContextNotFound(message)
-        }
-        other => ToolError::Internal(other.into()),
-    })
+    WorkspaceFileTools::new(&actor.workspace_root).map_err(map_workspace_sdk_error)
 }
 
 pub async fn shell(
@@ -259,64 +216,169 @@ pub async fn cancel_session(
     })
 }
 
+#[derive(Clone, Copy)]
+enum FenceCommit {
+    Real,
+    #[cfg(test)]
+    Fail,
+}
+
 pub async fn apply_patch(
     state: &AppState,
     actor: &ActorContext,
     params: &ApplyPatchParams,
-) -> Result<ApplyPatchOutput, ToolError> {
+) -> Result<PatchResultOutput, ToolError> {
+    apply_patch_inner(state, actor, params, FenceCommit::Real).await
+}
+
+#[cfg(test)]
+pub(crate) async fn apply_patch_with_commit_failure(
+    state: &AppState,
+    actor: &ActorContext,
+    params: &ApplyPatchParams,
+) -> Result<PatchResultOutput, ToolError> {
+    apply_patch_inner(state, actor, params, FenceCommit::Fail).await
+}
+
+async fn apply_patch_inner(
+    state: &AppState,
+    actor: &ActorContext,
+    params: &ApplyPatchParams,
+    commit: FenceCommit,
+) -> Result<PatchResultOutput, ToolError> {
     let started = Instant::now();
     ensure_scope(state, actor, crate::policy::WORKSPACE_PATCH)?;
     // Fenced admission covers direct workspace-SDK file writes as well as
-    // runner-backed writes. Validation runs first so invalid patches never
-    // take the row lock; admission then holds the lock across the
-    // filesystem write so a request admitted under an old owner cannot
-    // cross a handover.
+    // runner-backed writes. Syntax and protected-path validation runs first so
+    // those rejections never take the row lock; admission then holds the lock
+    // across the filesystem write so a request admitted under an old owner
+    // cannot cross a handover.
     if actor
         .policy
         .limits
         .max_file_bytes
         .is_some_and(|limit| params.patch_text.len() > limit)
     {
-        return Err(ToolError::InvalidInput(
-            "patch exceeds resource limit".to_string(),
-        ));
+        return Ok(rejected(PatchDiagnostic::new(
+            PatchCode::PatchTooLarge,
+            PatchStage::Params,
+        )));
     }
-    let parsed = parse_patch(&params.patch_text).map_err(map_apply_patch_error)?;
-    for operation in parsed.operations {
-        match operation {
-            PatchOperation::Add { path, .. } | PatchOperation::Delete { path } => {
-                validate_workspace_path(&path)?;
+    let parsed = match parse_patch(&params.patch_text) {
+        Ok(parsed) => parsed,
+        Err(diagnostic) => return Ok(rejected(diagnostic)),
+    };
+    for operation in &parsed.operations {
+        let (path, operation, move_to) = match operation {
+            PatchOperation::Add { path, .. } => (
+                path,
+                desk_foreman_workspace_sdk::ApplyPatchOperation::Add,
+                None,
+            ),
+            PatchOperation::Delete { path } => (
+                path,
+                desk_foreman_workspace_sdk::ApplyPatchOperation::Delete,
+                None,
+            ),
+            PatchOperation::Update { path, move_to, .. } => (
+                path,
+                if move_to.is_some() {
+                    desk_foreman_workspace_sdk::ApplyPatchOperation::Move
+                } else {
+                    desk_foreman_workspace_sdk::ApplyPatchOperation::Update
+                },
+                move_to.as_deref(),
+            ),
+        };
+        if resolve_workspace_path(&actor.workspace_root, path).is_err() {
+            return Ok(rejected(
+                PatchDiagnostic::new(PatchCode::PatchPathInvalid, PatchStage::Plan)
+                    .with_operation(Some(operation)),
+            ));
+        }
+        if patch_path_is_protected(path) {
+            return Ok(rejected(
+                PatchDiagnostic::new(PatchCode::PatchPathProtected, PatchStage::Plan)
+                    .with_path(Some(path.clone()))
+                    .with_operation(Some(operation)),
+            ));
+        }
+        if let Some(move_to) = move_to {
+            if resolve_workspace_path(&actor.workspace_root, move_to).is_err() {
+                return Ok(rejected(
+                    PatchDiagnostic::new(PatchCode::PatchPathInvalid, PatchStage::Plan)
+                        .with_operation(Some(operation)),
+                ));
             }
-            PatchOperation::Update { path, move_to, .. } => {
-                validate_workspace_path(&path)?;
-                if let Some(move_to) = move_to {
-                    validate_workspace_path(&move_to)?;
-                }
+            if patch_path_is_protected(move_to) {
+                return Ok(rejected(
+                    PatchDiagnostic::new(PatchCode::PatchPathProtected, PatchStage::Plan)
+                        .with_path(Some(move_to.to_string()))
+                        .with_operation(Some(operation)),
+                ));
             }
         }
     }
     let fence = admit_workspace_write(state, actor).await?;
     let tools = workspace_tools(actor)?;
-    let summary = tools
-        .apply_patch_text(&params.patch_text)
-        .map_err(map_apply_patch_error)?;
-    fence.commit().await?;
-    let summary_text = summary.summary.clone();
-    let partial = summary.partial;
-    let files = summary.changes.len();
+    let result = tools.apply_patch_text(&params.patch_text);
+    let commit_result = match commit {
+        FenceCommit::Real => fence.commit().await,
+        #[cfg(test)]
+        FenceCommit::Fail => {
+            drop(fence);
+            Err(tool_internal(anyhow::anyhow!(
+                "injected patch fence commit failure"
+            )))
+        }
+    };
+    let result = match commit_result {
+        Ok(()) => result,
+        Err(_) => return Ok(fence_failure_result(result).into()),
+    };
+    let status = match &result {
+        PatchResult::Applied(_) => "success",
+        PatchResult::Rejected(_) => "rejected",
+        PatchResult::Incomplete(_) => "partial",
+    };
+    let files = match &result {
+        PatchResult::Applied(applied) => applied.changes.len(),
+        PatchResult::Rejected(_) => 0,
+        PatchResult::Incomplete(incomplete) => incomplete.changes.len(),
+    };
     spawn_tool_audit(
         state,
         actor,
         "tool.apply_patch",
         json!({
             "patch_sha256": sha256_hex(&params.patch_text),
-            "status": if partial { "partial" } else { "success" },
-            "summary": summary_text,
+            "status": status,
             "files": files,
             "duration_ms": started.elapsed().as_millis(),
         }),
     );
-    Ok(summary.into())
+    Ok(result.into())
+}
+
+fn rejected(diagnostic: PatchDiagnostic) -> PatchResultOutput {
+    PatchResult::Rejected(PatchRejected { diagnostic }).into()
+}
+
+/// A fence commit can fail after all writes were already published. Only an
+/// applied result is reclassified, and it keeps the actual applied changes; an
+/// existing incomplete result keeps its first truthful diagnostic and effects.
+pub(crate) fn fence_failure_result(result: PatchResult) -> PatchResult {
+    match result {
+        PatchResult::Applied(applied) => {
+            let writes = desk_foreman_workspace_sdk::classify_writes(&applied.changes);
+            PatchResult::Incomplete(desk_foreman_workspace_sdk::PatchIncomplete {
+                writes,
+                changes: applied.changes,
+                diagnostic: PatchDiagnostic::new(PatchCode::PatchFenceFailed, PatchStage::Fence),
+            })
+        }
+        other => other,
+    }
 }
 
 pub fn read(
@@ -445,17 +507,10 @@ fn classify_shell_error(error: anyhow::Error) -> ToolError {
     }
 }
 
-fn map_apply_patch_error(error: WorkspaceSdkError) -> ToolError {
-    map_workspace_sdk_error(error)
-}
-
 fn map_workspace_sdk_error(error: WorkspaceSdkError) -> ToolError {
     let message = error.to_string();
     match error {
         WorkspaceSdkError::InvalidInput(message) => ToolError::InvalidInput(message),
-        WorkspaceSdkError::PatchContextNotFound(message) => {
-            ToolError::PatchContextNotFound(message)
-        }
         WorkspaceSdkError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
             ToolError::NotFound(message)
         }

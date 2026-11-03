@@ -81,8 +81,7 @@ pub struct CancelSessionParams {
 #[schemars(deny_unknown_fields)]
 pub struct ApplyPatchParams {
     #[serde(rename = "patchText")]
-    #[schemars(rename = "patchText", description = "Codex patch DSL text to apply inside the workspace.", example = &"*** Begin Patch\n*** Add File: example.txt\n+content\n*** End Patch\n")]
-    #[validate(custom(function = "validate_non_blank"))]
+    #[schemars(rename = "patchText", description = "Codex patch DSL text to apply inside the workspace. Empty patches are rejected as a typed patch result.", example = &"*** Begin Patch\n*** Add File: example.txt\n+content\n*** End Patch\n")]
     pub patch_text: String,
 }
 

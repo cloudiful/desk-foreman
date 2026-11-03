@@ -7,10 +7,11 @@ use std::{
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ApplyPatchSummary, DirectoryEntry, FileFingerprint, ListDirectoryPageOutput,
-    ListDirectoryPageParams, PathKind, ReadFilePageOutput, ReadFilePageParams, StatPathOutput,
-    StatPathParams, WalkWorkspacePageOutput, WalkWorkspacePageParams, WorkspaceSdkError,
-    patch::apply_patch, resolve_workspace_path, workspace_relative_display,
+    DirectoryEntry, FileFingerprint, ListDirectoryPageOutput, ListDirectoryPageParams, PatchCode,
+    PatchDiagnostic, PatchRejected, PatchResult, PatchStage, PathKind, ReadFilePageOutput,
+    ReadFilePageParams, StatPathOutput, StatPathParams, WalkWorkspacePageOutput,
+    WalkWorkspacePageParams, WorkspaceSdkError, patch::apply_patch, resolve_workspace_path,
+    workspace_relative_display,
 };
 
 pub struct WorkspaceFileTools {
@@ -35,8 +36,12 @@ impl WorkspaceFileTools {
         &self.workspace_root
     }
 
-    pub fn apply_patch_text(&self, patch: &str) -> Result<ApplyPatchSummary, WorkspaceSdkError> {
-        validate_patch_input(patch)?;
+    pub fn apply_patch_text(&self, patch: &str) -> PatchResult {
+        if patch.len() > MAX_PATCH_INPUT_BYTES {
+            return PatchResult::Rejected(PatchRejected {
+                diagnostic: PatchDiagnostic::new(PatchCode::PatchTooLarge, PatchStage::Params),
+            });
+        }
         apply_patch(&self.workspace_root, patch)
     }
 
@@ -282,15 +287,6 @@ impl WorkspaceFileTools {
 }
 
 const MAX_PATCH_INPUT_BYTES: usize = 16 * 1024 * 1024;
-
-fn validate_patch_input(patch: &str) -> Result<(), WorkspaceSdkError> {
-    if patch.len() > MAX_PATCH_INPUT_BYTES {
-        return Err(WorkspaceSdkError::invalid_input(
-            "patch input exceeds maximum size",
-        ));
-    }
-    Ok(())
-}
 
 fn utf8_prefix_len(bytes: &[u8], max_bytes: usize) -> usize {
     let mut end = bytes.len().min(max_bytes);

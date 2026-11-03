@@ -1,88 +1,102 @@
 use std::path::Path;
 
 use crate::{
-    ApplyPatchChange, ApplyPatchOperation, ApplyPatchStatus, ApplyPatchSummary, WorkspaceSdkError,
+    ApplyPatchStatus, PatchApplied, PatchChange, PatchChangeError, PatchEffect, PatchIncomplete,
+    PatchResult, PatchWrites,
     patch::{
-        commit::commit_change,
+        commit::{FsOps, commit_change, commit_diagnostic},
         parser::parse_patch,
         plan::{PlannedChange, plan_patch},
     },
 };
 
-pub(crate) fn apply_patch(
-    root: &Path,
-    patch: &str,
-) -> Result<ApplyPatchSummary, WorkspaceSdkError> {
-    let parsed = parse_patch(patch)?;
-    let planned = plan_patch(root, &parsed)?;
+pub(crate) fn apply_patch(root: &Path, patch: &str) -> PatchResult {
+    let parsed = match parse_patch(patch) {
+        Ok(parsed) => parsed,
+        Err(diagnostic) => return PatchResult::Rejected(crate::PatchRejected { diagnostic }),
+    };
+    let planned = match plan_patch(root, &parsed) {
+        Ok(planned) => planned,
+        Err(diagnostic) => return PatchResult::Rejected(crate::PatchRejected { diagnostic }),
+    };
     commit_planned(root, &planned)
 }
 
-pub(crate) fn commit_planned(
+pub(crate) fn commit_planned(root: &Path, planned: &[PlannedChange]) -> PatchResult {
+    commit_planned_impl(root, planned, FsOps::REAL)
+}
+
+#[cfg(test)]
+pub(crate) fn commit_planned_with(
     root: &Path,
     planned: &[PlannedChange],
-) -> Result<ApplyPatchSummary, WorkspaceSdkError> {
-    let mut changes = planned.iter().map(change_pending).collect::<Vec<_>>();
+    ops: FsOps,
+) -> PatchResult {
+    commit_planned_impl(root, planned, ops)
+}
+
+fn commit_planned_impl(root: &Path, planned: &[PlannedChange], ops: FsOps) -> PatchResult {
+    let mut changes = Vec::with_capacity(planned.len());
     for (index, planned_change) in planned.iter().enumerate() {
-        match commit_change(root, planned_change) {
-            Ok(()) => changes[index].status = ApplyPatchStatus::Applied,
-            Err(error) => {
-                changes[index].status = ApplyPatchStatus::Failed;
-                changes[index].error = Some(error);
-                for change in changes.iter_mut().skip(index + 1) {
-                    change.status = ApplyPatchStatus::Skipped;
-                    change.error =
-                        Some("not attempted after an earlier commit failure".to_string());
+        let outcome = commit_change(root, planned_change, ops);
+        match outcome.error {
+            None => changes.push(PatchChange {
+                operation: planned_change.operation,
+                path: planned_change.path.clone(),
+                destination: planned_change.destination.clone(),
+                status: ApplyPatchStatus::Applied,
+                effect: outcome.effect,
+                error: None,
+            }),
+            Some(code) => {
+                changes.push(PatchChange {
+                    operation: planned_change.operation,
+                    path: planned_change.path.clone(),
+                    destination: planned_change.destination.clone(),
+                    status: ApplyPatchStatus::Failed,
+                    effect: outcome.effect,
+                    error: Some(PatchChangeError::new(code)),
+                });
+                for skipped in planned.iter().skip(index + 1) {
+                    changes.push(PatchChange {
+                        operation: skipped.operation,
+                        path: skipped.path.clone(),
+                        destination: skipped.destination.clone(),
+                        status: ApplyPatchStatus::Skipped,
+                        effect: PatchEffect::Unchanged,
+                        error: None,
+                    });
                 }
-                return Ok(summary(changes, true));
+                return PatchResult::Incomplete(PatchIncomplete {
+                    writes: classify_writes(&changes),
+                    changes,
+                    diagnostic: commit_diagnostic(planned_change, code),
+                });
             }
         }
     }
-    Ok(summary(changes, false))
+    PatchResult::Applied(PatchApplied { changes })
 }
 
-fn change_pending(change: &PlannedChange) -> ApplyPatchChange {
-    ApplyPatchChange {
-        operation: change.operation,
-        path: change.path.clone(),
-        destination: change.destination.clone(),
-        status: ApplyPatchStatus::Skipped,
-        error: None,
-        added_lines: change.added_lines,
-        deleted_lines: change.deleted_lines,
-    }
-}
-
-fn summary(changes: Vec<ApplyPatchChange>, partial: bool) -> ApplyPatchSummary {
-    let summary = changes
+pub fn classify_writes(changes: &[PatchChange]) -> PatchWrites {
+    if changes
         .iter()
-        .map(summary_line)
-        .collect::<Vec<_>>()
-        .join("\n");
-    ApplyPatchSummary {
-        summary,
-        partial,
-        changes,
+        .any(|change| change.effect == PatchEffect::Unknown)
+    {
+        return PatchWrites::Unknown;
     }
-}
-
-fn summary_line(change: &ApplyPatchChange) -> String {
-    let operation = match change.operation {
-        ApplyPatchOperation::Add => "A",
-        ApplyPatchOperation::Delete => "D",
-        ApplyPatchOperation::Update => "U",
-        ApplyPatchOperation::Move => "M",
-    };
-    let target = change
-        .destination
-        .as_deref()
-        .map(|destination| format!(" -> {destination}"))
-        .unwrap_or_default();
-    let suffix = match (&change.status, &change.error) {
-        (ApplyPatchStatus::Applied, _) => String::new(),
-        (ApplyPatchStatus::Failed, Some(error)) => format!(" (failed: {error})"),
-        (ApplyPatchStatus::Skipped, Some(error)) => format!(" (skipped: {error})"),
-        _ => String::new(),
-    };
-    format!("{operation} {}{target}{suffix}", change.path)
+    let any_changed = changes
+        .iter()
+        .any(|change| change.effect == PatchEffect::Changed);
+    if !any_changed {
+        return PatchWrites::None;
+    }
+    if changes
+        .iter()
+        .all(|change| change.status == ApplyPatchStatus::Applied)
+    {
+        PatchWrites::All
+    } else {
+        PatchWrites::Partial
+    }
 }

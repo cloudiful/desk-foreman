@@ -8,6 +8,7 @@ mod plan;
 mod tests;
 
 pub(crate) use apply::apply_patch;
+pub use apply::classify_writes;
 pub use parser::parse_patch;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

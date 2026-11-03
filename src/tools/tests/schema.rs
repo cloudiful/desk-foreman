@@ -195,6 +195,214 @@ fn shell_rejects_host_only_fields() {
     assert!(error.to_string().contains("sandbox_permissions"));
 }
 
+#[tokio::test]
+async fn apply_patch_output_schema_is_a_strict_three_variant_union() {
+    let temp = tempdir().expect("tempdir");
+    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()));
+    let apply_patch = service
+        .tool_router
+        .list_all()
+        .into_iter()
+        .find(|tool| tool.name == "apply_patch")
+        .expect("apply_patch registered");
+    let schema = apply_patch
+        .output_schema
+        .expect("apply_patch output schema");
+    let variants = schema
+        .get("oneOf")
+        .and_then(Value::as_array)
+        .expect("strict result union");
+    assert_eq!(variants.len(), 3);
+    for variant in variants {
+        assert_eq!(
+            variant.get("additionalProperties").and_then(Value::as_bool),
+            Some(false)
+        );
+    }
+    let outcomes = variants
+        .iter()
+        .filter_map(|variant| {
+            variant["properties"]["outcome"]["const"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(outcomes, ["applied", "rejected", "incomplete"]);
+
+    let openapi = openapi_document();
+    let schemas = openapi.components.expect("components").schemas;
+    for name in [
+        "PatchResultOutput",
+        "PatchAppliedOutput",
+        "PatchRejectedOutput",
+        "PatchIncompleteOutput",
+        "PatchChangeOutput",
+        "PatchDiagnosticOutput",
+        "PatchChangeErrorOutput",
+    ] {
+        assert!(schemas.contains_key(name), "missing OpenAPI schema {name}");
+    }
+}
+
+#[tokio::test]
+async fn apply_patch_output_schema_requires_all_nullable_fields() {
+    let temp = tempdir().expect("tempdir");
+    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()));
+    let apply_patch = service
+        .tool_router
+        .list_all()
+        .into_iter()
+        .find(|tool| tool.name == "apply_patch")
+        .expect("apply_patch registered");
+    let schema = apply_patch
+        .output_schema
+        .expect("apply_patch output schema");
+    let defs = schema
+        .get("$defs")
+        .and_then(Value::as_object)
+        .expect("defs");
+    let change = &defs["PatchChangeOutput"];
+    let diagnostic = &defs["PatchDiagnosticOutput"];
+
+    assert_eq!(
+        required_names(change),
+        string_set(&[
+            "operation",
+            "path",
+            "destination",
+            "status",
+            "effect",
+            "error"
+        ])
+    );
+    assert_eq!(
+        required_names(diagnostic),
+        string_set(&["code", "stage", "path", "operation", "hunk", "message"])
+    );
+    for (label, definition, fields) in [
+        ("change", change, &["destination", "error"][..]),
+        ("diagnostic", diagnostic, &["path", "operation", "hunk"][..]),
+    ] {
+        assert_eq!(
+            definition
+                .get("additionalProperties")
+                .and_then(Value::as_bool),
+            Some(false),
+            "{label} stays closed"
+        );
+        for field in fields {
+            assert!(
+                allows_null(&definition["properties"][field]),
+                "{label}.{field} must still admit null"
+            );
+        }
+    }
+
+    let variants = schema["oneOf"].as_array().expect("variants");
+    let applied = variants
+        .iter()
+        .find(|variant| variant["properties"]["outcome"]["const"] == "applied")
+        .expect("applied variant");
+    assert_eq!(applied["properties"]["changes"]["minItems"], 1);
+    let incomplete = variants
+        .iter()
+        .find(|variant| variant["properties"]["outcome"]["const"] == "incomplete")
+        .expect("incomplete variant");
+    assert!(
+        incomplete["properties"]["changes"]
+            .get("minItems")
+            .is_none(),
+        "incomplete changes must not gain a minimum"
+    );
+}
+
+#[test]
+fn openapi_patch_schemas_require_all_nullable_fields() {
+    let document = openapi_document();
+    let value = serde_json::to_value(&document).expect("openapi serializes");
+    let schemas = &value["components"]["schemas"];
+    let change = &schemas["PatchChangeOutput"];
+    let diagnostic = &schemas["PatchDiagnosticOutput"];
+
+    assert_eq!(
+        required_names(change),
+        string_set(&[
+            "operation",
+            "path",
+            "destination",
+            "status",
+            "effect",
+            "error"
+        ])
+    );
+    assert_eq!(
+        required_names(diagnostic),
+        string_set(&["code", "stage", "path", "operation", "hunk", "message"])
+    );
+    for (label, definition, fields) in [
+        ("change", change, &["destination", "error"][..]),
+        ("diagnostic", diagnostic, &["path", "operation", "hunk"][..]),
+    ] {
+        assert_eq!(
+            definition
+                .get("additionalProperties")
+                .and_then(Value::as_bool),
+            Some(false),
+            "{label} stays closed"
+        );
+        for field in fields {
+            assert!(
+                allows_null(&definition["properties"][field]),
+                "{label}.{field} must still admit null"
+            );
+        }
+    }
+    assert_eq!(
+        schemas["PatchAppliedOutput"]["properties"]["changes"]["minItems"],
+        1
+    );
+    assert!(
+        schemas["PatchIncompleteOutput"]["properties"]["changes"]
+            .get("minItems")
+            .is_none(),
+        "incomplete changes must not gain a minimum"
+    );
+}
+
+fn required_names(schema: &Value) -> std::collections::BTreeSet<String> {
+    schema
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect()
+}
+
+fn string_set(values: &[&str]) -> std::collections::BTreeSet<String> {
+    values.iter().map(|value| (*value).to_string()).collect()
+}
+
+fn allows_null(schema: &Value) -> bool {
+    if schema.get("type").and_then(Value::as_str) == Some("null") {
+        return true;
+    }
+    if schema
+        .get("type")
+        .and_then(Value::as_array)
+        .is_some_and(|types| types.iter().any(|value| value == "null"))
+    {
+        return true;
+    }
+    ["anyOf", "oneOf", "allOf"].iter().any(|keyword| {
+        schema
+            .get(*keyword)
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.iter().any(allows_null))
+    })
+}
+
 #[test]
 fn openapi_includes_http_tool_paths() {
     let document = openapi_document();

@@ -76,6 +76,24 @@ pub fn workspace_relative_display(root: &Path, absolute: &Path) -> String {
         .to_string()
 }
 
+/// Classifies a patch path with the same credential-name policy used by the
+/// workspace tools. It is intentionally patch-specific so applying or moving a
+/// file cannot bypass the protected-path check; other operations keep their
+/// existing validation.
+pub fn patch_path_is_protected(relative: &str) -> bool {
+    let normalized = relative.replace('\\', "/");
+    let sensitive_name = normalized
+        .split('/')
+        .any(|part| part == ".env" || part.starts_with(".env.") || part == "credentials");
+    let sensitive_extension = [".pem", ".key", ".p12", ".pfx"]
+        .iter()
+        .any(|suffix| normalized.ends_with(suffix));
+    let sensitive_basename = ["id_rsa", "id_ed25519", "authorized_keys"]
+        .iter()
+        .any(|name| normalized.ends_with(name));
+    sensitive_name || sensitive_extension || sensitive_basename
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, os::unix::fs as unix_fs};
