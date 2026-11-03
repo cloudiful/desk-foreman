@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   build-and-publish:
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: aio
     env:
       CARGO_TERM_COLOR: always
@@ -71,6 +72,7 @@ jobs:
           builder_name_prefix: desk-foreman-runtime
           inline_cache: "true"
           inline_cache_tag: latest-amd64
+          manifest_tag: ${{ github.ref == 'refs/heads/main' && 'latest' || github.ref_name }}
           publish_latest: "false"
           username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_TOKEN }}
@@ -86,6 +88,7 @@ jobs:
           builder_name_prefix: desk-foreman-runner-manager
           inline_cache: "true"
           inline_cache_tag: latest-amd64
+          manifest_tag: ${{ github.ref == 'refs/heads/main' && 'latest' || github.ref_name }}
           publish_latest: "false"
           username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_TOKEN }}
@@ -101,6 +104,7 @@ jobs:
           builder_name_prefix: desk-foreman-workspace-runner
           inline_cache: "true"
           inline_cache_tag: latest-amd64
+          manifest_tag: ${{ github.ref == 'refs/heads/main' && 'latest' || github.ref_name }}
           publish_latest: "false"
           username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_TOKEN }}
@@ -113,6 +117,7 @@ jobs:
             [{"target":"runtime","image_suffix":""},
             {"target":"runner-manager","image_suffix":"-runner-manager"},
             {"target":"workspace-runner","image_suffix":"-workspace-runner"}]
+          manifest_tag: ${{ github.ref == 'refs/heads/main' && 'latest' || github.ref_name }}
           publish_latest: "false"
           username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_TOKEN }}
