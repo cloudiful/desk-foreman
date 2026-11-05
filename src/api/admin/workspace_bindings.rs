@@ -1,5 +1,3 @@
-use std::fs;
-
 use axum::{
     Json,
     extract::{Path, State},
@@ -14,7 +12,6 @@ use crate::{
         WorkspaceLeaseRequest,
     },
     error::AppError,
-    workspace::resolve_workspace_binding_root,
 };
 use serde_json::json;
 
@@ -112,71 +109,6 @@ pub async fn restore_workspace_binding(
     Path(binding_id): Path<i64>,
 ) -> Result<Json<WorkspaceBindingResponse>, AppError> {
     transition_workspace_binding(&state, &jar, binding_id, "active").await
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/admin/workspace-bindings/{binding_id}/reset",
-    tag = "admin-users",
-    params(("binding_id" = i64, Path, description = "Workspace binding identifier")),
-    responses((status = 200, body = WorkspaceBindingResponse), (status = 503, body = crate::error::ErrorResponse))
-)]
-pub async fn reset_workspace_binding(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    Path(binding_id): Path<i64>,
-) -> Result<Json<WorkspaceBindingResponse>, AppError> {
-    let admin = require_admin(&state, &jar).await?;
-    // The binding row lock is taken before the reset preflight and held
-    // through directory destruction and the final commit: without it, a task
-    // admitted mid-reset would be destroyed along with the workspace.
-    let mut guard = lock_binding_for_transition(&state.db, binding_id).await?;
-    if guard.is_native_task_conflict() {
-        return Err(native_task_owns_workspace());
-    }
-    if guard.is_absent() {
-        return Err(AppError::not_found("workspace binding not found"));
-    }
-    // The `resetting` transition runs on the guarded transaction, so nothing
-    // observes an unlocked workspace while the directory is about to be
-    // destroyed. It also proves the row still exists.
-    native_task_guard::set_lifecycle_state(guard.transaction_mut(), binding_id, "resetting")
-        .await?
-        .ok_or_else(|| AppError::not_found("workspace binding not found"))?;
-    // A plain read is safe for the columns reset consults: the row lock is
-    // held, and reset never rewrites `workspace_root` or `application_id`.
-    let Some(binding) =
-        crate::db::queries::find_workspace_binding_by_id(&state.db, binding_id).await?
-    else {
-        return Err(AppError::not_found("workspace binding not found"));
-    };
-    cancel_binding_sessions(&state, binding_id).await?;
-    let root = resolve_workspace_binding_root(&state.config.workspace_root, &binding)
-        .map_err(AppError::internal)?;
-    clear_directory(&root).map_err(AppError::internal)?;
-    let application = crate::db::queries::find_application_by_id(&state.db, binding.application_id)
-        .await?
-        .ok_or_else(|| AppError::not_found("application not found"))?;
-    crate::workspace::initialize_workspace_template(
-        &state.config.workspace_root,
-        &root,
-        application.workspace_template.as_deref(),
-    )?;
-    let binding =
-        native_task_guard::set_lifecycle_state(guard.transaction_mut(), binding_id, "active")
-            .await?
-            .ok_or_else(|| AppError::not_found("workspace binding not found"))?;
-    guard.commit().await?;
-    record_admin_audit(
-        &state,
-        &admin,
-        "workspace.reset",
-        "workspace_binding",
-        binding_id.to_string(),
-        json!({}),
-    )
-    .await?;
-    Ok(Json(binding))
 }
 
 async fn transition_workspace_binding(
@@ -382,18 +314,6 @@ async fn cancel_binding_sessions(state: &AppState, binding_id: i64) -> Result<()
                 .error
                 .unwrap_or_else(|| "workspace cleanup unconfirmed".into()),
         ));
-    }
-    Ok(())
-}
-
-fn clear_directory(root: &std::path::Path) -> anyhow::Result<()> {
-    for entry in fs::read_dir(root)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            fs::remove_dir_all(path)?;
-        } else {
-            fs::remove_file(path)?;
-        }
     }
     Ok(())
 }

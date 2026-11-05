@@ -68,10 +68,6 @@ pub fn router() -> Router<AppState> {
             post(admin::restore_workspace_binding),
         )
         .route(
-            "/api/admin/workspace-bindings/{binding_id}/reset",
-            post(admin::reset_workspace_binding),
-        )
-        .route(
             "/api/admin/workspace-bindings/{binding_id}/lease",
             post(admin::acquire_workspace_binding_lease)
                 .delete(admin::release_workspace_binding_lease),

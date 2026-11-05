@@ -50,25 +50,23 @@ pub async fn relay_response(
     mut events: mpsc::Receiver<InboundEvent>,
 ) -> Result<Response<Body>, AppError> {
     let mut terminal = call.terminal_signal();
-    let head = loop {
-        tokio::select! {
-            biased;
-            changed = terminal.changed() => {
-                if changed.is_err() {
+    let head = tokio::select! {
+        biased;
+        changed = terminal.changed() => {
+            if changed.is_err() {
+                return Err(refuse_before_head(None));
+            }
+            let code = terminal.borrow().unwrap_or(RelayErrorCode::UpstreamUnavailable);
+            return Err(refuse_before_head(Some(code)));
+        }
+        event = events.recv() => {
+            match event {
+                Some(InboundEvent::ResponseHead(head)) => head,
+                Some(InboundEvent::Error(code)) => return Err(refuse_before_head(Some(code))),
+                Some(InboundEvent::Data(_)) | None => {
                     return Err(refuse_before_head(None));
                 }
-                let code = terminal.borrow().unwrap_or(RelayErrorCode::UpstreamUnavailable);
-                return Err(refuse_before_head(Some(code)));
-            }
-            event = events.recv() => {
-                match event {
-                    Some(InboundEvent::ResponseHead(head)) => break head,
-                    Some(InboundEvent::Error(code)) => return Err(refuse_before_head(Some(code))),
-                    Some(InboundEvent::Data(_)) | None => {
-                        return Err(refuse_before_head(None));
-                    }
-                    Some(InboundEvent::End) => return Err(refuse_before_head(None)),
-                }
+                Some(InboundEvent::End) => return Err(refuse_before_head(None)),
             }
         }
     };
@@ -89,39 +87,35 @@ pub async fn relay_response(
             if cursor.done {
                 return None;
             }
-            loop {
-                tokio::select! {
-                    biased;
-                    changed = cursor.terminal.changed() => {
-                        if changed.is_ok() {
+            tokio::select! {
+                biased;
+                changed = cursor.terminal.changed() => {
+                    if changed.is_ok() {
+                        cursor.done = true;
+                        cursor.call.cancel();
+                        let code = cursor.terminal.borrow().unwrap_or(RelayErrorCode::Cancelled);
+                        Some((Err(stream_failure(code)), cursor))
+                    } else {
+                        None
+                    }
+                }
+                event = cursor.events.recv() => {
+                    match event {
+                        Some(InboundEvent::Data(bytes)) => Some((Ok(bytes), cursor)),
+                        // A second head cannot replace the status the caller
+                        // already acted on.
+                        Some(InboundEvent::ResponseHead(_)) => {
                             cursor.done = true;
                             cursor.call.cancel();
-                            let code = cursor.terminal.borrow().unwrap_or(RelayErrorCode::Cancelled);
-                            return Some((Err(stream_failure(code)), cursor));
+                            Some((Err(stream_failure(RelayErrorCode::OutOfOrder)), cursor))
                         }
-                        return None;
-                    }
-                    event = cursor.events.recv() => {
-                        match event {
-                            Some(InboundEvent::Data(bytes)) => return Some((Ok(bytes), cursor)),
-                            // A second head cannot replace the status the caller
-                            // already acted on.
-                            Some(InboundEvent::ResponseHead(_)) => {
-                                cursor.done = true;
-                                cursor.call.cancel();
-                                return Some((
-                                    Err(stream_failure(RelayErrorCode::OutOfOrder)),
-                                    cursor,
-                                ));
-                            }
-                            Some(InboundEvent::End) => return None,
-                            Some(InboundEvent::Error(code)) => {
-                                cursor.done = true;
-                                cursor.call.cancel();
-                                return Some((Err(stream_failure(code)), cursor));
-                            }
-                            None => return None,
+                        Some(InboundEvent::End) => None,
+                        Some(InboundEvent::Error(code)) => {
+                            cursor.done = true;
+                            cursor.call.cancel();
+                            Some((Err(stream_failure(code)), cursor))
                         }
+                        None => None,
                     }
                 }
             }

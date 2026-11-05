@@ -325,15 +325,17 @@ pub async fn takeover_resource_workspace_lease(
         }
         TakeoverOutcome::Conflict { reason, current } => {
             let reason_str = reason.as_str().to_string();
-            Err(AppError::TakeoverConflict(WorkspaceLeaseTakeoverConflict {
-                error: conflict_message(reason),
-                reason: reason_str,
-                stale_threshold_seconds: LEASE_TAKEOVER_STALE_THRESHOLD_SECONDS,
-                current: queries::workspace_lease_status_response(
-                    current,
-                    LEASE_TAKEOVER_STALE_THRESHOLD_SECONDS,
-                ),
-            }))
+            Err(AppError::TakeoverConflict(Box::new(
+                WorkspaceLeaseTakeoverConflict {
+                    error: conflict_message(reason),
+                    reason: reason_str,
+                    stale_threshold_seconds: LEASE_TAKEOVER_STALE_THRESHOLD_SECONDS,
+                    current: queries::workspace_lease_status_response(
+                        current,
+                        LEASE_TAKEOVER_STALE_THRESHOLD_SECONDS,
+                    ),
+                },
+            )))
         }
         TakeoverOutcome::NotFound => Err(AppError::not_found("workspace binding not found")),
     }

@@ -1,7 +1,7 @@
 use super::*;
 use chrono::Utc;
-#[path = "../admin/lease_test_support.rs"]
-mod support;
+
+use crate::lease_test_support as support;
 
 #[test]
 fn request_rejects_injection_and_invalid_containers() {

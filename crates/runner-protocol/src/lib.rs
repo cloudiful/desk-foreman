@@ -4,6 +4,7 @@ use serde_json::Value;
 use utoipa::ToSchema;
 
 pub mod execution_environment;
+pub mod git_authority;
 pub mod service_relay;
 pub mod task_execution;
 pub mod task_export;
@@ -20,6 +21,14 @@ pub use workspace_principal::{
 pub use execution_environment::{
     EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest, StopExecutionEnvironmentAck,
     StopExecutionEnvironmentRequest,
+};
+pub use git_authority::{
+    GIT_JOB_CREDENTIAL_URL_MAX_LEN, GIT_JOB_CREDENTIAL_USERNAME, GIT_JOB_WORKSPACE_ROOT_MAX_LEN,
+    GitJobCredential, GitJobErrorCode, GitJobOutcome, GitJobOutcomeError, GitJobSpec,
+    GitJobSpecError, GitObjectFormat, GitReceiptPhase, GitReceiptReadAck, GitReceiptReadAckError,
+    GitReceiptReadRequest, GitReceiptReadRequestError, GitReceiptState, GitRuntimeAvailability,
+    GitRuntimeReason, GitRuntimeStatus, GitVerifyRequest, GitVerifyRequestError, GitVerifyResult,
+    is_canonical_branch,
 };
 pub use task_execution::{
     NATIVE_TASK_WORKSPACE_ROOT, NativeTaskRuntimeIdentity, StartNativeTaskRequest,
@@ -126,6 +135,7 @@ impl RunnerOwner {
             Self::InternalUser { user_id } => format!("user:{user_id}"),
             Self::WorkspaceBinding {
                 workspace_binding_id,
+                ..
             } => format!("workspace_binding:{workspace_binding_id}"),
             Self::ExecutionEnvironment {
                 environment_id,
@@ -135,9 +145,25 @@ impl RunnerOwner {
                 application_id,
                 workspace_binding_id,
                 principal_digest,
+                ..
             } => format!(
                 "application_principal:{application_id}:{workspace_binding_id}:{principal_digest}"
             ),
+        }
+    }
+
+    /// Workspace binding id carried by the two bound owner variants.
+    pub fn workspace_binding_id(&self) -> Option<i64> {
+        match self {
+            Self::WorkspaceBinding {
+                workspace_binding_id,
+                ..
+            }
+            | Self::ApplicationPrincipal {
+                workspace_binding_id,
+                ..
+            } => Some(*workspace_binding_id),
+            Self::InternalUser { .. } | Self::ExecutionEnvironment { .. } => None,
         }
     }
 

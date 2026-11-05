@@ -1,7 +1,6 @@
 use super::StopWorkspacePrincipalRequest;
 
-#[path = "../admin/lease_test_support.rs"]
-mod support;
+use crate::lease_test_support as support;
 
 #[test]
 fn stop_request_rejects_unknown_fields() {

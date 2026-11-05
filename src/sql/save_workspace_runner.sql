@@ -41,9 +41,32 @@ SET
     updated_at = NOW(),
     last_observed_at = NOW(),
     last_error = EXCLUDED.last_error
-WHERE (workspace_runners.owner_kind <> 'application_principal' AND EXCLUDED.owner_kind <> 'application_principal')
+WHERE (workspace_runners.owner_kind = 'user' AND EXCLUDED.owner_kind = 'user'
+       AND workspace_runners.owner_user_id IS NOT DISTINCT FROM EXCLUDED.owner_user_id)
+   OR (workspace_runners.owner_kind = 'workspace_binding' AND EXCLUDED.owner_kind = 'workspace_binding'
+       AND workspace_runners.owner_workspace_binding_id = EXCLUDED.owner_workspace_binding_id)
    OR (workspace_runners.owner_kind = 'application_principal' AND EXCLUDED.owner_kind = 'application_principal'
        AND workspace_runners.owner_application_id = EXCLUDED.owner_application_id
        AND workspace_runners.owner_workspace_binding_id = EXCLUDED.owner_workspace_binding_id
        AND workspace_runners.owner_principal_digest = EXCLUDED.owner_principal_digest)
-RETURNING *;
+RETURNING
+    runner_id,
+    runner_manager_id,
+    owner_kind,
+    owner_user_id,
+    owner_workspace_binding_id,
+    owner_application_id,
+    owner_principal_digest,
+    container_name,
+    container_id,
+    runtime,
+    runtime_class,
+    image_name,
+    status,
+    network_enabled,
+    workspace_root,
+    last_active_at,
+    last_observed_at,
+    created_at,
+    updated_at,
+    last_error;

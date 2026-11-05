@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE runner_principal_admission SET stopped_at = now()\nWHERE owner_key = $1 AND application_id = $2 AND workspace_binding_id = $3 AND principal_digest = $4\n  AND runner_manager_id = $5 AND container_id = $6 AND stopped_at IS NULL;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d4440a81ff656731818ded3ccaac7aac748e883d84c14ff85b545cdb79ff8c2b"
+}

@@ -110,13 +110,11 @@ async fn application_mcp_actor(
         let lease = super::runner_isolation::required_claim(headers, LEASE_OWNER_HEADER)?;
         if external != lease
             || parse_resource_workspace_key(&workspace).is_none()
-            || runner_protocol::workspace_principal::application_principal_owner(
+            || !runner_protocol::workspace_principal::is_valid_application_principal_identity(
                 application.application_id,
-                1,
                 &external,
                 &workspace,
             )
-            .is_err()
         {
             return Err(AppError::unauthorized(
                 "invalid principal workspace identity",
@@ -131,6 +129,7 @@ async fn application_mcp_actor(
             header_value(headers, LEASE_OWNER_HEADER)?,
         )
     };
+    require_isolated_resource_workspace(isolated, &workspace_key)?;
     let application_response = application_response(&application);
     let binding =
         if let Some((resource_kind, resource_id)) = parse_resource_workspace_key(&workspace_key) {
@@ -173,6 +172,18 @@ async fn application_mcp_actor(
         token: Box::new(application),
         lease_owner,
     })
+}
+
+pub(super) fn require_isolated_resource_workspace(
+    isolated: bool,
+    workspace_key: &str,
+) -> Result<(), AppError> {
+    if !isolated && parse_resource_workspace_key(workspace_key).is_some() {
+        return Err(AppError::forbidden(
+            "resource workspace requires an isolated principal",
+        ));
+    }
+    Ok(())
 }
 
 async fn user_binding(

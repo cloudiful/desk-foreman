@@ -95,8 +95,12 @@ async fn docker_execution_requires_ack_and_targets_inspected_id() {
         let server = tokio::spawn(async move {
             for _ in 0..2 {
                 let (mut socket, _) = listener.accept().await.unwrap();
-                let mut b = [0; 8192];
-                socket.read(&mut b).await.unwrap();
+                let mut header = [0u8; 8192];
+                let read = socket.read(&mut header).await.unwrap();
+                assert!(
+                    read > 0,
+                    "backend closed before sending an HTTP request header"
+                );
                 socket.write_all(format!("HTTP/1.1 {status} result\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
             }
         });

@@ -166,6 +166,9 @@ socket is opened, and no relay exists yet.
   read through a capped reader, and holding exactly the configured
   `NAME=token` line. A symlink is refused before it is opened. Anything that
   fails is refused and left untouched: never chmod-ed, rewritten, or deleted.
+  The only deletion is retirement of the exact validated
+  `(environment, generation)` file after a confirmed stop (see Stop); an
+  invalid file is never retired.
   Reuse and restart require that existing credential and fail closed without
   it, rather than minting a new value under a container that is already
   running. Only creation mints, under the existing admission lock after the
@@ -262,9 +265,68 @@ mount.
   positively identified absence via `No such container/object`.
   Transport, parse, timeout, or permission failures never become
   absence; still-running returns `confirmed=false`. Never `volume rm`.
+- Both lifecycle and native confirmed stops retire the stopped generation's
+  host service credential. With a configured service profile the exact
+  `<state_dir>/<environment>/service/<generation>.env` file is re-validated
+  with the current auth variable name and unlinked; a missing file is already
+  retired. An unset profile skips retirement and deletes nothing, including any
+  older credential. An invalid profile, or a file or directory that fails
+  validation or removal, returns an error after the container stop: the
+  credential is left as it is, the generation stays durably closed, and a
+  corrected configuration or permission plus an absent-confirm retry can
+  complete retirement. An unconfirmed stop or an earlier failure never
+  retires anything. No automatic workspace reset, legacy-credential cleanup,
+  or old-data migration is implied.
 - Ack owner/generation matches the request. Persisted stop intent stays
   distinct from the actual stop acknowledgment: the barrier is not a claim
   that a container was killed.
+
+## Git authority readiness
+
+- `RUNNER_GIT_IMAGE` is optional and must be digest-pinned (`@sha256:`).
+  Trusted Git never falls back to `RUNNER_IMAGE`; a general workspace-runner
+  tag stays independent.
+- `RUNNER_GIT_PRIVATE_ROOT` is optional and must be an absolute normalized
+  manager path owned by the manager user with mode `0700`. It must not equal,
+  contain, or sit under the workspace, host-workspace, or native-task roots.
+  The manager must run non-root; missing, unsafe, symlinked, or overlapping
+  roots are reported as invalid or unconfigured, never repaired.
+- `RUNNER_GIT_HOST_PRIVATE_ROOT` is the optional daemon-visible path the
+  helper mounts. It is operator input and its mount identity is unverified;
+  a recognized remote Docker endpoint requires it, while a local Unix endpoint
+  treats it as optional.
+- `GET /internal/runner/git-availability` is protected by the manager bearer
+  token. It returns exactly `{status, reason}` with
+  `unconfigured`, `invalid`, or `configured_unverified`, and never includes
+  paths, images, users, hosts, or endpoints.
+- The route is structural only. It does not call Docker, create or chmod a
+  path, or prove image presence, daemon access, root writability, mount
+  mapping, or container isolation. `configured_unverified` enables nothing and
+  is not readiness; the Direct backend remains unsupported for trusted Git.
+- Clone preparation additionally requires `RUNNER_GIT_NETWORK` (a dedicated
+  Docker network, never the host, default, bridge, or container network),
+  `RUNNER_GIT_BROKER_HOST` (the exact broker `host[:port]` authority), and
+  positive values for `RUNNER_GIT_MAX_FETCH_VOLUME_BYTES`,
+  `RUNNER_GIT_MAX_BUNDLE_BYTES`, `RUNNER_GIT_MAX_LOGICAL_OBJECT_BYTES`,
+  `RUNNER_GIT_MAX_CHECKOUT_BYTES`, and `RUNNER_GIT_MAX_TREE_ENTRIES`.
+- The digest-pinned image must provide `/bin/sh`, `/bin/cat`, and Git 2.47 or
+  newer with SHA-1, SHA-256, and files-ref support.
+- The preparation component builds one bounded bundle from an authenticated
+  broker inside operation-owned mounts and a capped tmpfs volume.
+- `git_operation` jobs are dispatched to the manager: the bundle is cloned into
+  a second capped tmpfs volume with network disabled, verified read-only, and
+  exported as one bounded uncompressed tar stream. The manager validates and
+  extracts that stream into a pinned sibling temporary directory, then publishes
+  it with `RENAME_NOREPLACE` into the exact
+  `apps/<application>/resources/<resource-workspace-hash>` target. The same
+  workspace-binding fence blocks shell sessions while the install is validated
+  and published. The image must provide `tar` in addition to `/bin/sh`,
+  `/bin/cat`, and Git 2.47 or newer.
+- The install is bounded by the configured worktree, Git-data, metadata,
+  archive, and reservation caps. A valid checkout can still exceed the export
+  cap; the manager reports `ResourceLimit` rather than raising a limit. Actual
+  Docker/container acceptance remains deferred and unverified; the source phase
+  does not claim runtime effectiveness.
 
 ## Compatibility and limits
 

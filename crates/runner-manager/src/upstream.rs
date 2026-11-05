@@ -21,6 +21,11 @@ use crate::runtime::session_gate::SessionGate;
 
 mod dispatch;
 mod execute;
+#[path = "upstream/git_operation.rs"]
+mod git_operation;
+#[cfg(test)]
+#[path = "upstream/git_operation_tests.rs"]
+mod git_operation_tests;
 #[path = "upstream/native_task.rs"]
 mod native_task;
 

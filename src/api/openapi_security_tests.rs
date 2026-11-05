@@ -15,7 +15,6 @@ use super::{APPLICATION_BEARER_SCHEME, openapi_document};
 const HTTP_METHODS: [&str; 7] = ["get", "post", "put", "patch", "delete", "head", "options"];
 
 /// Operations guarded by `application_actor`, as `(path, method, operationId)`.
-
 fn document() -> Value {
     serde_json::to_value(openapi_document()).expect("serialize openapi document")
 }
@@ -139,6 +138,60 @@ fn principal_admission_requires_manager_bearer_and_request_schema() {
     assert_eq!(
         op["requestBody"]["content"]["application/json"]["schema"]["$ref"],
         "#/components/schemas/PrincipalAdmissionRequest"
+    );
+}
+
+#[test]
+fn workspace_binding_reset_is_absent_and_retained_actions_remain() {
+    let document = document();
+    let operations = operations(&document);
+
+    assert!(
+        !operations.contains_key(&("/api/admin/workspace-bindings/{binding_id}/reset", "post")),
+        "the online workspace reset operation must not be documented"
+    );
+
+    for (path, method, operation_id) in [
+        (
+            "/api/admin/workspace-bindings/{binding_id}/archive",
+            "post",
+            "archive_workspace_binding",
+        ),
+        (
+            "/api/admin/workspace-bindings/{binding_id}/restore",
+            "post",
+            "restore_workspace_binding",
+        ),
+        (
+            "/api/admin/workspace-bindings/{binding_id}",
+            "get",
+            "get_workspace_binding",
+        ),
+        (
+            "/api/admin/workspace-bindings/{binding_id}/lease",
+            "delete",
+            "release_workspace_binding_lease",
+        ),
+    ] {
+        let operation = operations
+            .get(&(path, method))
+            .unwrap_or_else(|| panic!("missing retained operation {method} {path}"));
+        assert_eq!(
+            operation["operationId"],
+            json!(operation_id),
+            "{path} must keep its documented operationId"
+        );
+    }
+
+    let router = include_str!("mod.rs");
+    assert!(
+        !router.contains("/api/admin/workspace-bindings/{binding_id}/reset"),
+        "the reset route must not stay registered in the router"
+    );
+    let binding_handlers = include_str!("admin/workspace_bindings.rs");
+    assert!(
+        !binding_handlers.contains("fn reset_workspace_binding"),
+        "the reset handler must be removed, not merely unregistered"
     );
 }
 

@@ -37,6 +37,22 @@ pub struct RunnerManagerConfig {
     pub workspace_root: PathBuf,
     pub host_workspace_root: PathBuf,
     pub image: String,
+    /// Optional dedicated image for the trusted Git helper. Missing or
+    /// malformed values are classified by Git availability, never fatal.
+    pub git_image: Option<String>,
+    /// Optional manager-private root for trusted Git operations.
+    pub git_private_root: Option<PathBuf>,
+    /// Optional daemon-visible counterpart of `git_private_root`.
+    pub git_host_private_root: Option<PathBuf>,
+    /// Optional dedicated Docker network for credentialed clone fetch steps.
+    pub git_network: Option<String>,
+    /// Optional exact broker authority (`host[:port]`) pinned for clone fetches.
+    pub git_broker_host: Option<String>,
+    pub git_max_fetch_volume_bytes: Option<u64>,
+    pub git_max_bundle_bytes: Option<u64>,
+    pub git_max_logical_object_bytes: Option<u64>,
+    pub git_max_checkout_bytes: Option<u64>,
+    pub git_max_tree_entries: Option<u64>,
     pub workdir: String,
     pub network_enabled: bool,
     pub max_output_bytes: usize,
@@ -90,6 +106,30 @@ impl RunnerManagerConfig {
             host_workspace_root,
             image: env::var("RUNNER_IMAGE")
                 .unwrap_or_else(|_| "desk-foreman-workspace-runner:local".to_string()),
+            git_image: optional_env_value(env::var("RUNNER_GIT_IMAGE").ok()),
+            git_private_root: optional_env_value(env::var("RUNNER_GIT_PRIVATE_ROOT").ok())
+                .map(PathBuf::from),
+            git_host_private_root: optional_env_value(
+                env::var("RUNNER_GIT_HOST_PRIVATE_ROOT").ok(),
+            )
+            .map(PathBuf::from),
+            git_network: optional_env_value(env::var("RUNNER_GIT_NETWORK").ok()),
+            git_broker_host: optional_env_value(env::var("RUNNER_GIT_BROKER_HOST").ok()),
+            git_max_fetch_volume_bytes: env::var("RUNNER_GIT_MAX_FETCH_VOLUME_BYTES")
+                .ok()
+                .and_then(|value| value.parse().ok()),
+            git_max_bundle_bytes: env::var("RUNNER_GIT_MAX_BUNDLE_BYTES")
+                .ok()
+                .and_then(|value| value.parse().ok()),
+            git_max_logical_object_bytes: env::var("RUNNER_GIT_MAX_LOGICAL_OBJECT_BYTES")
+                .ok()
+                .and_then(|value| value.parse().ok()),
+            git_max_checkout_bytes: env::var("RUNNER_GIT_MAX_CHECKOUT_BYTES")
+                .ok()
+                .and_then(|value| value.parse().ok()),
+            git_max_tree_entries: env::var("RUNNER_GIT_MAX_TREE_ENTRIES")
+                .ok()
+                .and_then(|value| value.parse().ok()),
             workdir: env::var("RUNNER_WORKDIR").unwrap_or_else(|_| "/workspace".to_string()),
             network_enabled: env::var("RUNNER_NETWORK_ENABLED")
                 .ok()
@@ -192,6 +232,10 @@ impl RunnerManagerConfig {
     }
 }
 
+fn optional_env_value(value: Option<String>) -> Option<String> {
+    value.filter(|value| !value.trim().is_empty())
+}
+
 fn workspace_root_from_env(name: &str) -> anyhow::Result<PathBuf> {
     let raw = env::var(name).unwrap_or_else(|_| "/workspace".into());
     canonical_workspace_root(name, Path::new(&raw))
@@ -215,7 +259,22 @@ fn canonical_workspace_root(name: &str, path: &Path) -> anyhow::Result<PathBuf> 
 
 #[cfg(test)]
 mod tests {
-    use super::RunnerBackendKind;
+    use super::{RunnerBackendKind, optional_env_value};
+
+    #[test]
+    fn optional_git_values_drop_blank_but_retain_invalid_nonempty() {
+        assert_eq!(optional_env_value(None), None);
+        assert_eq!(optional_env_value(Some(String::new())), None);
+        assert_eq!(optional_env_value(Some(" \t\n".to_owned())), None);
+        assert_eq!(
+            optional_env_value(Some("relative/root".to_owned())),
+            Some("relative/root".to_owned())
+        );
+        assert_eq!(
+            optional_env_value(Some(" runner@sha256:abc ".to_owned())),
+            Some(" runner@sha256:abc ".to_owned())
+        );
+    }
 
     #[test]
     fn parses_runner_backend_modes() {

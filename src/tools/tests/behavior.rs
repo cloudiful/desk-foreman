@@ -25,7 +25,6 @@ use crate::{
 use desk_foreman_workspace_sdk::{
     ApplyPatchOperation, PatchApplied, PatchChange, PatchChangeError, PatchCode, PatchDiagnostic,
     PatchEffect, PatchIncomplete, PatchRejected, PatchResult, PatchStage, PatchWrites,
-    WorkspaceFileTools,
 };
 
 use super::{

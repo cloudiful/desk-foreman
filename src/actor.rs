@@ -5,7 +5,7 @@ use rmcp::service::RequestContext;
 
 mod write_lease;
 
-pub use write_lease::{admit_fenced_write, check_write_lease};
+pub use write_lease::{admit_fenced_write, admit_personal_write, check_write_lease};
 
 use crate::{
     AppState,

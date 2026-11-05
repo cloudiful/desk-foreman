@@ -291,4 +291,132 @@ mod service_tests {
             );
         }
     }
+
+    #[test]
+    fn removal_unlinks_exactly_the_validated_generation_and_is_idempotent() {
+        let temp = temp();
+        let store = ServiceCredentialStore::new(temp.path());
+        let path = store
+            .obtain(ENV, 10, ENV_NAME)
+            .expect("create")
+            .env_file()
+            .to_path_buf();
+        store.remove(ENV, 10, ENV_NAME).expect("retire");
+        assert!(
+            !path.exists(),
+            "the exact generation credential is unlinked"
+        );
+        store
+            .remove(ENV, 10, ENV_NAME)
+            .expect("a missing credential is already retired");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn removal_leaves_sibling_generations_and_other_environments_untouched() {
+        let temp = temp();
+        let store = ServiceCredentialStore::new(temp.path());
+        let target = store
+            .obtain(ENV, 11, ENV_NAME)
+            .expect("target")
+            .env_file()
+            .to_path_buf();
+        let sibling = store
+            .obtain(ENV, 12, ENV_NAME)
+            .expect("sibling")
+            .env_file()
+            .to_path_buf();
+        let other = store
+            .obtain("00000000-0000-0000-0000-000000000000", 11, ENV_NAME)
+            .expect("other environment")
+            .env_file()
+            .to_path_buf();
+        store
+            .remove(ENV, 11, ENV_NAME)
+            .expect("retire the exact generation");
+        assert!(!target.exists());
+        assert!(sibling.exists(), "a sibling generation is untouched");
+        assert!(other.exists(), "another environment is untouched");
+    }
+
+    #[test]
+    fn removing_a_missing_credential_creates_no_directories() {
+        let temp = temp();
+        let store = ServiceCredentialStore::new(temp.path());
+        let path = store.credential_path(ENV, 13).expect("path");
+        let directory = path.parent().expect("directory").to_path_buf();
+        store
+            .remove(ENV, 13, ENV_NAME)
+            .expect("a missing credential is a no-op");
+        assert!(!directory.exists(), "no directory is created");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_permissive_credential_is_not_removed() {
+        let temp = temp();
+        let store = ServiceCredentialStore::new(temp.path());
+        let path = store
+            .obtain(ENV, 14, ENV_NAME)
+            .expect("create")
+            .env_file()
+            .to_path_buf();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("widen mode");
+        let before = read(&path);
+        let error = store
+            .remove(ENV, 14, ENV_NAME)
+            .expect_err("a permissive credential must be refused");
+        assert!(error.to_string().contains("0600"), "got: {error}");
+        assert_eq!(read(&path), before, "a refused file is left untouched");
+    }
+
+    #[test]
+    fn corrupt_or_misnamed_credentials_are_not_removed() {
+        let temp = temp();
+        let store = ServiceCredentialStore::new(temp.path());
+        for (generation, contents) in [(15, "no-equals-sign\n"), (16, "OTHER=value\n")] {
+            let path = seed_slot(&store, generation);
+            fs::write(&path, contents).expect("seed");
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("mode");
+            assert!(
+                store.remove(ENV, generation, ENV_NAME).is_err(),
+                "{contents:?} must be refused"
+            );
+            assert_eq!(read(&path), contents, "a refused file is left intact");
+        }
+    }
+
+    #[test]
+    fn a_symlinked_credential_and_its_target_survive_removal() {
+        let temp = temp();
+        let store = ServiceCredentialStore::new(temp.path());
+        let path = seed_slot(&store, 17);
+        let target = temp.path().join("removal-target.env");
+        fs::write(&target, format!("{ENV_NAME}=token\n")).expect("seed target");
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).expect("mode");
+        std::os::unix::fs::symlink(&target, &path).expect("symlink");
+        assert!(store.remove(ENV, 17, ENV_NAME).is_err());
+        assert!(
+            fs::symlink_metadata(&path)
+                .expect("link metadata")
+                .file_type()
+                .is_symlink(),
+            "the symlink itself is untouched"
+        );
+        assert!(target.exists(), "the symlink target is untouched");
+    }
+
+    #[test]
+    fn a_negative_generation_is_rejected_without_touching_the_filesystem() {
+        let temp = temp();
+        let store = ServiceCredentialStore::new(temp.path());
+        let error = store
+            .remove(ENV, -1, ENV_NAME)
+            .expect_err("a negative generation must be refused");
+        assert!(error.to_string().contains("negative"), "got: {error}");
+        assert!(
+            !temp.path().join(env_name()).exists(),
+            "no environment directory is created"
+        );
+    }
 }

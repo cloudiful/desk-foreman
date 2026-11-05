@@ -3,6 +3,18 @@ use sha2::{Digest, Sha256};
 
 use crate::RunnerOwner;
 
+pub fn is_valid_application_principal_identity(
+    application_id: i64,
+    external_user_id: &str,
+    workspace_key: &str,
+) -> bool {
+    application_id > 0
+        && !external_user_id.is_empty()
+        && external_user_id.len() <= 1024
+        && !workspace_key.is_empty()
+        && workspace_key.len() <= 1024
+}
+
 pub fn application_principal_owner(
     application_id: i64,
     workspace_binding_id: i64,
@@ -12,11 +24,7 @@ pub fn application_principal_owner(
     if application_id <= 0 || workspace_binding_id <= 0 {
         return Err("application and workspace binding IDs must be positive");
     }
-    if external_user_id.is_empty()
-        || external_user_id.len() > 1024
-        || workspace_key.is_empty()
-        || workspace_key.len() > 1024
-    {
+    if !is_valid_application_principal_identity(application_id, external_user_id, workspace_key) {
         return Err("principal fields must be nonempty and at most 1024 bytes");
     }
     let mut hash = Sha256::new();

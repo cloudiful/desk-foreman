@@ -62,7 +62,7 @@ Tool audit records store actor/workspace/tool metadata, hashes, status, duration
 - `GET /api/admin/operations/summary`
 - `GET|POST /api/admin/runner-managers`
 - `PATCH /api/admin/runner-managers/{runner_manager_id}`
-- `POST /api/admin/workspace-bindings/{binding_id}/archive|restore|reset`
+- `POST /api/admin/workspace-bindings/{binding_id}/archive|restore`
 - `POST|DELETE /api/admin/workspace-bindings/{binding_id}/lease` (admin, web session)
 - `POST|DELETE /api/internal/workspace-bindings/{binding_id}/lease` (application bearer token)
 - `POST|DELETE /api/internal/resource-workspaces/{resource_kind}/{resource_id}/lease` (application bearer token; resolves or creates the shared resource workspace binding)
@@ -81,6 +81,12 @@ Tool audit records store actor/workspace/tool metadata, hashes, status, duration
 - `RUNNER_MANAGER_TOKEN` required by `runner-manager`; create or register it from the admin Runner managers page
 - `RUNNER_MANAGER_ID` optional stable identity for standalone runner-managers; if omitted it is derived from `WORKSPACE_ROOT`; control-plane registration supplies this identity automatically
 - `RUNNER_HOST_WORKSPACE_ROOT` required by a containerized Docker runner-manager, and must be the host path corresponding to its `/workspace` mount
+- `RUNNER_GIT_IMAGE` optional digest-pinned image for the trusted Git helper and first-clone install; it must also provide `tar`, and never falls back to `RUNNER_IMAGE`
+- `RUNNER_GIT_PRIVATE_ROOT` optional manager-owned `0700` directory outside the workspace and native-task roots; trusted Git stays unconfigured without it
+- `RUNNER_GIT_HOST_PRIVATE_ROOT` optional daemon-visible counterpart of `RUNNER_GIT_PRIVATE_ROOT`; required for a remote Docker endpoint and treated as operator input
+- `RUNNER_GIT_NETWORK` and `RUNNER_GIT_BROKER_HOST` optional dedicated Docker network and exact broker authority for isolated clone fetches
+- `RUNNER_GIT_MAX_FETCH_VOLUME_BYTES`, `RUNNER_GIT_MAX_BUNDLE_BYTES`, `RUNNER_GIT_MAX_LOGICAL_OBJECT_BYTES`, `RUNNER_GIT_MAX_CHECKOUT_BYTES`, and `RUNNER_GIT_MAX_TREE_ENTRIES` optional positive caps required before clone preparation and first-clone install are available
+- `GIT_JOB_WAIT_SECS`, `GIT_JOB_DEADLINE_SECS`, `GIT_JOB_RESERVED_BYTES`, `GIT_JOB_MAX_ACTIVE`, `GIT_JOB_MAX_BYTES`, `GIT_JOB_MAX_PER_BINDING`, `GIT_JOB_MAX_PER_MANAGER`, and `GIT_JOB_MAX_BYTES_PER_MANAGER` optional all-or-none control-plane Git-job settings; all absent disables durable first clone with `503`, while a partial or invalid group fails startup
 - Runner image, network access, resource limits, and enabled state are managed from the admin Runner managers page
 - `SESSION_IDLE_TTL_SEC` default `1800`
 - `WEB_SESSION_TTL_SEC` default `604800`
@@ -140,3 +146,5 @@ The Compose defaults are local-development placeholders. Set `POSTGRES_PASSWORD`
 Current compose deployment keeps `/var/run/docker.sock` only on `runner-manager`. Runner managers pull jobs from desk-foreman and no longer require PostgreSQL access.
 
 `runner-manager` now has direct-backend HTTP integration tests covering `exec-shell`, `write-stdin`, `run-command`, and bearer-auth enforcement. Run them with `cargo test -p desk-foreman-runner-manager`.
+
+For the offline clean-deployment maintenance checklist, see [docs/offline-clean-deploy.md](docs/offline-clean-deploy.md).

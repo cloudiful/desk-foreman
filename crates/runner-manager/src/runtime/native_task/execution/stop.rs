@@ -19,6 +19,7 @@ use crate::runtime::{
             ensure_native_task_labels_match, ensure_native_task_stop_mounts_match,
             inspect_environment_container,
         },
+        service::retire_confirmed_generation,
         stop::stop_and_remove_within,
         tombstone::{TombstoneStore, record_stopped},
     },
@@ -117,7 +118,13 @@ pub(crate) async fn stop_native_task(
             preparation_quiescent: true,
         })
     }
-    .await;
+    .await
+    .and_then(|result| {
+        if result.environment.confirmed {
+            retire_confirmed_generation(profile, state_dir, &environment_id, generation)?;
+        }
+        Ok(result)
+    });
     release_and_finish(file_lock, outcome)
 }
 

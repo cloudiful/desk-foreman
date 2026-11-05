@@ -16,7 +16,6 @@ import {
   listWorkspaceRunners,
   operationsSummary,
   archiveWorkspaceBinding,
-  resetWorkspaceBinding,
   restoreWorkspaceBinding,
   updateApplicationToken,
   updateMcpToken,
@@ -280,21 +279,15 @@ export async function listAdminWorkspaceBindings(
 
 export async function transitionAdminWorkspaceBinding(
   binding_id: number,
-  action: 'archive' | 'restore' | 'reset',
+  action: 'archive' | 'restore',
 ): Promise<WorkspaceBindingResponse> {
   const operation =
-    action === 'archive'
-      ? archiveWorkspaceBinding
-      : action === 'restore'
-        ? restoreWorkspaceBinding
-        : resetWorkspaceBinding
+    action === 'archive' ? archiveWorkspaceBinding : restoreWorkspaceBinding
   const { data, response } = await operation({ path: { binding_id } })
   const fallback =
     action === 'archive'
       ? i18n.global.t('workspaceBindings.errors.archive')
-      : action === 'restore'
-        ? i18n.global.t('workspaceBindings.errors.restore')
-        : i18n.global.t('workspaceBindings.errors.reset')
+      : i18n.global.t('workspaceBindings.errors.restore')
   await requireOk(response, fallback)
   if (!data) throw new Error(fallback)
   return data

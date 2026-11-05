@@ -14,7 +14,7 @@ use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     handler::server::router::tool::ToolRouter,
     model::{
-        Implementation, InitializeRequestParams, InitializeResult, ServerCapabilities, ServerInfo,
+        Implementation, InitializeRequestParams, InitializeResult, ServerCapabilities, ServerConfig,
     },
     service::RequestContext,
     tool_handler,
@@ -61,8 +61,8 @@ impl ServerHandler for DeskForemanService {
         self.negotiate_initialize(&request)
     }
 
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(
                 Implementation::new("Desk Foreman", env!("CARGO_PKG_VERSION"))
                     .with_description(

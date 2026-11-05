@@ -67,6 +67,7 @@ pub async fn stop_execution_environment(
     deadline.remaining_ms()?;
     let manager_id = backend.manager_id.clone();
     let file_lock = EnvFileLock::acquire(&store.lock_path(), lock_holder_token(&manager_id))?;
+    let retire_environment_id = environment_id.clone();
 
     let outcome: anyhow::Result<StopExecutionEnvironmentAck> = async move {
         // Fail closed on corrupt/invalid durable state before any Docker
@@ -135,7 +136,18 @@ pub async fn stop_execution_environment(
             }
         }
     }
-    .await;
+    .await
+    .and_then(|ack| {
+        if ack.confirmed {
+            super::service::retire_confirmed_generation(
+                profile,
+                state_dir,
+                &retire_environment_id,
+                generation,
+            )?;
+        }
+        Ok(ack)
+    });
 
     release_and_finish(file_lock, outcome)
 }

@@ -141,7 +141,9 @@ generation 生成的凭据。本子阶段只提供启动前提：不会拨号、
   路径无法改变被接受或被读取的内容：必须是普通文件、恰好 `0600`、
   由有效 uid 拥有、大小有界、经有上限的读取器读取，且恰好包含所配置的
   `NAME=token` 一行；符号链接在打开前即被拒绝。任何不满足的情况都会被
-  拒绝且原样保留：绝不改权限、改写或删除。复用与重启要求既有凭据存在，
+  拒绝且原样保留：绝不改权限、改写或删除。唯一的删除发生在已确认停止
+  之后，且仅删除通过校验的精确 `(环境, generation)` 文件（见 Stop）；
+  无效文件绝不被清退。复用与重启要求既有凭据存在，
   否则失败关闭，而不是给已在运行的容器换上新值。只有创建分支会生成凭据，
   且发生在既有准入锁内、屏障之后、容器 run 之前。
 - **显式前提：** 状态根是被信任的、由 manager 拥有且其他本地账户无法写入
@@ -217,8 +219,55 @@ generation 生成的凭据。本子阶段只提供启动前提：不会拨号、
   `No such container/object` 明确判定缺席时才确认。
   传输、解析、超时或权限失败永不视为缺席；仍在运行则返回
   `confirmed=false`。绝不 `volume rm`。
+- 生命周期与原生确认停止都会清退已停止 generation 的宿主机服务凭据。
+  配置了服务配置时，会以当前 auth 变量名重新校验并删除精确的
+  `<state_dir>/<environment>/service/<generation>.env`；文件不存在即视为
+  已清退。未配置（Unset）的服务配置跳过清退且不删除任何内容，包括任何
+  遗留凭据。Invalid 配置，或文件/目录校验、删除失败，会在容器停止之后
+  返回错误：凭据保持原样，generation 仍持久关闭，修正配置或权限后可通过
+  再次缺席确认重试完成清退。未确认的停止或更早的错误绝不触发清退。
+  此处不承诺自动重置工作区、清理遗留凭据或迁移旧数据。
 - Ack 的 owner/generation 与请求一致。持久停止意图与实际停止确认
   保持区分：屏障并不声称容器已被杀死。
+
+## Git 权威就绪状态
+
+- `RUNNER_GIT_IMAGE` 可选，必须是 digest 固定镜像（`@sha256:`）。
+  受信 Git 绝不回退到 `RUNNER_IMAGE`；通用 workspace-runner 标签与其独立。
+- `RUNNER_GIT_PRIVATE_ROOT` 可选，必须是绝对规范化路径，由 manager 用户
+  所有且模式为 `0700`，并且不得等于、包含或位于 workspace、
+  host-workspace 或 native-task 根目录之下。manager 必须以非 root 运行；
+  缺失、不安全、符号链接或重叠的根目录只报告为 invalid 或
+  unconfigured，绝不被修复。
+- `RUNNER_GIT_HOST_PRIVATE_ROOT` 是 helper 挂载使用的可选 daemon 侧路径。
+  它属于运营输入，挂载身份未经验证；已识别的远程 Docker endpoint 必须
+  提供它，本地 Unix endpoint 则可选。
+- `GET /internal/runner/git-availability` 受 manager bearer token 保护，
+  仅返回 `{status, reason}`，取值为 `unconfigured`、`invalid` 或
+  `configured_unverified`，绝不包含路径、镜像、用户、主机或 endpoint。
+- 该路由只做结构化检查：不调用 Docker、不创建或 chmod 路径，也不证明
+  镜像存在、daemon 可访问、根目录可写、挂载映射或容器隔离。
+  `configured_unverified` 不授予任何能力，也不代表就绪；受信 Git 仍不支持
+  Direct backend。
+- 克隆准备还要求 `RUNNER_GIT_NETWORK`（专用 Docker 网络，绝不使用 host、
+  default、bridge 或 container 网络）、`RUNNER_GIT_BROKER_HOST`（精确的
+  broker `host[:port]` 权威），以及 `RUNNER_GIT_MAX_FETCH_VOLUME_BYTES`、
+  `RUNNER_GIT_MAX_BUNDLE_BYTES`、`RUNNER_GIT_MAX_LOGICAL_OBJECT_BYTES`、
+  `RUNNER_GIT_MAX_CHECKOUT_BYTES`、`RUNNER_GIT_MAX_TREE_ENTRIES` 的正值。
+- digest 固定镜像必须提供 `/bin/sh`、`/bin/cat`，以及支持 SHA-1、SHA-256 和
+  files-ref 的 Git 2.47 或更新版本。
+- 准备组件在操作自有挂载和有上限的 tmpfs 卷内，从已认证 broker 构建一个
+  有界 bundle。
+- `git_operation` 任务会分派到 manager：bundle 被克隆到第二个有上限的 tmpfs
+  卷，网络关闭，先做只读验证，再导出一个有界未压缩 tar 流。manager 校验并
+  解压到 fd 固定的同级临时目录，然后用 `RENAME_NOREPLACE` 发布到精确的
+  `apps/<application>/resources/<resource-workspace-hash>` 目标。相同的
+  workspace-binding 围栏会在校验和发布期间阻止 shell 会话。镜像除
+  `/bin/sh`、`/bin/cat` 和支持 SHA-1/SHA-256/files-ref 的 Git 2.47+ 外，
+  还必须提供 `tar`。
+- 安装受配置的 worktree、Git 数据、元数据、归档和预留上限约束。合法的
+  checkout 仍可能超过导出上限；manager 会报告 `ResourceLimit`，不会自行提高
+  上限。实际 Docker/容器验收仍延后且未验证；本源码阶段不宣称运行时有效性。
 
 ## 兼容与限制
 

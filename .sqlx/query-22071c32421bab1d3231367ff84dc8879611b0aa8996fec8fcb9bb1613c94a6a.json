@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO runner_owner_stop_fence (owner_key, application_id, workspace_binding_id, principal_digest)\nVALUES ($1, $2, $3, $4)\nON CONFLICT (owner_key) DO NOTHING;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "22071c32421bab1d3231367ff84dc8879611b0aa8996fec8fcb9bb1613c94a6a"
+}

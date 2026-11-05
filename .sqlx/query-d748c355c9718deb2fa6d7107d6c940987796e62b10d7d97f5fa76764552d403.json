@@ -1,0 +1,304 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    job_id,\n    token,\n    operation_id,\n    application_id,\n    workspace_binding_id,\n    assigned_manager_id,\n    code_project_id,\n    authorization_generation,\n    job_kind,\n    state,\n    canonical_branch,\n    expected_base,\n    principal_digest,\n    lease_owner,\n    lease_acquired_at,\n    reserved_bytes,\n    cleanup_confirmed,\n    claimed_at,\n    deadline_at,\n    terminal_at,\n    result,\n    error_summary,\n    created_at,\n    updated_at\nFROM workspace_git_jobs\nWHERE job_id = $1\nLIMIT 1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "token",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "token"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "operation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "operation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "application_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "application_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "workspace_binding_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "workspace_binding_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "assigned_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "assigned_manager_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "code_project_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "code_project_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "authorization_generation",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "authorization_generation"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "job_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "job_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "canonical_branch",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "canonical_branch"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "expected_base",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "expected_base"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "principal_digest",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "principal_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "lease_owner",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "lease_owner"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "lease_acquired_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "lease_acquired_at"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "reserved_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "reserved_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "cleanup_confirmed",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "cleanup_confirmed"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "claimed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "claimed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "deadline_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "deadline_at"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "terminal_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "terminal_at"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "result",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "result"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "error_summary",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "error_summary"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "workspace_git_jobs",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "d748c355c9718deb2fa6d7107d6c940987796e62b10d7d97f5fa76764552d403"
+}

@@ -3,9 +3,34 @@ use std::{os::unix::fs::PermissionsExt, time::Duration};
 use runner_protocol::{SourceSeedSnapshotFile, validate_seed_bundle};
 
 use super::test_support::{ENVIRONMENT_ID, Rig};
+use crate::runtime::execution_environment::ExecutionEnvironmentProfile;
 use crate::runtime::execution_environment::profile::{
     command::TrustedCommand, workdir::TrustedStateWorkdir,
 };
+use crate::runtime::execution_environment::service::{
+    ServiceProfile, credential::ServiceCredentialStore, profile::ServiceProfileConfig,
+};
+
+const ENV_NAME: &str = "DF_AGENT_TOKEN";
+
+fn configured(profile: &ExecutionEnvironmentProfile) -> ExecutionEnvironmentProfile {
+    let mut configured = profile.clone();
+    configured.service = ServiceProfile::Configured(ServiceProfileConfig {
+        network: "df-private".to_string(),
+        port: 8443,
+        auth_username: "agent".to_string(),
+        auth_env_name: ENV_NAME.to_string(),
+    });
+    configured
+}
+
+fn seed_credential(rig: &Rig, generation: i64) -> std::path::PathBuf {
+    ServiceCredentialStore::new(&rig.state_dir)
+        .obtain(ENVIRONMENT_ID, generation, ENV_NAME)
+        .expect("seed service credential")
+        .env_file()
+        .to_path_buf()
+}
 
 fn journal_path(rig: &Rig) -> std::path::PathBuf {
     rig.task_tree
@@ -26,8 +51,9 @@ async fn running_stop_fences_writers_and_preserves_the_edited_workspace() {
     let edited_file = rig.task_tree.join("README.md");
     std::fs::write(&edited_file, "edited before stop").expect("edit task file");
     rig.set_mode("require-stop-barrier");
+    let credential = seed_credential(&rig, 4);
 
-    let mut changed_profile = rig.profile.clone();
+    let mut changed_profile = configured(&rig.profile);
     changed_profile.enabled = false;
     changed_profile.command = TrustedCommand::Unset;
     changed_profile.state_workdir = TrustedStateWorkdir::Unset;
@@ -42,6 +68,10 @@ async fn running_stop_fences_writers_and_preserves_the_edited_workspace() {
     assert!(stopped.environment.confirmed);
     assert_eq!(stopped.environment.observed_state, "absent");
     assert_eq!(rig.stop_count(), 1);
+    assert!(
+        !credential.exists(),
+        "a confirmed running stop retires its exact credential"
+    );
     assert_eq!(
         std::fs::read_to_string(&edited_file).expect("edited task file remains"),
         "edited before stop"
@@ -56,10 +86,17 @@ async fn running_stop_fences_writers_and_preserves_the_edited_workspace() {
     .expect("barrier JSON");
     assert_eq!(barrier["stopped_generation"], 4);
 
-    let replay = rig.stop().await.expect("idempotent stop replay");
+    let replay = rig
+        .stop_with_profile(&configured(&rig.profile))
+        .await
+        .expect("idempotent stop replay");
     assert!(replay.preparation_quiescent && replay.environment.confirmed);
     assert_eq!(replay.environment.observed_state, "absent");
     assert_eq!(rig.stop_count(), 1);
+    assert!(
+        !credential.exists(),
+        "a replay with the credential already missing stays a no-op"
+    );
     let before_late_start = rig.log();
 
     let reopened = rig.reopened_backend().await;
@@ -75,14 +112,25 @@ async fn a_prepared_task_without_a_container_is_quiescent_and_not_cleaned_up() {
     let rig = Rig::prepared().await;
     let before = std::fs::read(journal_path(&rig)).expect("prepared journal");
     rig.set_mode("require-stop-barrier");
+    let credential = seed_credential(&rig, 4);
 
     let stopped = rig
-        .stop()
+        .stop_with_profile(&configured(&rig.profile))
         .await
         .expect("stop prepared task without a container");
     assert!(stopped.preparation_quiescent && stopped.environment.confirmed);
     assert_eq!(stopped.environment.observed_state, "absent");
     assert_eq!(rig.stop_count(), 0);
+    assert!(
+        !credential.exists(),
+        "a confirmed absent stop retires its exact credential"
+    );
+    let replay = rig
+        .stop_with_profile(&configured(&rig.profile))
+        .await
+        .expect("a replay with the credential missing stays a no-op");
+    assert!(replay.preparation_quiescent && replay.environment.confirmed);
+    assert!(!credential.exists());
     assert_eq!(
         std::fs::read(journal_path(&rig)).expect("journal remains"),
         before
@@ -246,6 +294,55 @@ async fn a_stuck_candidate_never_returns_a_positive_stop_proof() {
         std::fs::read(journal_path(&rig)).expect("journal unchanged"),
         before
     );
+    assert!(rig.stopped_barrier_path().exists());
+}
+
+#[tokio::test]
+async fn unset_retains_sibling_credentials_and_a_configured_stop_removes_only_its_generation() {
+    let rig = Rig::prepared().await;
+    let retired = seed_credential(&rig, 4);
+    let sibling = seed_credential(&rig, 5);
+
+    let unset = rig.stop().await.expect("an unset profile still stops");
+    assert!(unset.environment.confirmed);
+    assert!(
+        retired.exists() && sibling.exists(),
+        "an unset service profile deletes no credential"
+    );
+
+    let configured_ack = rig
+        .stop_with_profile(&configured(&rig.profile))
+        .await
+        .expect("a configured profile retires the confirmed generation");
+    assert!(configured_ack.environment.confirmed);
+    assert!(!retired.exists(), "the exact generation is unlinked");
+    assert!(sibling.exists(), "a sibling generation is untouched");
+    let barrier: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(rig.stopped_barrier_path()).expect("stop barrier"))
+            .expect("barrier JSON");
+    assert_eq!(barrier["stopped_generation"], 4);
+}
+
+#[tokio::test]
+async fn an_invalid_service_profile_fails_retirement_after_the_actual_container_stop() {
+    let rig = Rig::prepared().await;
+    rig.start().await.expect("start native task");
+    let credential = seed_credential(&rig, 4);
+    let mut invalid = rig.profile.clone();
+    invalid.service =
+        ServiceProfile::Invalid("execution environment service profile is invalid".to_string());
+
+    let error = rig
+        .stop_with_profile(&invalid)
+        .await
+        .expect_err("an invalid service profile fails retirement after the stop");
+    assert!(error.to_string().contains("invalid"), "{error}");
+    assert_eq!(
+        rig.stop_count(),
+        1,
+        "the container was actually stopped before retirement failed"
+    );
+    assert!(credential.exists(), "the credential stays intact");
     assert!(rig.stopped_barrier_path().exists());
 }
 

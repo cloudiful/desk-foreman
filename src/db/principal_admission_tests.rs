@@ -10,7 +10,7 @@ fn identity_and_container_validation_fail_closed() {
         identity(&RunnerOwner::ApplicationPrincipal {
             application_id: 1,
             workspace_binding_id: 2,
-            principal_digest: "A".repeat(64)
+            principal_digest: "A".repeat(64),
         })
         .is_err()
     );

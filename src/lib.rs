@@ -12,6 +12,10 @@ pub mod shell;
 pub mod tools;
 pub mod workspace;
 
+#[cfg(test)]
+#[path = "api/admin/lease_test_support.rs"]
+pub(crate) mod lease_test_support;
+
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -27,6 +31,7 @@ use config::AppConfig;
 use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
+use runner::git_job_credentials::GitJobCredentialStore;
 use runner::{PullRunnerService, RunnerBroker, RunnerService};
 use tools::DeskForemanService;
 use tower_http::services::{ServeDir, ServeFile};
@@ -36,6 +41,7 @@ pub struct AppState {
     pub config: Arc<AppConfig>,
     pub runner: Arc<dyn RunnerService>,
     pub runner_broker: Arc<RunnerBroker>,
+    pub git_job_credentials: Arc<GitJobCredentialStore>,
     pub db: sqlx::PgPool,
 }
 
@@ -52,6 +58,7 @@ pub async fn run() -> anyhow::Result<()> {
         config: Arc::clone(&config),
         runner,
         runner_broker,
+        git_job_credentials: Arc::new(GitJobCredentialStore::new()),
         db,
     };
     lifecycle::spawn_janitor(state.clone());

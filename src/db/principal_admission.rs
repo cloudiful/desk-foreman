@@ -43,12 +43,13 @@ pub struct AdmissionBinding {
 }
 
 pub async fn find_binding(pool: &PgPool, id: i64) -> anyhow::Result<Option<AdmissionBinding>> {
-    Ok(
-        sqlx::query_as(include_str!("../sql/principal_admission/find_binding.sql"))
-            .bind(id)
-            .fetch_optional(pool)
-            .await?,
+    Ok(sqlx::query_file_as!(
+        AdmissionBinding,
+        "src/sql/principal_admission/find_binding.sql",
+        id
     )
+    .fetch_optional(pool)
+    .await?)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -115,15 +116,16 @@ pub async fn admit(
         tx.commit().await?;
         return Ok(AdmissionOutcome::Fenced);
     }
-    let record = sqlx::query_as::<_, PrincipalAdmission>(include_str!(
-        "../sql/principal_admission/admit.sql"
-    ))
-    .bind(&key)
-    .bind(app)
-    .bind(binding)
-    .bind(digest)
-    .bind(manager_id)
-    .bind(container_id)
+    let record = sqlx::query_file_as!(
+        PrincipalAdmission,
+        "src/sql/principal_admission/admit.sql",
+        &key,
+        app,
+        binding,
+        digest,
+        manager_id,
+        container_id,
+    )
     .fetch_optional(&mut *tx)
     .await?;
     let record = record
@@ -139,13 +141,15 @@ pub async fn fence(pool: &PgPool, owner: &RunnerOwner) -> anyhow::Result<()> {
         .bind(&key)
         .execute(&mut *tx)
         .await?;
-    sqlx::query(include_str!("../sql/principal_admission/fence.sql"))
-        .bind(&key)
-        .bind(app)
-        .bind(binding)
-        .bind(digest)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query_file!(
+        "src/sql/principal_admission/fence.sql",
+        &key,
+        app,
+        binding,
+        digest,
+    )
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -155,12 +159,13 @@ pub async fn list_active_by_owner(
     owner: &RunnerOwner,
 ) -> anyhow::Result<Vec<PrincipalAdmission>> {
     let (key, _, _, _) = identity(owner)?;
-    Ok(
-        sqlx::query_as(include_str!("../sql/principal_admission/list_owner.sql"))
-            .bind(key)
-            .fetch_all(pool)
-            .await?,
+    Ok(sqlx::query_file_as!(
+        PrincipalAdmission,
+        "src/sql/principal_admission/list_owner.sql",
+        key
     )
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn list_active_by_binding(
@@ -170,12 +175,13 @@ pub async fn list_active_by_binding(
     if binding_id <= 0 {
         anyhow::bail!("invalid workspace binding id");
     }
-    Ok(
-        sqlx::query_as(include_str!("../sql/principal_admission/list_binding.sql"))
-            .bind(binding_id)
-            .fetch_all(pool)
-            .await?,
+    Ok(sqlx::query_file_as!(
+        PrincipalAdmission,
+        "src/sql/principal_admission/list_binding.sql",
+        binding_id
     )
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn list_fences_by_binding(
@@ -185,12 +191,13 @@ pub async fn list_fences_by_binding(
     if binding_id <= 0 {
         anyhow::bail!("invalid workspace binding id");
     }
-    Ok(
-        sqlx::query_as(include_str!("../sql/principal_admission/list_fences.sql"))
-            .bind(binding_id)
-            .fetch_all(pool)
-            .await?,
+    Ok(sqlx::query_file_as!(
+        PrincipalStopFence,
+        "src/sql/principal_admission/list_fences.sql",
+        binding_id
     )
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn mark_stopped_batch(pool: &PgPool, rows: &[PrincipalAdmission]) -> anyhow::Result<()> {
@@ -206,15 +213,17 @@ pub async fn mark_stopped_batch(pool: &PgPool, rows: &[PrincipalAdmission]) -> a
             anyhow::bail!("invalid stored admission identity");
         }
         check_manager_container(row.runner_manager_id, &row.container_id)?;
-        sqlx::query(include_str!("../sql/principal_admission/mark_stopped.sql"))
-            .bind(key)
-            .bind(app)
-            .bind(binding)
-            .bind(digest)
-            .bind(row.runner_manager_id)
-            .bind(&row.container_id)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query_file!(
+            "src/sql/principal_admission/mark_stopped.sql",
+            key,
+            app,
+            binding,
+            digest,
+            row.runner_manager_id,
+            &row.container_id,
+        )
+        .execute(&mut *tx)
+        .await?;
     }
     tx.commit().await?;
     Ok(())
@@ -228,15 +237,17 @@ pub async fn mark_stopped(
 ) -> anyhow::Result<bool> {
     let (key, app, binding, digest) = identity(owner)?;
     check_manager_container(manager_id, container_id)?;
-    let changed = sqlx::query(include_str!("../sql/principal_admission/mark_stopped.sql"))
-        .bind(key)
-        .bind(app)
-        .bind(binding)
-        .bind(digest)
-        .bind(manager_id)
-        .bind(container_id)
-        .execute(pool)
-        .await?
-        .rows_affected();
+    let changed = sqlx::query_file!(
+        "src/sql/principal_admission/mark_stopped.sql",
+        key,
+        app,
+        binding,
+        digest,
+        manager_id,
+        container_id,
+    )
+    .execute(pool)
+    .await?
+    .rows_affected();
     Ok(changed == 1)
 }

@@ -66,6 +66,9 @@ where
         sessions_cancelled: 0,
         error: None,
     };
+    let binding_owner = RunnerOwner::WorkspaceBinding {
+        workspace_binding_id: binding_id,
+    };
     if let Err(error) = principal.await {
         outcome.succeeded = false;
         outcome.error = Some(format!("principal cleanup failed: {error}"));
@@ -85,11 +88,7 @@ where
         }
     };
     for session in sessions {
-        if session.owner
-            != (RunnerOwner::WorkspaceBinding {
-                workspace_binding_id: binding_id,
-            })
-        {
+        if session.owner.workspace_binding_id() != Some(binding_id) {
             continue;
         }
         match state
@@ -129,12 +128,7 @@ where
         Ok(sessions) => {
             let remaining = sessions
                 .iter()
-                .filter(|session| {
-                    session.owner
-                        == (RunnerOwner::WorkspaceBinding {
-                            workspace_binding_id: binding_id,
-                        })
-                })
+                .filter(|session| session.owner.workspace_binding_id() == Some(binding_id))
                 .count();
             if remaining > 0 {
                 outcome.succeeded = false;
@@ -166,10 +160,7 @@ where
     // wedged daemon blocks takeover instead of reporting false quiescence.
     // The whole helper runs under the takeover row-lock timeout, so this
     // call cannot pin writers beyond that bound.
-    let owner = RunnerOwner::WorkspaceBinding {
-        workspace_binding_id: binding_id,
-    };
-    if let Err(error) = state.runner.cleanup_runner_owner(owner).await {
+    if let Err(error) = state.runner.cleanup_runner_owner(binding_owner).await {
         outcome.succeeded = false;
         let message = format!("failed to stop runner execution for binding {binding_id}: {error}");
         tracing::warn!(
@@ -183,12 +174,8 @@ where
 }
 
 // Test modules live in sibling files to keep this helper under the 400-line
-// cap. Wired here (rather than in `admin.rs`, which is outside this phase's
-// scope) via explicit paths so `admin.rs` stays untouched.
-#[cfg(test)]
-#[path = "lease_test_support.rs"]
-mod lease_test_support;
-
+// cap. The shared fake runner is registered once at the crate root; only the
+// takeover regression module is wired here so `admin.rs` stays untouched.
 #[cfg(test)]
 #[path = "lease_takeover_tests.rs"]
 mod lease_takeover_tests;

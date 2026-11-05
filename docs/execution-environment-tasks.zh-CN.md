@@ -114,7 +114,7 @@
 
 - 围栏写入准入（`lock_workspace_binding_for_write`）；
 - 遗留写入租约的获取、释放与强制接管；
-- 管理端的 archive、restore 与 reset；
+- 管理端的 archive 与 restore；
 - 经由资源工作区路由的 git/sync；
 - 归档工作区清理（janitor）扫描——它跳过而非删除。
 
