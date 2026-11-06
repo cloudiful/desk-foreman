@@ -11,8 +11,8 @@
 
 use sqlx::{PgPool, Postgres, Transaction};
 
-use crate::db::workspace_bindings::git_job_guard::git_job_holds_binding;
 use crate::db::workspace_bindings::native_task_guard::native_task_holds_binding;
+use crate::db::workspace_bindings::workspace_scope_guard::workspace_scope_holds_binding;
 
 // Re-exported so the handler reaches the guarded state transition through
 // this module's name: one guard module, one way to mutate a guarded binding.
@@ -87,11 +87,14 @@ pub(crate) async fn lock_binding_for_transition(
     if native_task_holds_binding(&mut tx, binding_id)
         .await?
         .is_some()
-        || git_job_holds_binding(&mut tx, binding_id).await?.is_some()
+        || workspace_scope_holds_binding(&mut tx, binding_id)
+            .await?
+            .is_some()
     {
-        // A pending, claimed, or uncertain Git job blocks the transition the
-        // same way an active native task does: the caller refuses with the
-        // existing occupied-workspace shape and never sees a job id.
+        // A busy scoped environment blocks the transition the same way an
+        // active native task does: the
+        // caller refuses with the existing occupied-workspace shape and never
+        // sees an internal id.
         return Ok(TransitionGuard::NativeTaskHolds(tx));
     }
     Ok(TransitionGuard::Ready(tx))

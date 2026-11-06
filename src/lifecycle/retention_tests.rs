@@ -1,7 +1,7 @@
 //! Guarded janitor retention regression (issue 1180 J1).
 //!
 //! These ignored cases run only against the retained issue database named by
-//! `DF_GIT_TEST_DATABASE_URL`. They create owned fixture rows through the
+//! `DF_RETENTION_TEST_DATABASE_URL`. They create owned fixture rows through the
 //! production APIs, drive the real janitor path, and always remove exactly the
 //! rows they created. No database is created, dropped, or migrated.
 
@@ -11,31 +11,30 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use chrono::{Duration as ChronoDuration, Utc};
 use futures_util::FutureExt;
 use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::actor::{ActorContext, ActorMode};
 use crate::db;
 use crate::db::audit::AuditLogEntry;
+use crate::db::queries::{
+    acquire_workspace_write_lease, find_workspace_binding_by_id, lock_workspace_binding_for_write,
+};
 use crate::db::types::{
     CreateApplicationRequest, CreateRunnerManagerRequest, ListAuditLogsParams,
     WorkspaceBindingResponse,
 };
-use crate::db::workspace_git_jobs::lifecycle::{claim_next_git_job, complete_git_job};
-use crate::db::workspace_git_jobs::store::admit_and_insert_git_job;
-use crate::db::workspace_git_jobs::types::{
-    AdmissionLimits, GitJobCompletion, GitJobResult, NewGitJob,
-};
 use crate::lease_test_support::{FakeRunnerService, fake_state};
+use crate::policy::{ALL_SCOPES, AccessPolicy, ResourceLimits};
 
 const REQUIRED_HOST: &str = "unraid.cloud1ful.com";
 const REQUIRED_PORT: u16 = 5444;
 const REQUIRED_DATABASE: &str = "desk_foreman_issue_1180";
 const OWNERSHIP_MARK: &str = "desk-foreman issue #1180";
-const IDENTITY_SQL: &str = include_str!("../../tests/workspace_git_jobs/issue_db_identity.sql");
+const IDENTITY_SQL: &str = include_str!("../sql/lifecycle/issue_db_identity.sql");
 
 #[derive(sqlx::FromRow)]
 struct IssueDbIdentity {
@@ -120,9 +119,9 @@ impl RetentionLedger {
 
     async fn create_binding(&self, label: &str) -> (WorkspaceBindingResponse, PathBuf) {
         let external_user_id = unique_name(label);
-        let workspace_key = format!("code_project:{}", Uuid::new_v4());
+        let workspace_key = format!("artifact:{}", Uuid::new_v4());
         let resource_id = workspace_key
-            .strip_prefix("code_project:")
+            .strip_prefix("artifact:")
             .expect("resource key")
             .to_string();
         let root = self.root.path().join(format!("binding-{}", Uuid::new_v4()));
@@ -134,7 +133,7 @@ impl RetentionLedger {
             &external_user_id,
             &workspace_key,
             root.to_str().expect("fixture root path"),
-            Some("code_project"),
+            Some("artifact"),
             Some(&resource_id),
         )
         .await
@@ -188,12 +187,12 @@ where
 }
 
 async fn issue_pool() -> PgPool {
-    let url = std::env::var("DF_GIT_TEST_DATABASE_URL").expect(
-        "DF_GIT_TEST_DATABASE_URL is required for the retention suite; set it to the \
+    let url = std::env::var("DF_RETENTION_TEST_DATABASE_URL").expect(
+        "DF_RETENTION_TEST_DATABASE_URL is required for the retention suite; set it to the \
          task-owned issue database URL",
     );
     let options = PgConnectOptions::from_str(&url)
-        .unwrap_or_else(|_| panic!("DF_GIT_TEST_DATABASE_URL is not a valid PostgreSQL URL"));
+        .unwrap_or_else(|_| panic!("DF_RETENTION_TEST_DATABASE_URL is not a valid PostgreSQL URL"));
     assert_eq!(options.get_host(), REQUIRED_HOST);
     assert_eq!(options.get_port(), REQUIRED_PORT);
     assert_eq!(options.get_database(), Some(REQUIRED_DATABASE));
@@ -284,7 +283,7 @@ fn restore_directory_permissions(path: &std::path::Path) {
 }
 
 #[tokio::test]
-#[ignore = "requires DF_GIT_TEST_DATABASE_URL (issue 1180 database)"]
+#[ignore = "requires DF_RETENTION_TEST_DATABASE_URL (issue 1180 database)"]
 async fn audit_reference_retains_archived_binding_and_directory() {
     let ledger = RetentionLedger::new().await;
     run_guarded(&ledger, async {
@@ -321,7 +320,7 @@ async fn audit_reference_retains_archived_binding_and_directory() {
 }
 
 #[tokio::test]
-#[ignore = "requires DF_GIT_TEST_DATABASE_URL (issue 1180 database)"]
+#[ignore = "requires DF_RETENTION_TEST_DATABASE_URL (issue 1180 database)"]
 async fn released_task_retains_archived_binding_and_directory() {
     let ledger = RetentionLedger::new().await;
     run_guarded(&ledger, async {
@@ -376,73 +375,31 @@ async fn released_task_retains_archived_binding_and_directory() {
 }
 
 #[tokio::test]
-#[ignore = "requires DF_GIT_TEST_DATABASE_URL (issue 1180 database)"]
-async fn terminal_git_job_retains_archived_binding_and_directory() {
+#[ignore = "requires DF_RETENTION_TEST_DATABASE_URL (issue 1180 database)"]
+async fn scoped_environment_reference_retains_archived_binding_and_directory() {
     let ledger = RetentionLedger::new().await;
     run_guarded(&ledger, async {
-        let (binding, root) = ledger.create_binding("git-ref").await;
-        let lease_owner = unique_name("retention-lease");
-        let leased = db::queries::acquire_workspace_write_lease(
+        let (binding, root) = ledger.create_binding("scoped-env-ref").await;
+        let environment = match db::queries::ensure_execution_environment_scoped(
             &ledger.pool,
-            binding.workspace_binding_id,
-            &lease_owner,
-            600,
+            ledger.application_id,
+            &binding.external_user_id,
+            "docker",
+            Some(binding.workspace_binding_id),
         )
         .await
-        .expect("acquire fixture lease")
-        .expect("fixture binding accepts the lease");
-        let job = admit_and_insert_git_job(
-            &ledger.pool,
-            NewGitJob {
-                job_id: Uuid::new_v4(),
-                token: unique_name("retention-job"),
-                operation_id: Uuid::new_v4(),
-                application_id: ledger.application_id,
-                workspace_binding_id: binding.workspace_binding_id,
-                assigned_manager_id: ledger.manager_id,
-                code_project_id: Uuid::parse_str(
-                    binding.resource_id.as_deref().expect("fixture resource id"),
-                )
-                .expect("fixture resource UUID"),
-                authorization_generation: Uuid::new_v4(),
-                canonical_branch: "main".to_string(),
-                expected_base: None,
-                lease_owner: lease_owner.clone(),
-                lease_acquired_at: leased
-                    .write_lease_acquired_at
-                    .expect("fixture lease timestamp"),
-                reserved_bytes: 1,
-                deadline_at: Utc::now() + ChronoDuration::seconds(60),
-            },
-            AdmissionLimits {
-                max_active: 10,
-                max_bytes: 1024,
-                max_per_binding: 10,
-                max_per_manager: 10,
-                max_bytes_per_manager: 1024,
-            },
-        )
-        .await
-        .expect("admit fixture git job");
-        claim_next_git_job(&ledger.pool, ledger.manager_id)
-            .await
-            .expect("claim fixture git job")
-            .expect("fixture git job is claimable");
-        complete_git_job(
-            &ledger.pool,
-            job.job_id,
-            &job.token,
-            ledger.manager_id,
-            GitJobCompletion::Succeeded {
-                result: GitJobResult::SyncSucceeded {
-                    head: "a".repeat(40),
-                    base: None,
-                    published: true,
-                },
-            },
-        )
-        .await
-        .expect("complete fixture git job");
+        .expect("ensure scoped fixture environment")
+        {
+            db::execution_environments::store::EnsureOutcome::Created(environment)
+            | db::execution_environments::store::EnsureOutcome::Existing(environment) => {
+                environment
+            }
+            other => panic!("unexpected ensure outcome: {other:?}"),
+        };
+        assert_eq!(
+            environment.state, "absent",
+            "the scoped fixture environment is not running"
+        );
         ledger.archive(binding.workspace_binding_id).await;
         tokio::time::sleep(Duration::from_millis(20)).await;
         let state = state_with_root(&ledger);
@@ -450,12 +407,90 @@ async fn terminal_git_job_retains_archived_binding_and_directory() {
             .await
             .expect("janitor sweep");
         assert_retained(&ledger, binding.workspace_binding_id, &root).await;
+        assert!(
+            db::execution_environments::find_execution_environment(
+                &ledger.pool,
+                ledger.application_id,
+                environment.environment_id,
+            )
+            .await
+            .expect("read retained scoped environment")
+            .is_some(),
+            "a scoped environment must keep its binding and directory"
+        );
     })
     .await;
 }
 
 #[tokio::test]
-#[ignore = "requires DF_GIT_TEST_DATABASE_URL (issue 1180 database)"]
+#[ignore = "requires DF_RETENTION_TEST_DATABASE_URL (issue 1180 database)"]
+async fn read_fence_is_lease_free_and_serializes_container_dispatch() {
+    let ledger = RetentionLedger::new().await;
+    run_guarded(&ledger, async {
+        let (binding, _root) = ledger.create_binding("read-fence").await;
+        let foreign_lease = unique_name("foreign-lease");
+        acquire_workspace_write_lease(
+            &ledger.pool,
+            binding.workspace_binding_id,
+            &foreign_lease,
+            600,
+        )
+        .await
+        .expect("acquire foreign lease")
+        .expect("fixture binding accepts the foreign lease");
+        let row = find_workspace_binding_by_id(&ledger.pool, binding.workspace_binding_id)
+            .await
+            .expect("read fixture binding")
+            .expect("fixture binding remains");
+        let actor = ActorContext {
+            mode: ActorMode::ApplicationSubject,
+            user: None,
+            application: None,
+            workspace_binding: Some(row.clone()),
+            principal_id: format!("workspace_binding:{}", binding.workspace_binding_id),
+            external_user_id: Some(binding.external_user_id.clone()),
+            workspace_binding_id: binding.workspace_binding_id,
+            workspace_root: PathBuf::from(&row.workspace_root),
+            policy: AccessPolicy::new(
+                ALL_SCOPES.iter().map(|scope| (*scope).to_string()),
+                ResourceLimits::unrestricted(true),
+            ),
+            lease_owner: None,
+        };
+
+        // The fixture row holds a lease for a different writer; read admission
+        // must ignore it and succeed without a caller lease.
+        let state = state_with_root(&ledger);
+        let fence = crate::tools::fenced_read::admit_workspace_read(&state, &actor)
+            .await
+            .expect("a lease-free read must admit the active binding");
+
+        let competing = tokio::time::timeout(
+            Duration::from_millis(250),
+            lock_workspace_binding_for_write(&ledger.pool, binding.workspace_binding_id),
+        )
+        .await;
+        assert!(
+            competing.is_err(),
+            "a competing fence must block while the read fence is held"
+        );
+
+        fence.commit().await.expect("commit read fence");
+        let (tx, fresh) =
+            lock_workspace_binding_for_write(&ledger.pool, binding.workspace_binding_id)
+                .await
+                .expect("post-commit fence");
+        assert!(
+            fresh.is_some(),
+            "a released read fence must leave the binding lockable"
+        );
+        tx.rollback().await.expect("release post-commit fence");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires DF_RETENTION_TEST_DATABASE_URL (issue 1180 database)"]
 async fn filesystem_failure_retains_first_binding_and_still_cleans_later_orphan() {
     use std::os::unix::fs::PermissionsExt;
     let ledger = RetentionLedger::new().await;
@@ -493,7 +528,7 @@ async fn filesystem_failure_retains_first_binding_and_still_cleans_later_orphan(
 }
 
 #[tokio::test]
-#[ignore = "requires DF_GIT_TEST_DATABASE_URL (issue 1180 database)"]
+#[ignore = "requires DF_RETENTION_TEST_DATABASE_URL (issue 1180 database)"]
 async fn no_reference_orphan_is_deleted_with_one_success_audit() {
     let ledger = RetentionLedger::new().await;
     run_guarded(&ledger, async {

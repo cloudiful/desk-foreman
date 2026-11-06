@@ -1,4 +1,5 @@
 mod common;
+pub mod fenced_read;
 pub mod fenced_write;
 pub mod params;
 pub mod readonly;

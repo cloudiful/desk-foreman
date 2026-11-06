@@ -107,20 +107,20 @@ pub async fn set_cold_fence(pool: &PgPool, environment_id: Uuid, generation: i64
 }
 
 /// Create one live code-project resource workspace binding.
-pub async fn create_code_project_binding(
+pub async fn create_resource_binding(
     pool: &PgPool,
     application_id: i64,
     workspace_root: &str,
     key: &str,
 ) -> i64 {
-    // `key` is the workspace key (`code_project:<id>`); the resource routes
+    // `key` is the workspace key (`artifact:<id>`); the resource routes
     // address the resource by its bare id, so the two must not be conflated.
-    let resource_id = key.strip_prefix("code_project:").unwrap_or(key).to_string();
+    let resource_id = key.strip_prefix("artifact:").unwrap_or(key).to_string();
     let row: (i64,) = sqlx::query_as(
         "INSERT INTO workspace_bindings ( \
              application_id, external_user_id, workspace_key, external_user_hash, \
              workspace_root, is_active, lifecycle_state, resource_kind, resource_id \
-         ) VALUES ($1, $2, $3, $4, $5, TRUE, 'active', 'code_project', $6) \
+         ) VALUES ($1, $2, $3, $4, $5, TRUE, 'active', 'artifact', $6) \
          RETURNING workspace_binding_id",
     )
     .bind(application_id)

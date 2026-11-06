@@ -4,8 +4,7 @@ use uuid::Uuid;
 
 use super::prepare_helpers::{admitted_and_seeded, prepare_job};
 use super::support::{
-    TaskFixture, call, create_code_project_binding, create_environment, fence_header,
-    set_idle_fence,
+    TaskFixture, call, create_environment, create_resource_binding, fence_header, set_idle_fence,
 };
 
 async fn insert_completed_ensure(
@@ -136,11 +135,11 @@ async fn sequential_token_reuse_by_other_jobs_is_an_opaque_conflict() {
     )
     .await;
     set_idle_fence(&fixture.database.pool, second_env, fixture.manager_id, 4).await;
-    let second_binding = create_code_project_binding(
+    let second_binding = create_resource_binding(
         &fixture.database.pool,
         fixture.application_id,
         "/workspace/second-native-task",
-        "code_project:second-native-task",
+        "artifact:second-native-task",
     )
     .await;
     let task_b = create_seeded_task(
@@ -207,11 +206,11 @@ async fn concurrent_cross_task_token_reuse_has_one_winner_without_500() {
     )
     .await;
     set_idle_fence(&fixture.database.pool, second_env, fixture.manager_id, 4).await;
-    let second_binding = create_code_project_binding(
+    let second_binding = create_resource_binding(
         &fixture.database.pool,
         fixture.application_id,
         "/workspace/concurrent-native-task",
-        "code_project:concurrent-native-task",
+        "artifact:concurrent-native-task",
     )
     .await;
     let task_b = create_seeded_task(

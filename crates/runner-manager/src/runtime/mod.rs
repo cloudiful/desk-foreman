@@ -8,7 +8,6 @@ mod docker_lifecycle;
 mod docker_tests;
 pub mod execution_environment;
 #[allow(dead_code)]
-pub(crate) mod git_authority;
 mod janitor;
 mod local_service;
 mod native_task;
@@ -21,7 +20,13 @@ mod shell_session;
 mod shell_spawn;
 #[cfg(test)]
 mod takeover_termination_tests;
+pub(crate) mod trusted_image;
+pub(crate) mod workspace_binding_quiescence;
+#[cfg(test)]
+mod workspace_binding_quiescence_tests;
+pub(crate) mod workspace_service;
 
+pub(crate) use backend::RunnerOperationLease;
 pub use backend::{ProcessSpawnTarget, RunnerBackend};
 pub use direct::DirectRunnerBackend;
 pub use docker::DockerRunnerBackend;

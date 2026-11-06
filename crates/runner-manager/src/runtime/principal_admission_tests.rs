@@ -81,9 +81,11 @@ async fn docker_execution_requires_ack_and_targets_inspected_id() {
     let owner = application_principal_owner(1, 2, "u", "w").unwrap();
     for status in [204, 200, 401, 409, 500] {
         let temp = tempfile::tempdir().unwrap();
+        let child = temp.path().join("workspace");
+        std::fs::create_dir_all(&child).unwrap();
         let log = temp.path().join("docker.log");
         let fake = temp.path().join("docker");
-        let metadata = serde_json::json!({"Name":format!("/{}", owner.container_name()), "Id":"immutable-id", "State":{"Status":"running"}, "Config":{"Labels":{"desk-foreman.managed":"true", "desk-foreman.owner":owner.stable_key(), "desk-foreman.manager":"test-manager"}}}).to_string();
+        let metadata = serde_json::json!({"Name":format!("/{}", owner.container_name()), "Id":"immutable-id", "State":{"Status":"running"}, "Config":{"Labels":{"desk-foreman.managed":"true", "desk-foreman.owner":owner.stable_key(), "desk-foreman.manager":"test-manager"}}, "Mounts":[{"Destination":"/workspace","Source":child}]}).to_string();
         std::fs::write(&fake, format!("#!/bin/sh\nif [ \"$1\" = __df_fixture_ready ]; then exit 0; fi\necho \"$@\" >> '{}'\nif [ \"$1\" = inspect ]; then printf '%s\\n' '{}'; fi\n", log.display(), metadata)).unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         super::super::docker_tests::probe_fixture_readiness(&fake, |path, arg| {
@@ -107,6 +109,8 @@ async fn docker_execution_requires_ack_and_targets_inspected_id() {
         let mut config = super::super::docker_tests::test_config();
         config.control_plane_url = Some(format!("http://{addr}"));
         config.docker_cli = fake.to_string_lossy().into();
+        config.workspace_root = temp.path().to_path_buf();
+        config.host_workspace_root = temp.path().to_path_buf();
         let backend = DockerRunnerBackend::new(
             Arc::new(tokio::sync::RwLock::new(config)),
             "test-manager".into(),
@@ -118,8 +122,8 @@ async fn docker_execution_requires_ack_and_targets_inspected_id() {
         );
         let shell = RunnerShellRequest {
             owner: owner.clone(),
-            workspace_root: "/tmp".into(),
-            working_dir: "/tmp".into(),
+            workspace_root: child.clone(),
+            working_dir: child.clone(),
             shell: "sh".into(),
             login: false,
             tty: false,
@@ -134,8 +138,8 @@ async fn docker_execution_requires_ack_and_targets_inspected_id() {
         }
         let command = RunnerCommandRequest {
             owner: owner.clone(),
-            workspace_root: "/tmp".into(),
-            working_dir: "/tmp".into(),
+            workspace_root: child.clone(),
+            working_dir: child.clone(),
             program: "true".into(),
             args: vec![],
             timeout_ms: None,
@@ -164,9 +168,11 @@ async fn unverified_container_and_missing_url_never_execute() {
     let owner = application_principal_owner(1, 2, "u", "w").unwrap();
     for managed in ["false", "true"] {
         let temp = tempfile::tempdir().unwrap();
+        let child = temp.path().join("workspace");
+        std::fs::create_dir_all(&child).unwrap();
         let log = temp.path().join("log");
         let fake = temp.path().join("docker");
-        let metadata = serde_json::json!({"Name":format!("/{}", owner.container_name()), "Id":"immutable-id", "State":{"Status":"running"}, "Config":{"Labels":{"desk-foreman.managed":managed, "desk-foreman.owner":owner.stable_key(), "desk-foreman.manager":"test-manager"}}}).to_string();
+        let metadata = serde_json::json!({"Name":format!("/{}", owner.container_name()), "Id":"immutable-id", "State":{"Status":"running"}, "Config":{"Labels":{"desk-foreman.managed":managed, "desk-foreman.owner":owner.stable_key(), "desk-foreman.manager":"test-manager"}}, "Mounts":[{"Destination":"/workspace","Source":child}]}).to_string();
         std::fs::write(&fake, format!("#!/bin/sh\nif [ \"$1\" = __df_fixture_ready ]; then exit 0; fi\necho \"$@\" >> '{}'\nif [ \"$1\" = inspect ]; then printf '%s\\n' '{}'; fi\n", log.display(), metadata)).unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         super::super::docker_tests::probe_fixture_readiness(&fake, |path, arg| {
@@ -175,6 +181,8 @@ async fn unverified_container_and_missing_url_never_execute() {
         .unwrap();
         let mut config = super::super::docker_tests::test_config();
         config.docker_cli = fake.to_string_lossy().into();
+        config.workspace_root = temp.path().to_path_buf();
+        config.host_workspace_root = temp.path().to_path_buf();
         let backend = DockerRunnerBackend::new(
             Arc::new(tokio::sync::RwLock::new(config)),
             "test-manager".into(),
@@ -186,8 +194,8 @@ async fn unverified_container_and_missing_url_never_execute() {
         );
         let command = RunnerCommandRequest {
             owner: owner.clone(),
-            workspace_root: "/tmp".into(),
-            working_dir: "/tmp".into(),
+            workspace_root: child.clone(),
+            working_dir: child.clone(),
             program: "true".into(),
             args: vec![],
             timeout_ms: None,

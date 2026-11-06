@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Configured runner managers observed before a scoped intent\n-- (issue 1180).\n--\n-- Every configured manager is listed regardless of enabled/online/heartbeat\n-- state: a manager that cannot be observed must block admission rather than be\n-- assumed session-free. The list is a snapshot; no manager created later can\n-- have received a pre-fence resource dispatch under this control plane.\nSELECT runner_manager_id\nFROM runner_managers\nORDER BY runner_manager_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "runner_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runner_managers",
+            "name": "runner_manager_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "91fbf524816f37d5b3b94d773cd265609f8ef7c09798f905f6e6a971c3521160"
+}

@@ -6,6 +6,11 @@
 -- commit between the check and the write. A plain SELECT reread without
 -- this row lock leaves exactly that interleaving open for already-admitted
 -- old-owner writes (including direct workspace-SDK file operations).
+--
+-- FOR NO KEY UPDATE serializes fenced writers against each other and
+-- against the binding's non-key/lease mutations, while still admitting the
+-- KEY SHARE lock a foreign-key check takes when an observation row is
+-- inserted into workspace_runners.
 SELECT
     workspace_binding_id,
     application_id,
@@ -26,4 +31,4 @@ SELECT
     write_lease_expires_at
 FROM workspace_bindings
 WHERE workspace_binding_id = $1
-FOR UPDATE;
+FOR NO KEY UPDATE;

@@ -74,6 +74,37 @@ pub fn admit_personal_write(
     Ok(())
 }
 
+/// Pure read admission over the binding row locked by
+/// [`crate::db::workspace_bindings::lock_workspace_binding_for_write`].
+///
+/// A bound workspace read needs no write lease: the locked fresh row must
+/// still be the same binding and application with the same workspace root and
+/// remain active, `active`-lifecycle, and unarchived. Resource kind, lease
+/// owner, and lease expiry are deliberately irrelevant. Missing, resetting,
+/// archived, or identity-mismatched rows are refused.
+pub fn admit_read(
+    fresh: Option<&WorkspaceBindingResponse>,
+    snapshot: &WorkspaceBindingResponse,
+) -> Result<(), String> {
+    let Some(fresh) = fresh else {
+        return Err(read_denied_message());
+    };
+    if fresh.workspace_binding_id != snapshot.workspace_binding_id
+        || fresh.application_id != snapshot.application_id
+        || fresh.workspace_root != snapshot.workspace_root
+        || !fresh.is_active
+        || fresh.lifecycle_state != "active"
+        || fresh.archived_at.is_some()
+    {
+        return Err(read_denied_message());
+    }
+    Ok(())
+}
+
+fn read_denied_message() -> String {
+    "workspace is not available for reads".to_string()
+}
+
 /// Pure fenced admission over the binding row locked by
 /// [`crate::db::workspace_bindings::lock_workspace_binding_for_write`].
 ///
@@ -97,7 +128,7 @@ pub fn admit_fenced_write(
 mod tests {
     use chrono::{Duration, Utc};
 
-    use super::{admit_fenced_write, admit_personal_write, check_write_lease};
+    use super::{admit_fenced_write, admit_personal_write, admit_read, check_write_lease};
     use crate::db::types::WorkspaceBindingResponse;
 
     fn personal_binding(
@@ -134,7 +165,7 @@ mod tests {
             workspace_binding_id: 1,
             application_id: 1,
             external_user_id: "__resource__".to_string(),
-            workspace_key: "code_project:abc".to_string(),
+            workspace_key: "artifact:abc".to_string(),
             external_user_hash: "hash".to_string(),
             workspace_root: "/tmp/ws".to_string(),
             is_active: true,
@@ -143,7 +174,7 @@ mod tests {
             updated_at: now,
             lifecycle_state: "active".to_string(),
             archived_at: None,
-            resource_kind: Some("code_project".to_string()),
+            resource_kind: Some("artifact".to_string()),
             resource_id: Some("abc".to_string()),
             write_lease_owner: Some("conversation:2".to_string()),
             write_lease_acquired_at: Some(now),
@@ -172,7 +203,7 @@ mod tests {
             workspace_binding_id: 1,
             application_id: 1,
             external_user_id: "__resource__".to_string(),
-            workspace_key: "code_project:abc".to_string(),
+            workspace_key: "artifact:abc".to_string(),
             external_user_hash: "hash".to_string(),
             workspace_root: "/tmp/ws".to_string(),
             is_active: false,
@@ -181,7 +212,7 @@ mod tests {
             updated_at: now,
             lifecycle_state: "archived".to_string(),
             archived_at: Some(now),
-            resource_kind: Some("code_project".to_string()),
+            resource_kind: Some("artifact".to_string()),
             resource_id: Some("abc".to_string()),
             write_lease_owner: Some("conversation:1".to_string()),
             write_lease_acquired_at: Some(now),
@@ -213,7 +244,7 @@ mod tests {
         archived_at.archived_at = Some(Utc::now());
         let wrong_application = personal_binding(1, 2, None);
         let wrong_binding = personal_binding(2, 1, None);
-        let resource = personal_binding(1, 1, Some("code_project"));
+        let resource = personal_binding(1, 1, Some("artifact"));
         for fresh in [
             inactive,
             archived,
@@ -246,5 +277,53 @@ mod tests {
         no_lease.write_lease_owner = None;
         no_lease.write_lease_expires_at = None;
         assert!(admit_personal_write(Some(&no_lease), &snapshot).is_ok());
+    }
+
+    #[test]
+    fn admit_read_requires_matching_active_locked_row_and_ignores_lease() {
+        let snapshot = personal_binding(1, 1, Some("generic_resource"));
+        assert!(admit_read(Some(&snapshot), &snapshot).is_ok());
+        assert_eq!(
+            admit_read(None, &snapshot).expect_err("a vanished locked row must fail closed"),
+            "workspace is not available for reads"
+        );
+
+        let mut inactive = snapshot.clone();
+        inactive.is_active = false;
+        let mut archived = snapshot.clone();
+        archived.lifecycle_state = "archived".to_string();
+        let mut resetting = snapshot.clone();
+        resetting.lifecycle_state = "resetting".to_string();
+        let mut archived_at = snapshot.clone();
+        archived_at.archived_at = Some(Utc::now());
+        let mut other_root = snapshot.clone();
+        other_root.workspace_root = "/tmp/other".to_string();
+        let wrong_application = personal_binding(1, 2, Some("generic_resource"));
+        let wrong_binding = personal_binding(2, 1, Some("generic_resource"));
+        for fresh in [
+            inactive,
+            archived,
+            resetting,
+            archived_at,
+            other_root,
+            wrong_application,
+            wrong_binding,
+        ] {
+            assert!(
+                admit_read(Some(&fresh), &snapshot).is_err(),
+                "an inactive, archived, resetting, moved, or mismatched row must be refused"
+            );
+        }
+
+        let mut foreign_lease = snapshot.clone();
+        foreign_lease.write_lease_owner = Some("conversation:other".to_string());
+        foreign_lease.write_lease_acquired_at = Some(Utc::now());
+        foreign_lease.write_lease_expires_at = Some(Utc::now() - Duration::minutes(1));
+        assert!(
+            admit_read(Some(&foreign_lease), &snapshot).is_ok(),
+            "read admission never demands or rejects a write lease"
+        );
+        let personal = personal_binding(1, 1, None);
+        assert!(admit_read(Some(&personal), &personal).is_ok());
     }
 }

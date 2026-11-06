@@ -5,7 +5,7 @@ use rmcp::service::RequestContext;
 
 mod write_lease;
 
-pub use write_lease::{admit_fenced_write, admit_personal_write, check_write_lease};
+pub use write_lease::{admit_fenced_write, admit_personal_write, admit_read, check_write_lease};
 
 use crate::{
     AppState,
@@ -276,7 +276,7 @@ mod tests {
                 workspace_binding_id: 1,
                 application_id: 1,
                 external_user_id: "__resource__".to_string(),
-                workspace_key: "code_project:abc".to_string(),
+                workspace_key: "artifact:abc".to_string(),
                 external_user_hash: "hash".to_string(),
                 workspace_root: "/tmp/ws".to_string(),
                 is_active: true,
@@ -291,7 +291,7 @@ mod tests {
                 write_lease_acquired_at: None,
                 write_lease_expires_at,
             }),
-            principal_id: "application:1:user:code_project:abc".to_string(),
+            principal_id: "application:1:user:artifact:abc".to_string(),
             external_user_id: Some("user".to_string()),
             workspace_binding_id: 1,
             workspace_root: std::path::PathBuf::from("/tmp/ws"),
@@ -315,7 +315,7 @@ mod tests {
     fn resource_workspace_requires_matching_lease() {
         let now = Utc::now();
         let actor = actor_with_binding(
-            Some("code_project".to_string()),
+            Some("artifact".to_string()),
             Some("conversation:1".to_string()),
             Some(now + Duration::minutes(10)),
             Some("conversation:1".to_string()),
@@ -327,18 +327,18 @@ mod tests {
     fn resource_workspace_rejects_foreign_or_missing_lease() {
         let now = Utc::now();
         let foreign = actor_with_binding(
-            Some("code_project".to_string()),
+            Some("artifact".to_string()),
             Some("conversation:1".to_string()),
             Some(now + Duration::minutes(10)),
             Some("conversation:2".to_string()),
         );
         assert!(foreign.ensure_write_access().is_err());
 
-        let missing = actor_with_binding(Some("code_project".to_string()), None, None, None);
+        let missing = actor_with_binding(Some("artifact".to_string()), None, None, None);
         assert!(missing.ensure_write_access().is_err());
 
         let expired = actor_with_binding(
-            Some("code_project".to_string()),
+            Some("artifact".to_string()),
             Some("conversation:1".to_string()),
             Some(now - Duration::minutes(1)),
             Some("conversation:1".to_string()),

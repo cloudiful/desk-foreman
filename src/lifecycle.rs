@@ -11,17 +11,6 @@ use crate::{
 };
 use chrono::{Duration as ChronoDuration, Utc};
 
-pub const GIT_JOB_EXPIRY_INTERVAL: Duration = Duration::from_secs(60);
-
-/// Counts from one bounded Git-expiry tick. The production loop logs these
-/// fixed values and never exposes a job id, token, credential, or row body.
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct GitExpiryReport {
-    pub expired_jobs: usize,
-    pub pruned_credentials: usize,
-}
-
 pub fn spawn_janitor(state: AppState) {
     let workspace_state = state.clone();
     tokio::spawn(async move {
@@ -33,55 +22,6 @@ pub fn spawn_janitor(state: AppState) {
             }
         }
     });
-    tokio::spawn(async move {
-        let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-        let _ = run_git_job_expiry(state, shutdown_rx, GIT_JOB_EXPIRY_INTERVAL).await;
-    });
-}
-
-/// The actual production Git-expiry loop, shared by `spawn_janitor` and tests.
-///
-/// The first tick is immediate and later ticks use `interval`. Tests pass an
-/// explicit shutdown receiver and short interval so the loop is bounded and
-/// joined instead of running detached over the issue database.
-#[doc(hidden)]
-pub async fn run_git_job_expiry(
-    state: AppState,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
-    interval: Duration,
-) -> GitExpiryReport {
-    let mut ticker = tokio::time::interval(interval);
-    let mut report = GitExpiryReport::default();
-    loop {
-        tokio::select! {
-            _ = ticker.tick() => {
-                let tick = expire_git_jobs_once(&state).await;
-                report.expired_jobs += tick.expired_jobs;
-                report.pruned_credentials += tick.pruned_credentials;
-            }
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
-                    break;
-                }
-            }
-        }
-    }
-    report
-}
-
-async fn expire_git_jobs_once(state: &AppState) -> GitExpiryReport {
-    let mut report = GitExpiryReport::default();
-    match db::workspace_git_jobs::lifecycle::expire_git_jobs(&state.db).await {
-        Ok(expired) => {
-            report.expired_jobs = expired.len();
-            if !expired.is_empty() {
-                tracing::info!(expired = expired.len(), "expired durable git jobs");
-            }
-        }
-        Err(error) => tracing::warn!(%error, "git job expiry failed"),
-    }
-    report.pruned_credentials = state.git_job_credentials.prune_expired();
-    report
 }
 
 /// One archived-workspace sweep.
@@ -194,14 +134,4 @@ async fn cleanup_archived_binding(
         .await?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::GIT_JOB_EXPIRY_INTERVAL;
-
-    #[test]
-    fn git_job_expiry_interval_is_sixty_seconds() {
-        assert_eq!(GIT_JOB_EXPIRY_INTERVAL, std::time::Duration::from_secs(60));
-    }
 }

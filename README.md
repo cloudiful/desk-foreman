@@ -24,7 +24,7 @@ This workspace also includes `desk-foreman-workspace-sdk`, a reusable Rust crate
 
 Use `shell` for Git commands such as `git status --short`, `git diff`, and `git show <revision>`.
 
-Application tokens select a workspace with `X-DF-Workspace-Key` (default `default`). Workspace keys of the form `kind:id` (for example `code_project:<uuid>`) resolve to a **resource-owned shared workspace**: one directory per `(application, kind, id)` shared across all external users of the application. Resource workspaces enforce a **write lease**: mutating tools (`shell`, `apply_patch`, and `write_stdin` with input) only run when the request carries an active lease for that binding. Pass the lease owner with `X-DF-Lease-Owner` (for example an AI conversation id); leases are acquired and released by the host application through the lease endpoints. Read-only tools (`read`, `glob`, `grep`, `stat`) work without a lease.
+Application tokens select a workspace with `X-DF-Workspace-Key` (default `default`). Workspace keys of the form `kind:id` (for example `artifact:<uuid>`) resolve to a **resource-owned shared workspace**: one directory per `(application, kind, id)` shared across all external users of the application. Resource workspaces enforce a **write lease**: mutating tools (`shell`, `apply_patch`, and `write_stdin` with input) only run when the request carries an active lease for that binding. Pass the lease owner with `X-DF-Lease-Owner` (for example an AI conversation id); leases are acquired and released by the host application through the lease endpoints. Read-only tools (`read`, `glob`, `grep`, `stat`) work without a lease.
 
 `read` accepts a file or directory. File text output includes line numbers; directory output contains child entries with directory names ending in `/`. Both are bounded and paginated by `offset` and `limit`. All returned paths are workspace-relative.
 
@@ -81,12 +81,6 @@ Tool audit records store actor/workspace/tool metadata, hashes, status, duration
 - `RUNNER_MANAGER_TOKEN` required by `runner-manager`; create or register it from the admin Runner managers page
 - `RUNNER_MANAGER_ID` optional stable identity for standalone runner-managers; if omitted it is derived from `WORKSPACE_ROOT`; control-plane registration supplies this identity automatically
 - `RUNNER_HOST_WORKSPACE_ROOT` required by a containerized Docker runner-manager, and must be the host path corresponding to its `/workspace` mount
-- `RUNNER_GIT_IMAGE` optional digest-pinned image for the trusted Git helper and first-clone install; it must also provide `tar`, and never falls back to `RUNNER_IMAGE`
-- `RUNNER_GIT_PRIVATE_ROOT` optional manager-owned `0700` directory outside the workspace and native-task roots; trusted Git stays unconfigured without it
-- `RUNNER_GIT_HOST_PRIVATE_ROOT` optional daemon-visible counterpart of `RUNNER_GIT_PRIVATE_ROOT`; required for a remote Docker endpoint and treated as operator input
-- `RUNNER_GIT_NETWORK` and `RUNNER_GIT_BROKER_HOST` optional dedicated Docker network and exact broker authority for isolated clone fetches
-- `RUNNER_GIT_MAX_FETCH_VOLUME_BYTES`, `RUNNER_GIT_MAX_BUNDLE_BYTES`, `RUNNER_GIT_MAX_LOGICAL_OBJECT_BYTES`, `RUNNER_GIT_MAX_CHECKOUT_BYTES`, and `RUNNER_GIT_MAX_TREE_ENTRIES` optional positive caps required before clone preparation and first-clone install are available
-- `GIT_JOB_WAIT_SECS`, `GIT_JOB_DEADLINE_SECS`, `GIT_JOB_RESERVED_BYTES`, `GIT_JOB_MAX_ACTIVE`, `GIT_JOB_MAX_BYTES`, `GIT_JOB_MAX_PER_BINDING`, `GIT_JOB_MAX_PER_MANAGER`, and `GIT_JOB_MAX_BYTES_PER_MANAGER` optional all-or-none control-plane Git-job settings; all absent disables durable first clone with `503`, while a partial or invalid group fails startup
 - Runner image, network access, resource limits, and enabled state are managed from the admin Runner managers page
 - `SESSION_IDLE_TTL_SEC` default `1800`
 - `WEB_SESSION_TTL_SEC` default `604800`

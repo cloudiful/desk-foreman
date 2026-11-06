@@ -86,6 +86,7 @@ mod launch_tests {
             &profile_with(&state, serving()),
             EnsureExecutionEnvironmentRequest {
                 owner: support::env_owner(0),
+                workspace_scope: None,
             },
         )
         .await
@@ -132,6 +133,7 @@ mod launch_tests {
             &profile_with(&state, serving()),
             EnsureExecutionEnvironmentRequest {
                 owner: support::env_owner(0),
+                workspace_scope: None,
             },
         )
         .await
@@ -179,7 +181,10 @@ mod launch_tests {
         let result = ensure_execution_environment(
             &backend,
             &profile_with(&state, serving()),
-            EnsureExecutionEnvironmentRequest { owner },
+            EnsureExecutionEnvironmentRequest {
+                owner,
+                workspace_scope: None,
+            },
         )
         .await;
         let error = result
@@ -211,6 +216,7 @@ mod launch_tests {
             &profile_with(&state, degraded),
             EnsureExecutionEnvironmentRequest {
                 owner: support::env_owner(0),
+                workspace_scope: None,
             },
         )
         .await;
@@ -236,6 +242,7 @@ mod launch_tests {
             &profile_with(&state, ServiceProfile::Unset),
             EnsureExecutionEnvironmentRequest {
                 owner: support::env_owner(0),
+                workspace_scope: None,
             },
         )
         .await
@@ -266,10 +273,13 @@ mod launch_tests {
             support::inspect_json("exited", &owner.stable_key(), support::ENV_ID, "0"),
         )
         .expect("inspect json");
+        let removed = temp.path().join("removed.marker");
         let script = format!(
-            "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"inspect\" ]; then\n  cat \"{}\"\n  exit 0\nfi\nexit 0\n",
+            "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"inspect\" ]; then\n  if [ -f \"{}\" ]; then\n    echo \"Error: No such container: $2\" >&2\n    exit 1\n  fi\n  cat \"{}\"\n  exit 0\nfi\nif [ \"$1\" = \"rm\" ]; then\n  touch \"{}\"\n  exit 0\nfi\nexit 0\n",
             log.display(),
-            inspect_file.display()
+            removed.display(),
+            inspect_file.display(),
+            removed.display()
         );
         let fake = support::write_executable(temp.path(), "docker-fake", &script);
         let backend = support::backend_with_cli(&fake.to_string_lossy());

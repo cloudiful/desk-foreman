@@ -69,7 +69,7 @@ pub enum TakeoverOutcome {
 /// The runner broker waits up to `RUNNER_JOB_TIMEOUT_SECS` (3660s) for a
 /// manager result; without this bound a slow or disconnected runner
 /// manager would pin the row for about an hour and block every fenced
-/// write (shell, write_stdin, apply_patch, git-sync) for the binding.
+/// write (shell, write_stdin, apply_patch) for the binding.
 /// Thirty seconds comfortably covers a healthy local group kill and Docker
 /// container removal (milliseconds to seconds) while letting the takeover
 /// roll back deterministically instead of wedging writers.
@@ -219,7 +219,7 @@ pub async fn acquire_workspace_write_lease_takeover(
     )
     .await?
     .is_some()
-        || crate::db::workspace_bindings::git_job_guard::git_job_holds_binding(
+        || crate::db::workspace_bindings::workspace_scope_guard::workspace_scope_holds_binding(
             &mut tx,
             workspace_binding_id,
         )

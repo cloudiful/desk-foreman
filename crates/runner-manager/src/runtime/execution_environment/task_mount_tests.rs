@@ -60,6 +60,7 @@ fn info_for(binding_id: i64, task_source: &str) -> EnvContainerInfo {
     }
     let workspace_directory = native_task_workspace_directory(binding_id);
     EnvContainerInfo {
+        container_id: Some("container-4".to_string()),
         status: "running".to_string(),
         owner_key: Some(owner.stable_key()),
         environment_id: Some("123e4567-e89b-12d3-a456-426614174000".to_string()),

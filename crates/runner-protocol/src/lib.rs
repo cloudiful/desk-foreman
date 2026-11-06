@@ -4,7 +4,6 @@ use serde_json::Value;
 use utoipa::ToSchema;
 
 pub mod execution_environment;
-pub mod git_authority;
 pub mod service_relay;
 pub mod task_execution;
 pub mod task_export;
@@ -19,16 +18,9 @@ pub use workspace_principal::{
 };
 
 pub use execution_environment::{
-    EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest, StopExecutionEnvironmentAck,
+    EnsureExecutionEnvironmentAck, EnsureExecutionEnvironmentRequest,
+    ExecutionEnvironmentWorkspaceScope, StopExecutionEnvironmentAck,
     StopExecutionEnvironmentRequest,
-};
-pub use git_authority::{
-    GIT_JOB_CREDENTIAL_URL_MAX_LEN, GIT_JOB_CREDENTIAL_USERNAME, GIT_JOB_WORKSPACE_ROOT_MAX_LEN,
-    GitJobCredential, GitJobErrorCode, GitJobOutcome, GitJobOutcomeError, GitJobSpec,
-    GitJobSpecError, GitObjectFormat, GitReceiptPhase, GitReceiptReadAck, GitReceiptReadAckError,
-    GitReceiptReadRequest, GitReceiptReadRequestError, GitReceiptState, GitRuntimeAvailability,
-    GitRuntimeReason, GitRuntimeStatus, GitVerifyRequest, GitVerifyRequestError, GitVerifyResult,
-    is_canonical_branch,
 };
 pub use task_execution::{
     NATIVE_TASK_WORKSPACE_ROOT, NativeTaskRuntimeIdentity, StartNativeTaskRequest,

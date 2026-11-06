@@ -8,7 +8,8 @@ SELECT
     state_volume_ref,
     last_active_at,
     created_at,
-    updated_at
+    updated_at,
+    workspace_binding_id
 FROM execution_environments
 WHERE environment_id = $1
   AND application_id = $2

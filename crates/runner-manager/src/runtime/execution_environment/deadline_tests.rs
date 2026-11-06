@@ -27,6 +27,7 @@ mod deadline_tests {
     fn ensure_req(generation: i64) -> EnsureExecutionEnvironmentRequest {
         EnsureExecutionEnvironmentRequest {
             owner: support::env_owner(generation),
+            workspace_scope: None,
         }
     }
 

@@ -157,14 +157,14 @@ async fn router_stop_is_fenced_and_lease_scoped() -> anyhow::Result<()> {
         401
     );
     assert!(
-        queries::find_workspace_binding_by_resource(&pool, 817301, "code_project", "one")
+        queries::find_workspace_binding_by_resource(&pool, 817301, "artifact", "one")
             .await?
             .is_none()
     );
-    let path = "/api/internal/resource-workspaces/code_project/one/workspace-sessions/stop";
+    let path = "/api/internal/resource-workspaces/artifact/one/workspace-sessions/stop";
     let claims = |external: &str, lease: &str| {
         format!(
-            "X-DF-Runner-Isolation: principal\r\nX-DF-External-User-Id: {external}\r\nX-DF-Workspace-Key: code_project:one\r\nX-DF-Lease-Owner: {lease}\r\n"
+            "X-DF-Runner-Isolation: principal\r\nX-DF-External-User-Id: {external}\r\nX-DF-Workspace-Key: artifact:one\r\nX-DF-Lease-Owner: {lease}\r\n"
         )
     };
     let body = r#"{"expected_lease_owner":"person-a"}"#;
@@ -231,16 +231,16 @@ async fn router_stop_is_fenced_and_lease_scoped() -> anyhow::Result<()> {
         404
     );
     assert!(
-        queries::find_workspace_binding_by_resource(&pool, 817301, "code_project", "one")
+        queries::find_workspace_binding_by_resource(&pool, 817301, "artifact", "one")
             .await?
             .is_none()
     );
     let binding = crate::auth::identity::resolve_or_create_resource_binding(
         &state,
         &application,
-        "code_project",
+        "artifact",
         "one",
-        "code_project:one",
+        "artifact:one",
     )
     .await
     .unwrap();
@@ -267,7 +267,7 @@ async fn router_stop_is_fenced_and_lease_scoped() -> anyhow::Result<()> {
         404
     );
     assert!(
-        queries::find_workspace_binding_by_resource(&pool, 817302, "code_project", "one")
+        queries::find_workspace_binding_by_resource(&pool, 817302, "artifact", "one")
             .await?
             .is_none()
     );
@@ -309,7 +309,7 @@ async fn router_stop_is_fenced_and_lease_scoped() -> anyhow::Result<()> {
     .bind(id)
     .execute(&pool)
     .await?;
-    let owner = application_principal_owner(817301, id, "person-a", "code_project:one").unwrap();
+    let owner = application_principal_owner(817301, id, "person-a", "artifact:one").unwrap();
     assert!(matches!(
         principal_admission::admit(&pool, 817601, &owner, "test-container").await?,
         AdmissionOutcome::Admitted(_)
@@ -330,12 +330,12 @@ async fn router_stop_is_fenced_and_lease_scoped() -> anyhow::Result<()> {
                     serde_json::from_value(job.payload.clone()).unwrap();
                 assert_eq!(
                     stop.owner,
-                    application_principal_owner(817301, id, expected_external, "code_project:one")
+                    application_principal_owner(817301, id, expected_external, "artifact:one")
                         .unwrap()
                 );
                 assert_eq!(
                     stop.principal_id,
-                    format!("application:817301:{expected_external}:code_project:one")
+                    format!("application:817301:{expected_external}:artifact:one")
                 );
                 broker
                     .complete_job(
@@ -425,7 +425,7 @@ async fn router_stop_is_fenced_and_lease_scoped() -> anyhow::Result<()> {
     let mut stopping = tokio::spawn({
         let token = token.clone();
         async move {
-            let headers = "X-DF-Runner-Isolation: principal\r\nX-DF-External-User-Id: person-c\r\nX-DF-Workspace-Key: code_project:one\r\nX-DF-Lease-Owner: person-c\r\n";
+            let headers = "X-DF-Runner-Isolation: principal\r\nX-DF-External-User-Id: person-c\r\nX-DF-Workspace-Key: artifact:one\r\nX-DF-Lease-Owner: person-c\r\n";
             http(
                 address,
                 "POST",
@@ -490,7 +490,7 @@ async fn router_stop_is_fenced_and_lease_scoped() -> anyhow::Result<()> {
             .as_deref(),
         Some("person-d")
     );
-    let d_owner = application_principal_owner(817301, id, "person-d", "code_project:one").unwrap();
+    let d_owner = application_principal_owner(817301, id, "person-d", "artifact:one").unwrap();
     assert!(matches!(
         principal_admission::admit(&pool, 817601, &d_owner, "after-timeout").await?,
         AdmissionOutcome::Fenced
@@ -518,7 +518,7 @@ async fn router_stop_is_fenced_and_lease_scoped() -> anyhow::Result<()> {
             .as_deref(),
         Some("person-d")
     );
-    let fenced = application_principal_owner(817301, id, "person-d", "code_project:one").unwrap();
+    let fenced = application_principal_owner(817301, id, "person-d", "artifact:one").unwrap();
     assert!(matches!(
         principal_admission::admit(&pool, 817601, &fenced, "after-failure").await?,
         AdmissionOutcome::Fenced

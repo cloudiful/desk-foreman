@@ -106,7 +106,7 @@ async fn lock_current<'a>(
         && task.prepare_job_id == Some(job_id)
         && task.subject_external_user_id == environment.external_user_id
         && binding.application_id == peek.application_id
-        && binding.is_active_code_project()
+        && binding.is_active_resource_workspace()
         && binding.lifecycle_state == "active";
     if !owner_matches {
         return Ok(LockAttempt::Refused(

@@ -1,14 +1,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use desk_foreman::runner::{RunnerFuture, RunnerService};
+use desk_foreman::runner::{RunnerFuture, RunnerService, WorkspaceActivity};
 use runner_protocol::{
     CancelSessionRequest, CleanupWorkspaceBindingPrincipalsAck,
     CleanupWorkspaceBindingPrincipalsRequest, EnsureExecutionEnvironmentAck,
-    EnsureExecutionEnvironmentRequest, ExecRequest, GitReceiptReadAck, GitReceiptReadRequest,
-    InputRequest, RunnerCommandRequest, RunnerOwner, RunnerSessionStatus, ShellToolOutput,
-    StopExecutionEnvironmentAck, StopExecutionEnvironmentRequest, StopWorkspacePrincipalAck,
-    StopWorkspacePrincipalRequest,
+    EnsureExecutionEnvironmentRequest, ExecRequest, InputRequest, RunnerCommandRequest,
+    RunnerOwner, RunnerSessionStatus, ShellToolOutput, StopExecutionEnvironmentAck,
+    StopExecutionEnvironmentRequest, StopWorkspacePrincipalAck, StopWorkspacePrincipalRequest,
 };
 use tokio::sync::OwnedRwLockWriteGuard;
 
@@ -22,6 +21,10 @@ use workspace_principal_stop::OwnerFences;
 #[cfg(test)]
 #[path = "workspace_principal_stop_tests.rs"]
 mod workspace_principal_stop_tests;
+
+#[cfg(test)]
+#[path = "workspace_scope_prepare_tests.rs"]
+mod workspace_scope_prepare_tests;
 
 pub struct LocalRunnerService {
     backend: Arc<dyn RunnerBackend>,
@@ -67,79 +70,41 @@ impl LocalRunnerService {
         }
     }
 
-    async fn read_git_receipt_inner(
+    /// Prepare one binding for scoped helper activation: take the binding's
+    /// write fence without waiting and prove no in-flight operation or Shell
+    /// session exists. The returned guard stays held by the caller; ordinary
+    /// container quiescence belongs to the ensure lifecycle, which runs after
+    /// its own generation/identity preflight.
+    async fn acquire_workspace_scope(
         &self,
-        request: &GitReceiptReadRequest,
-    ) -> anyhow::Result<GitReceiptReadAck> {
-        use super::git_authority::clone_plan::GitCloneConfig;
-        use super::git_authority::docker_runner::{DockerCliExecutor, GitPlanRunner};
-        use super::git_authority::receipt::{GitReceiptError, read_receipt};
-        use super::git_authority::update::inspect_published;
-
-        let config = self.config.read().await.clone();
-        let Some(binding) = request.workspace_binding_id() else {
-            anyhow::bail!("git receipt read is unconfirmed");
-        };
-        let root = std::path::Path::new(&request.workspace_root);
-        let manager_root = match std::fs::canonicalize(&config.workspace_root) {
-            Ok(root) => root,
-            Err(_) => anyhow::bail!("git receipt read is unavailable"),
-        };
-        let canonical_root = match std::fs::canonicalize(root) {
-            Ok(root) => root,
-            Err(_) => return Ok(unconfirmed_ack(request, binding)),
-        };
-        if canonical_root != root || !canonical_root.starts_with(&manager_root) {
-            return Ok(unconfirmed_ack(request, binding));
+        workspace_binding_id: i64,
+    ) -> anyhow::Result<OwnedRwLockWriteGuard<()>> {
+        if workspace_binding_id <= 0 {
+            anyhow::bail!("invalid workspace binding id");
         }
-        let Ok(clone_config) = GitCloneConfig::from_runner(&config) else {
-            return Ok(unconfirmed_ack(request, binding));
-        };
-        let receipt = match read_receipt(&clone_config.private_root, request) {
-            Ok(receipt) => receipt,
-            Err(GitReceiptError::Unavailable) => return Ok(missing_ack(request, binding)),
-            Err(_) => return Ok(unconfirmed_ack(request, binding)),
-        };
-        let Ok(executor) =
-            DockerCliExecutor::new(config.docker_cli.clone(), config.docker_host.clone())
-        else {
-            return Ok(unconfirmed_ack(request, binding));
-        };
-        let executor = GitPlanRunner::new(executor);
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis() as i64)
-            .unwrap_or(0);
-        let remaining = (request.deadline_unix_ms - now_ms).clamp(1, 30_000) as u64;
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(remaining);
-        let inspected = inspect_published(
-            &request.workspace_root,
-            &request.canonical_branch,
-            &receipt.head,
-            &clone_config,
-            &executor,
-            request.operation_id,
-            deadline,
-        )
-        .await;
-        let Some((head, branch, clean)) = inspected else {
-            return Ok(unconfirmed_ack(request, binding));
-        };
-        let ack = receipt
-            .read_ack()
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        if receipt.is_confirmed()
-            && clean
-            && head == receipt.head
-            && branch == request.canonical_branch
-            && ack.job_id == request.job_id
-            && ack.operation_id == request.operation_id
-            && ack.workspace_binding_id == binding
+        if !self.backend.supports_workspace_binding_owner_quiescence() {
+            anyhow::bail!("workspace binding quiescence is not supported by this runner backend");
+        }
+        let fence = self
+            .binding_fences
+            .for_owner(&RunnerOwner::WorkspaceBinding {
+                workspace_binding_id,
+            });
+        let guard = fence
+            .try_write_owned()
+            .map_err(|_| anyhow::anyhow!("workspace binding is busy"))?;
+        if self
+            .backend
+            .workspace_activity_count(workspace_binding_id)
+            .await?
+            != 0
         {
-            Ok(ack)
-        } else {
-            Ok(unconfirmed_ack(request, binding))
+            anyhow::bail!("workspace binding has active operations");
         }
+        if self.binding_has_live_sessions(workspace_binding_id).await {
+            anyhow::bail!("workspace binding has live sessions");
+        }
+        Ok(guard)
     }
 
     pub async fn reconcile(&self) -> anyhow::Result<()> {
@@ -157,31 +122,6 @@ fn binding_id(owner: &RunnerOwner) -> Option<i64> {
             workspace_binding_id,
         } => Some(*workspace_binding_id),
         _ => None,
-    }
-}
-
-fn base_ack(request: &GitReceiptReadRequest, binding: i64) -> GitReceiptReadAck {
-    GitReceiptReadAck {
-        job_id: request.job_id,
-        operation_id: request.operation_id,
-        workspace_binding_id: binding,
-        state: runner_protocol::GitReceiptState::Missing,
-        phase: None,
-        base: request.expected_base.clone(),
-        head: None,
-        published: false,
-        cleanup_confirmed: false,
-    }
-}
-
-fn missing_ack(request: &GitReceiptReadRequest, binding: i64) -> GitReceiptReadAck {
-    base_ack(request, binding)
-}
-
-fn unconfirmed_ack(request: &GitReceiptReadRequest, binding: i64) -> GitReceiptReadAck {
-    GitReceiptReadAck {
-        state: runner_protocol::GitReceiptState::Unconfirmed,
-        ..base_ack(request, binding)
     }
 }
 
@@ -224,6 +164,51 @@ impl RunnerService for LocalRunnerService {
 
     fn list_sessions<'a>(&'a self) -> RunnerFuture<'a, anyhow::Result<Vec<RunnerSessionStatus>>> {
         Box::pin(async move { self.shell.list_sessions().await })
+    }
+
+    fn workspace_activity<'a>(
+        &'a self,
+        workspace_binding_id: i64,
+    ) -> RunnerFuture<'a, anyhow::Result<WorkspaceActivity>> {
+        Box::pin(async move {
+            if workspace_binding_id <= 0 {
+                anyhow::bail!("invalid workspace binding id");
+            }
+            let fence = self
+                .binding_fences
+                .for_owner(&RunnerOwner::WorkspaceBinding {
+                    workspace_binding_id,
+                });
+            let guard = match fence.try_write_owned() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    return Ok(WorkspaceActivity {
+                        workspace_binding_id,
+                        active_operations: 0,
+                        live_sessions: 0,
+                        binding_rpc_active: true,
+                    });
+                }
+            };
+            let active_operations = self
+                .backend
+                .workspace_activity_count(workspace_binding_id)
+                .await?;
+            let live_sessions = self
+                .shell
+                .snapshot_sessions()
+                .await?
+                .iter()
+                .filter(|session| binding_id(&session.owner) == Some(workspace_binding_id))
+                .count();
+            drop(guard);
+            Ok(WorkspaceActivity {
+                workspace_binding_id,
+                active_operations,
+                live_sessions: u32::try_from(live_sessions).unwrap_or(u32::MAX),
+                binding_rpc_active: false,
+            })
+        })
     }
 
     fn run_command<'a>(
@@ -391,7 +376,19 @@ impl RunnerService for LocalRunnerService {
         &'a self,
         request: EnsureExecutionEnvironmentRequest,
     ) -> RunnerFuture<'a, anyhow::Result<EnsureExecutionEnvironmentAck>> {
-        Box::pin(async move { self.backend.ensure_execution_environment(request).await })
+        Box::pin(async move {
+            let workspace_binding_id = request
+                .workspace_scope
+                .as_ref()
+                .map(|scope| scope.workspace_binding_id);
+            let _scope_guard = match workspace_binding_id {
+                Some(workspace_binding_id) => {
+                    Some(self.acquire_workspace_scope(workspace_binding_id).await?)
+                }
+                None => None,
+            };
+            self.backend.ensure_execution_environment(request).await
+        })
     }
 
     fn stop_execution_environment<'a>(
@@ -399,77 +396,5 @@ impl RunnerService for LocalRunnerService {
         request: StopExecutionEnvironmentRequest,
     ) -> RunnerFuture<'a, anyhow::Result<StopExecutionEnvironmentAck>> {
         Box::pin(async move { self.backend.stop_execution_environment(request).await })
-    }
-
-    fn acquire_git_install_fence<'a>(
-        &'a self,
-        workspace_binding_id: i64,
-        remaining: Duration,
-    ) -> RunnerFuture<'a, Option<OwnedRwLockWriteGuard<()>>> {
-        Box::pin(async move {
-            if workspace_binding_id <= 0 || remaining.is_zero() {
-                return None;
-            }
-            let fence = self
-                .binding_fences
-                .for_owner(&RunnerOwner::WorkspaceBinding {
-                    workspace_binding_id,
-                });
-            let budget = remaining.min(Duration::from_secs(30));
-            let guard = match tokio::time::timeout(budget, fence.write_owned()).await {
-                Ok(guard) => guard,
-                Err(_) => return None,
-            };
-            if self.binding_has_live_sessions(workspace_binding_id).await {
-                return None;
-            }
-            Some(guard)
-        })
-    }
-
-    fn read_git_receipt<'a>(
-        &'a self,
-        request: GitReceiptReadRequest,
-    ) -> RunnerFuture<'a, anyhow::Result<GitReceiptReadAck>> {
-        Box::pin(async move {
-            if request.validate().is_err() {
-                anyhow::bail!("git receipt read is unconfirmed");
-            }
-            let manager_id = self
-                .config
-                .read()
-                .await
-                .manager_id
-                .parse::<i64>()
-                .ok()
-                .filter(|id| *id == request.assigned_manager_id)
-                .ok_or_else(|| anyhow::anyhow!("git receipt read is unavailable"))?;
-            let _ = manager_id;
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_millis() as i64)
-                .unwrap_or(0);
-            if request.deadline_unix_ms <= now_ms {
-                anyhow::bail!("git receipt read is unconfirmed");
-            }
-            let workspace_binding_id = request
-                .workspace_binding_id()
-                .ok_or_else(|| anyhow::anyhow!("git receipt read is unconfirmed"))?;
-            let fence = self
-                .binding_fences
-                .for_owner(&RunnerOwner::WorkspaceBinding {
-                    workspace_binding_id,
-                });
-            let remaining =
-                Duration::from_millis((request.deadline_unix_ms - now_ms).min(30_000) as u64);
-            let _guard = match tokio::time::timeout(remaining, fence.read_owned()).await {
-                Ok(guard) => guard,
-                Err(_) => anyhow::bail!("git receipt read is unconfirmed"),
-            };
-            if self.binding_has_live_sessions(workspace_binding_id).await {
-                anyhow::bail!("git receipt read is unconfirmed");
-            }
-            self.read_git_receipt_inner(&request).await
-        })
     }
 }

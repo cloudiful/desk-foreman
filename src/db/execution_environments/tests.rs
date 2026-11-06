@@ -7,6 +7,7 @@
 
 use uuid::Uuid;
 
+use super::store::initial_state_for_scope;
 use super::types::{
     EXECUTION_ENVIRONMENT_INITIAL_STATE, EXECUTION_ENVIRONMENT_INVALIDATED_STATE,
     derive_state_volume_ref, execution_state_is_valid, external_user_id_is_valid,
@@ -40,6 +41,10 @@ fn lifecycle_states_match_checked_constraint() {
 fn initial_and_invalidated_states_are_checked_values() {
     assert_eq!(EXECUTION_ENVIRONMENT_INITIAL_STATE, "starting");
     assert_eq!(EXECUTION_ENVIRONMENT_INVALIDATED_STATE, "stopping");
+    assert_eq!(initial_state_for_scope(None), "starting");
+    assert_eq!(initial_state_for_scope(Some(7)), "absent");
+    assert!(execution_state_is_valid(initial_state_for_scope(None)));
+    assert!(execution_state_is_valid(initial_state_for_scope(Some(7))));
     assert!(execution_state_is_valid(
         EXECUTION_ENVIRONMENT_INITIAL_STATE
     ));

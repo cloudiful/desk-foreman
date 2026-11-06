@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Potential-writer observations for one bound workspace scope\n-- (issue 1180 P9).\n--\n-- Every non-removed observation of this binding is retained, including stale,\n-- offline, disabled, cleanup-failed, unknown and orphaned manager rows. They\n-- are grouped per observed manager and root so positive admission requires one\n-- group whose every row is simultaneously running, freshly observed and backed\n-- by an enabled/online/fresh manager. Stale heartbeat is never quiescence\n-- proof: it only makes the group non-authorizing while still blocking through\n-- its presence. Removed rows are ignored only under the existing per-container\n-- stop/rm report contract.\nSELECT\n    wr.runner_manager_id,\n    wr.workspace_root,\n    COALESCE(\n        BOOL_AND(\n            wr.status = 'running'\n            AND wr.last_observed_at > NOW() - ((2 * $2::bigint) * INTERVAL '1 second')\n            AND rm.enabled = TRUE\n            AND rm.status = 'online'\n            AND rm.last_seen_at > NOW() - ($2::bigint * INTERVAL '1 second')\n        ),\n        FALSE\n    ) AS \"authorizes!\"\nFROM workspace_runners wr\nLEFT JOIN runner_managers rm ON rm.runner_manager_id = wr.runner_manager_id\nWHERE wr.owner_workspace_binding_id = $1\n  AND wr.status IS DISTINCT FROM 'removed'\nGROUP BY wr.runner_manager_id, wr.workspace_root\nORDER BY wr.runner_manager_id NULLS FIRST, wr.workspace_root\nLIMIT 2;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "runner_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "workspace_runners",
+            "name": "runner_manager_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "workspace_root",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_runners",
+            "name": "workspace_root"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "authorizes!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      null
+    ]
+  },
+  "hash": "e283f76505d9bbd615c293d0cf0d5134431a7b5894577f12d7e4bbfb476c49f5"
+}

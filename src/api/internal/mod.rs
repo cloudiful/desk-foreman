@@ -14,20 +14,18 @@
 
 pub(super) mod application;
 pub(super) mod execution_environments;
-pub(super) mod git_sync_job;
 pub(super) mod lease;
 pub(super) mod lease_audit;
 pub(super) mod resource_binding;
 pub(super) mod runner_manager;
 pub(super) mod runner_manager_environment_jobs;
-pub(super) mod runner_manager_git_jobs;
 pub(super) mod runner_manager_service_relay;
 pub(super) mod runner_manager_task_exports;
 pub(super) mod runner_principal_admission;
 pub(super) mod shared;
 pub(super) mod workspace_principal;
 
-pub(super) use application::{application_capabilities, sync_resource_workspace_git};
+pub(super) use application::application_capabilities;
 /// Every relayed method, bound onto the gateway's single route.
 use execution_environments::service_route;
 
@@ -54,7 +52,6 @@ pub(super) use runner_manager::{
 };
 
 pub(super) use runner_manager_environment_jobs::task_seed_for_preparation_job;
-pub(super) use runner_manager_git_jobs::git_job_credential;
 pub(super) use runner_manager_service_relay::runner_manager_service_relay;
 pub(super) use runner_manager_task_exports::upload_native_task_export_handler;
 
@@ -87,10 +84,6 @@ pub(super) fn router() -> axum::Router<crate::AppState> {
             axum::routing::get(task_seed_for_preparation_job),
         )
         .route(
-            "/api/internal/runner-managers/{manager_id}/git-jobs/{job_id}/credential",
-            axum::routing::get(git_job_credential),
-        )
-        .route(
             "/api/internal/runner-managers/{manager_id}/environment-jobs/{job_id}/task-export",
             axum::routing::post(upload_native_task_export_handler),
         )
@@ -101,10 +94,6 @@ pub(super) fn router() -> axum::Router<crate::AppState> {
         .route(
             "/api/internal/runner-manager/service-relay",
             axum::routing::get(runner_manager_service_relay),
-        )
-        .route(
-            "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/git/sync",
-            axum::routing::post(sync_resource_workspace_git),
         )
         .route(
             "/api/internal/workspace-bindings/{binding_id}/lease",

@@ -45,6 +45,18 @@ pub const SUPERSEDED_BY_STOP_PROOF_OUTCOME: &str = "superseded_by_stop_proof";
 /// Observed states a confirmed stop result may carry.
 pub const ACCEPTED_CONFIRMED_STOP_STATES: [&str; 3] = ["absent", "exited", "dead"];
 
+/// Authenticated workspace scope authority for scoped lifecycle admission.
+///
+/// Identity only: the binding id and the caller's original lease owner. The
+/// database revalidates both against the locked fresh binding row, so this
+/// snapshot never authorizes by itself. No application id, path or secret
+/// travels here.
+#[derive(Clone, Debug)]
+pub struct ScopeAuthority {
+    pub workspace_binding_id: i64,
+    pub lease_owner: String,
+}
+
 /// Environment row with lifecycle metadata. `container_generation` is the
 /// provision candidate (`None` before the first admitted provision);
 /// `assigned_manager_id` is the immutable manager binding; the stop-proof

@@ -7,13 +7,16 @@
 //! records the stop intent in the durable barrier before any destructive
 //! command, and only then inspects/terminates. A positively absent container
 //! confirms without any destructive command; a present container is only
-//! touched when its owner/environment/generation labels match, and a
-//! matching container that is already stopped confirms without destruction.
-//! A running matching container is terminated with a bounded stop plus
-//! `rm -f` escalation (which kills native descendants) inside one monotonic
-//! operation deadline, then inspected again. Never checks `active_ops` as a
-//! substitute for termination, never removes the durable volume, and never
-//! treats transport, parse, timeout, or permission failures as absence.
+//! touched when its owner/environment/generation labels match and it carries a
+//! verifiable container id. A matching container is terminated by that id with
+//! a bounded stop plus `rm`/`rm -f` escalation (which kills native
+//! descendants) even when it already reports `exited`/`dead`, inside one
+//! monotonic operation deadline. Both the captured id and the canonical name
+//! are inspected again: absence of both is the only confirmation, any
+//! remaining matching object is returned unconfirmed, and foreign or
+//! unrecognized identity refuses. Never checks `active_ops` as a substitute
+//! for termination, never removes the durable volume, and never treats
+//! transport, parse, timeout, or permission failures as absence.
 //!
 //! Persisted stop intent and actual stop acknowledgment stay distinct: the
 //! barrier is written before the destructive step, so a failed or timed-out
@@ -35,10 +38,12 @@ use crate::runtime::docker_command::is_missing_container_error;
 
 /// Confirmed stop for one exact generation.
 ///
-/// Returns `confirmed=true` only after a successful inspect proves
-/// `exited`/`dead`/`removed` or positively identified absence. All other
-/// outcomes are `Err` (transport/parse/timeout/permission) or
-/// `confirmed=false` (still running/unknown) with no replacement implied.
+/// Returns `confirmed=true` only when a present matching container was
+/// removed by its verified id and a final inspect proves both that id and the
+/// canonical name absent, or when the preflight was positively absent. All
+/// other outcomes are `Err` (transport/parse/timeout/permission) or
+/// `confirmed=false` (any remaining matching object) with no replacement
+/// implied.
 pub async fn stop_execution_environment(
     backend: &DockerRunnerBackend,
     profile: &ExecutionEnvironmentProfile,
@@ -79,13 +84,27 @@ pub async fn stop_execution_environment(
         let container_name = request.owner.container_name();
 
         // Preflight: positively absent confirms with no destructive command;
-        // a present container is only touched after its labels match.
+        // a present container is only touched after its labels match and it
+        // carries a verifiable id, which is the only removal target.
         let preflight =
             inspect_environment_container(backend, &container_name, deadline.remaining_ms()?)
                 .await?;
-        if let Some(info) = &preflight {
-            ensure_owner_matches(info, &request.owner)?;
-        }
+        let verified_id = match &preflight {
+            Some(info) => {
+                ensure_owner_matches(info, &request.owner)?;
+                Some(
+                    info.container_id
+                        .clone()
+                        .filter(|id| !id.trim().is_empty())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "environment container {container_name} has no verifiable id; refusing destructive action"
+                            )
+                        })?,
+                )
+            }
+            None => None,
+        };
 
         // Durable stop intent before any destructive command or
         // confirmation. A later ensure of this generation is now refused
@@ -98,7 +117,7 @@ pub async fn stop_execution_environment(
         // because its generation is closed even though no container exists.
         backend.service_cancel().cancel_environment(&environment_id);
 
-        let Some(info) = preflight else {
+        let Some(verified_id) = verified_id else {
             return Ok(StopExecutionEnvironmentAck {
                 owner: request.owner,
                 container_name,
@@ -107,33 +126,38 @@ pub async fn stop_execution_environment(
             });
         };
 
-        // A matching, already-stopped container is terminal: confirm without
-        // running stop/rm. Anything running-like or unknown is terminated.
-        if !protocol::is_stopped_status(&info.status) {
-            stop_and_remove_within(backend, &container_name, profile, &deadline).await?;
-        }
+        // A matching container may still hold its mounts even when it already
+        // reports exited/dead, so remove it by the verified id in every
+        // present case. The canonical name is never used as a fallback.
+        stop_and_remove_within(backend, &verified_id, profile, &deadline).await?;
 
-        // Positive confirmation only. Missing via the known Docker error is
-        // absence; any other failure never becomes absence.
-        let observed =
-            inspect_environment_container(backend, &container_name, deadline.remaining_ms()?)
-                .await?;
-        match observed {
+        // Confirmation requires positive absence of both the captured id and
+        // the canonical name. Any remaining matching object is observed state,
+        // not absence; a foreign object refuses and transport stays an error.
+        let mut remaining: Option<String> = None;
+        for target in [&verified_id, &container_name] {
+            if let Some(info) =
+                inspect_environment_container(backend, target, deadline.remaining_ms()?).await?
+            {
+                ensure_owner_matches(&info, &request.owner)?;
+                if remaining.is_none() {
+                    remaining = Some(info.status);
+                }
+            }
+        }
+        match remaining {
             None => Ok(StopExecutionEnvironmentAck {
                 owner: request.owner,
                 container_name,
                 confirmed: true,
                 observed_state: protocol::EXECUTION_ENVIRONMENT_ABSENT_STATE.to_string(),
             }),
-            Some(info) => {
-                ensure_owner_matches(&info, &request.owner)?;
-                Ok(StopExecutionEnvironmentAck {
-                    owner: request.owner,
-                    container_name,
-                    confirmed: protocol::is_stopped_status(&info.status),
-                    observed_state: info.status,
-                })
-            }
+            Some(status) => Ok(StopExecutionEnvironmentAck {
+                owner: request.owner,
+                container_name,
+                confirmed: false,
+                observed_state: status,
+            }),
         }
     }
     .await

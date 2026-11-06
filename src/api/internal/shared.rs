@@ -25,6 +25,72 @@ pub(super) async fn application_actor(
     Ok(application.application_id)
 }
 
+/// Authenticated application authority for a resource-owned workspace scope.
+///
+/// Snapshot only: identity may be used for authorization decisions, but
+/// lifecycle and lease state must be re-read from the locked fresh binding row
+/// before any scoped operation is admitted. This helper performs no write,
+/// lease acquire/renew/takeover/clear or cancellation.
+pub(super) struct ApplicationScopeAuth {
+    pub(super) application_id: i64,
+    pub(super) workspace_binding: WorkspaceBindingResponse,
+    pub(super) lease_owner: String,
+}
+
+/// Resolve the authenticated application plus its owned binding and explicit
+/// write lease for scoped admission.
+///
+/// Reuses the same bearer actor lookup as `application_actor` and keeps its
+/// no-bearer/non-application 401 wording. A scope needs a resource-owned
+/// binding and an explicit nonblank lease owner; neither is accepted from
+/// headers.
+pub(super) async fn application_scope_auth(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<ApplicationScopeAuth, AppError> {
+    let Some(actor) = crate::auth::identity::mcp_actor_from_bearer(state, headers, false).await?
+    else {
+        return Err(AppError::unauthorized(
+            "bearer token required for internal API",
+        ));
+    };
+    let crate::actor::McpActor::ApplicationSubject {
+        application,
+        workspace_binding,
+        lease_owner,
+        ..
+    } = actor
+    else {
+        return Err(AppError::unauthorized(
+            "application bearer token required for internal API",
+        ));
+    };
+    let binding = *workspace_binding;
+    let resource_owned = binding
+        .resource_kind
+        .as_deref()
+        .is_some_and(|kind| !kind.trim().is_empty())
+        && binding
+            .resource_id
+            .as_deref()
+            .is_some_and(|id| !id.trim().is_empty());
+    if !resource_owned {
+        return Err(AppError::forbidden(
+            "workspace scope requires a resource-owned binding",
+        ));
+    }
+    let Some(lease_owner) = lease_owner.filter(|owner| !owner.trim().is_empty()) else {
+        return Err(AppError::forbidden(
+            "workspace scope requires an explicit write lease",
+        ));
+    };
+    Ok(ApplicationScopeAuth {
+        application_id: application.application_id,
+        workspace_binding: binding,
+        lease_owner,
+    })
+}
+
 pub(super) async fn resolve_binding_for_application(
     state: &AppState,
     headers: &HeaderMap,

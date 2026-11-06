@@ -173,6 +173,51 @@ impl RunnerBackend for DockerRunnerBackend {
         self.touch_runner_activity(owner);
     }
 
+    fn supports_workspace_binding_owner_quiescence(&self) -> bool {
+        true
+    }
+
+    fn quiesce_workspace_binding_owners<'a>(
+        &'a self,
+        workspace_binding_id: i64,
+        authorized_local_workspace_root: std::path::PathBuf,
+        expected_own: Option<super::backend::ExpectedOwnContainer>,
+    ) -> RunnerFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            let config = self.config.read().await.clone();
+            self.quiesce_workspace_binding_owners_with_config(
+                &config,
+                workspace_binding_id,
+                authorized_local_workspace_root,
+                expected_own,
+            )
+            .await
+        })
+    }
+
+    fn workspace_activity_count<'a>(
+        &'a self,
+        workspace_binding_id: i64,
+    ) -> RunnerFuture<'a, anyhow::Result<u32>> {
+        Box::pin(async move {
+            if workspace_binding_id <= 0 {
+                anyhow::bail!("invalid workspace binding id");
+            }
+            let active = self.active_ops.lock().expect("active ops map poisoned");
+            let mut total: u32 = 0;
+            for (key, count) in active.iter() {
+                let Some(owner) = super::docker_lifecycle::owner_from_stable_key(key) else {
+                    continue;
+                };
+                if owner_binding_id(&owner) != Some(workspace_binding_id) {
+                    continue;
+                }
+                total = total.saturating_add(u32::try_from(*count).unwrap_or(u32::MAX));
+            }
+            Ok(total)
+        })
+    }
+
     fn cleanup_runner_owner<'a>(
         &'a self,
         owner: RunnerOwner,
@@ -378,5 +423,18 @@ impl DockerRunnerBackend {
         }
         .await;
         super::execution_environment::file_lock::release_and_finish(file_lock, outcome)
+    }
+}
+
+fn owner_binding_id(owner: &RunnerOwner) -> Option<i64> {
+    match owner {
+        RunnerOwner::WorkspaceBinding {
+            workspace_binding_id,
+        }
+        | RunnerOwner::ApplicationPrincipal {
+            workspace_binding_id,
+            ..
+        } => Some(*workspace_binding_id),
+        _ => None,
     }
 }

@@ -8,9 +8,11 @@
 #[cfg(test)]
 mod ensure_tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use runner_protocol::{
-        EnsureExecutionEnvironmentRequest, RunnerOwner, StopExecutionEnvironmentRequest,
+        EnsureExecutionEnvironmentRequest, ExecutionEnvironmentWorkspaceScope, RunnerOwner,
+        StopExecutionEnvironmentRequest,
     };
 
     use super::super::{
@@ -36,7 +38,10 @@ mod ensure_tests {
         let result = ensure_execution_environment(
             &backend,
             &ExecutionEnvironmentProfile::default(),
-            EnsureExecutionEnvironmentRequest { owner },
+            EnsureExecutionEnvironmentRequest {
+                owner,
+                workspace_scope: None,
+            },
         )
         .await;
         assert!(result.is_err(), "disabled profile must fail closed");
@@ -49,6 +54,194 @@ mod ensure_tests {
             logged.is_empty(),
             "disabled must not touch docker, got: {logged}"
         );
+    }
+
+    #[tokio::test]
+    async fn scoped_ensure_creates_and_reuses_one_validated_private_service() {
+        use std::os::unix::fs::MetadataExt;
+
+        use runner_protocol::execution_environment::derive_state_volume_name;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let local_root = workspace.join("scope");
+        let state = temp.path().join("state");
+        std::fs::create_dir_all(&local_root).expect("workspace scope");
+        std::fs::create_dir_all(&state).expect("state dir");
+        let owner = support::env_owner(0);
+        let container = owner.container_name();
+        let owner_key = owner.stable_key();
+        let metadata = std::fs::metadata(&local_root).expect("local root metadata");
+        let (uid, gid) = (metadata.uid(), metadata.gid());
+        let volume = derive_state_volume_name(support::ENV_ID).expect("volume");
+        let image = format!(
+            "registry.example.com/team/service@sha256:{}",
+            "a".repeat(64)
+        );
+        let inspect = serde_json::json!({
+            "Name": format!("/{container}"),
+            "Id": "scoped-helper-id",
+            "State": {"Status": "running"},
+            "Config": {
+                "Image": image,
+                "User": format!("{uid}:{gid}"),
+                "WorkingDir": "/workspace",
+                "Labels": {
+                    "desk-foreman.owner": owner_key,
+                    "desk-foreman.manager": "test-manager",
+                    "desk-foreman.managed": "true",
+                    "desk-foreman.execution-environment": support::ENV_ID,
+                    "desk-foreman.generation": "0"
+                }
+            },
+            "HostConfig": {
+                "Privileged": false,
+                "PublishAllPorts": false,
+                "PortBindings": {}
+            },
+            "Mounts": [
+                {
+                    "Type": "volume",
+                    "Name": volume,
+                    "Source": format!("/var/lib/docker/volumes/{volume}/_data"),
+                    "Destination": "/state",
+                    "RW": true
+                },
+                {
+                    "Type": "bind",
+                    "Source": local_root.to_string_lossy(),
+                    "Destination": "/workspace",
+                    "RW": true
+                },
+                {"Type": "tmpfs", "Destination": "/tmp", "RW": true}
+            ]
+        })
+        .to_string();
+
+        let run = |mode: &str| {
+            let log = temp.path().join("scoped.log");
+            std::fs::write(&log, "").expect("seed log");
+            let inspect_file = temp.path().join("scoped-inspect.json");
+            std::fs::write(&inspect_file, &inspect).expect("inspect json");
+            let script = format!(
+                "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"ps\" ]; then\n  if [ \"{}\" = \"reuse\" ]; then echo \"{}\"; fi\n  exit 0\nfi\nif [ \"$1\" = \"inspect\" ]; then\n  cat \"{}\"\n  exit 0\nfi\nexit 0\n",
+                log.display(),
+                mode,
+                container,
+                inspect_file.display()
+            );
+            let fake = support::write_executable(temp.path(), &format!("docker-{mode}"), &script);
+            let backend = support::backend_with_cli(&fake.to_string_lossy());
+            (backend, log)
+        };
+
+        let profile = ExecutionEnvironmentProfile {
+            enabled: true,
+            stop_timeout: Duration::from_millis(500),
+            operation_deadline: Duration::from_secs(5),
+            volume_uid: Some(uid),
+            volume_gid: Some(gid),
+            state_workdir: TrustedStateWorkdir::Configured("/state/work".to_string()),
+            service: super::super::service::ServiceProfile::Configured(
+                super::super::service::ServiceProfileConfig {
+                    network: "df-private".to_string(),
+                    port: 8081,
+                    auth_username: "agent".to_string(),
+                    auth_env_name: "DF_SERVICE_TOKEN".to_string(),
+                },
+            ),
+            state_dir: Some(state.clone()),
+            ..ExecutionEnvironmentProfile::default()
+        };
+        unsafe {
+            std::env::set_var(
+                crate::runtime::workspace_service::WORKSPACE_SERVICE_IMAGE_ENV,
+                &image,
+            );
+        }
+        let request = || EnsureExecutionEnvironmentRequest {
+            owner: owner.clone(),
+            workspace_scope: Some(ExecutionEnvironmentWorkspaceScope {
+                workspace_binding_id: 5,
+                workspace_relative_path: "scope".to_string(),
+            }),
+        };
+
+        let (backend, log) = run("create");
+        {
+            let mut config = backend.config.write().await;
+            config.workspace_root = workspace.clone();
+            config.host_workspace_root = workspace.clone();
+        }
+        let created = ensure_execution_environment(&backend, &profile, request())
+            .await
+            .expect("scoped create must succeed");
+        assert_eq!(created.workspace_binding_id, Some(5));
+        let logged = std::fs::read_to_string(&log).expect("create log");
+        assert!(logged.contains("--mount type=bind"));
+        assert!(logged.contains("--workdir /workspace"));
+        assert!(logged.contains("-e DF_STATE_DIRECTORY=/state"));
+        assert!(logged.contains(&image));
+        assert!(logged.contains("--network df-private"));
+        assert!(
+            logged.contains("inspect scoped-helper-id")
+                || logged.contains(&format!("inspect {container}")),
+            "post-create identity must be inspected: {logged}"
+        );
+        let lines: Vec<&str> = logged.lines().collect();
+        let prep_index = lines
+            .iter()
+            .position(|line| line.starts_with("run --rm "))
+            .expect("scoped create must prepare the state volume ownership");
+        let prep = lines[prep_index];
+        assert!(
+            prep.contains(&format!("--mount type=volume,src={volume},dst=/state")),
+            "ownership prep must mount only the derived state volume: {prep}"
+        );
+        assert!(prep.contains("--cap-add CHOWN"), "got: {prep}");
+        assert!(prep.contains("--cap-add FOWNER"), "got: {prep}");
+        assert!(prep.contains("--user 0:0"), "got: {prep}");
+        assert!(!prep.contains("type=bind"), "no workspace bind: {prep}");
+        assert!(!prep.contains("--env-file"), "no credential file: {prep}");
+        assert!(!prep.contains("-R"), "no recursive ownership: {prep}");
+        let helper_index = lines
+            .iter()
+            .position(|line| line.starts_with("run ") && line.contains("--env-file"))
+            .expect("scoped create must launch the helper");
+        assert!(
+            prep_index < helper_index,
+            "state ownership must complete before the helper launch: {logged}"
+        );
+
+        let (backend, log) = run("reuse");
+        {
+            let mut config = backend.config.write().await;
+            config.workspace_root = workspace.clone();
+            config.host_workspace_root = workspace.clone();
+        }
+        let reused = ensure_execution_environment(&backend, &profile, request())
+            .await
+            .expect("same-generation scoped reuse must succeed");
+        assert_eq!(reused.workspace_binding_id, Some(5));
+        let logged = std::fs::read_to_string(&log).expect("reuse log");
+        assert_eq!(
+            logged
+                .lines()
+                .filter(|line| line.starts_with("run --rm "))
+                .count(),
+            1,
+            "reuse must still prepare only its own derived state volume: {logged}"
+        );
+        assert!(
+            !logged
+                .lines()
+                .any(|line| line.starts_with("run ") && line.contains("--env-file")),
+            "reuse must not create a second helper: {logged}"
+        );
+
+        unsafe {
+            std::env::remove_var(crate::runtime::workspace_service::WORKSPACE_SERVICE_IMAGE_ENV);
+        }
     }
 
     #[tokio::test]
@@ -82,6 +275,7 @@ mod ensure_tests {
             &support::enabled_profile(&state),
             EnsureExecutionEnvironmentRequest {
                 owner: owner.clone(),
+                workspace_scope: None,
             },
         )
         .await
@@ -126,7 +320,10 @@ mod ensure_tests {
         let result = ensure_execution_environment(
             &backend,
             &support::enabled_profile(&state),
-            EnsureExecutionEnvironmentRequest { owner: new_owner },
+            EnsureExecutionEnvironmentRequest {
+                owner: new_owner,
+                workspace_scope: None,
+            },
         )
         .await;
         assert!(result.is_err(), "old running generation must refuse");
@@ -182,6 +379,7 @@ mod ensure_tests {
             &support::enabled_profile(&state),
             EnsureExecutionEnvironmentRequest {
                 owner: support::env_owner(2),
+                workspace_scope: None,
             },
         )
         .await;
@@ -215,7 +413,10 @@ mod ensure_tests {
             let result = ensure_execution_environment(
                 &backend,
                 &support::bare_enabled_profile(),
-                EnsureExecutionEnvironmentRequest { owner },
+                EnsureExecutionEnvironmentRequest {
+                    owner,
+                    workspace_scope: None,
+                },
             )
             .await;
             assert!(result.is_err(), "malformed owner must be rejected");
@@ -271,10 +472,13 @@ mod ensure_tests {
             support::inspect_json("exited", &owner.stable_key(), support::ENV_ID, "0"),
         )
         .expect("inspect json");
+        let removed = temp.path().join("removed.marker");
         let script = format!(
-            "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"inspect\" ]; then\n  cat \"{}\"\n  exit 0\nfi\nexit 0\n",
+            "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"inspect\" ]; then\n  if [ -f \"{}\" ]; then\n    echo \"Error: No such container: $2\" >&2\n    exit 1\n  fi\n  cat \"{}\"\n  exit 0\nfi\nif [ \"$1\" = \"rm\" ]; then\n  touch \"{}\"\n  exit 0\nfi\nexit 0\n",
             log.display(),
-            inspect_file.display()
+            removed.display(),
+            inspect_file.display(),
+            removed.display()
         );
         let fake = support::write_executable(temp.path(), "docker-fake", &script);
         let backend = support::backend_with_cli(&fake.to_string_lossy());
@@ -340,6 +544,7 @@ mod ensure_tests {
                 &profile,
                 EnsureExecutionEnvironmentRequest {
                     owner: owner.clone(),
+                    workspace_scope: None,
                 },
             )
             .await;
@@ -377,7 +582,10 @@ mod ensure_tests {
         let backend = crate::runtime::DirectRunnerBackend::new();
         let owner = support::env_owner(0);
         let result = backend
-            .ensure_execution_environment(EnsureExecutionEnvironmentRequest { owner })
+            .ensure_execution_environment(EnsureExecutionEnvironmentRequest {
+                owner,
+                workspace_scope: None,
+            })
             .await;
         assert!(result.is_err());
         assert!(

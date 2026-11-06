@@ -10,8 +10,7 @@ use desk_foreman::{AppState, lifecycle::cleanup_archived_workspaces};
 use uuid::Uuid;
 
 use super::support::{
-    HttpOutcome, TaskFixture, admin_session, call, create_code_project_binding,
-    test_state_with_admin,
+    HttpOutcome, TaskFixture, admin_session, call, create_resource_binding, test_state_with_admin,
 };
 
 const ADMIN_LOGIN: &str = "task-admin";
@@ -51,11 +50,11 @@ impl AdminFixture {
         let other_root = workspace_root.join("other-workspace");
         std::fs::create_dir_all(&other_root).expect("other workspace");
         std::fs::write(other_root.join("keep.txt"), b"keep me").expect("seed file");
-        let other_binding_id = create_code_project_binding(
+        let other_binding_id = create_resource_binding(
             &fixture.database.pool,
             fixture.application_id,
             &other_root.to_string_lossy(),
-            "code_project:other",
+            "artifact:other",
         )
         .await;
 

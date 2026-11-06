@@ -46,7 +46,7 @@ pub async fn force_takeover_lease(fixture: &TaskFixture, owner: &str) -> HttpOut
     call(
         &fixture.base,
         "POST",
-        "/api/internal/resource-workspaces/code_project/alpha/lease/takeover",
+        "/api/internal/resource-workspaces/artifact/alpha/lease/takeover",
         Some(&fixture.application_token),
         &[fence_header(0)],
         serde_json::to_vec(&serde_json::json!({

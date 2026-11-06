@@ -8,84 +8,6 @@ use anyhow::{Context, bail};
 
 use crate::policy::{ALL_SCOPES, ResourceLimits};
 
-#[derive(Clone, Debug)]
-pub struct GitJobSettings {
-    pub wait: Duration,
-    pub deadline: Duration,
-    pub reserved_bytes: i64,
-    pub max_active: i64,
-    pub max_bytes: i64,
-    pub max_per_binding: i64,
-    pub max_per_manager: i64,
-    pub max_bytes_per_manager: i64,
-}
-
-impl GitJobSettings {
-    fn from_env() -> anyhow::Result<Option<Self>> {
-        Self::parse(
-            [
-                "GIT_JOB_WAIT_SECS",
-                "GIT_JOB_DEADLINE_SECS",
-                "GIT_JOB_RESERVED_BYTES",
-                "GIT_JOB_MAX_ACTIVE",
-                "GIT_JOB_MAX_BYTES",
-                "GIT_JOB_MAX_PER_BINDING",
-                "GIT_JOB_MAX_PER_MANAGER",
-                "GIT_JOB_MAX_BYTES_PER_MANAGER",
-            ]
-            .into_iter()
-            .map(|key| env::var(key).ok()),
-        )
-    }
-
-    fn parse(values: impl IntoIterator<Item = Option<String>>) -> anyhow::Result<Option<Self>> {
-        let values: Vec<Option<String>> = values.into_iter().collect();
-        let present = values.iter().filter(|value| value.is_some()).count();
-        if present == 0 {
-            return Ok(None);
-        }
-        if present != 8 {
-            anyhow::bail!("incomplete GIT_JOB_* configuration");
-        }
-        let mut parsed = Vec::with_capacity(8);
-        for value in values.into_iter().flatten() {
-            let value: u64 = value
-                .parse()
-                .map_err(|_| anyhow::anyhow!("invalid GIT_JOB_* value"))?;
-            let value = i64::try_from(value).map_err(|_| anyhow::anyhow!("GIT_JOB_* overflow"))?;
-            if value <= 0 {
-                anyhow::bail!("invalid GIT_JOB_* value");
-            }
-            parsed.push(value);
-        }
-        let wait_secs = parsed[0] as u64;
-        let deadline_secs = parsed[1] as u64;
-        let reserved_bytes = parsed[2];
-        let max_bytes = parsed[4];
-        let max_bytes_per_manager = parsed[7];
-        if wait_secs > 300
-            || deadline_secs < wait_secs
-            || reserved_bytes > max_bytes
-            || reserved_bytes > max_bytes_per_manager
-        {
-            anyhow::bail!("invalid GIT_JOB_* bounds");
-        }
-        if chrono::Duration::from_std(Duration::from_secs(deadline_secs)).is_err() {
-            anyhow::bail!("invalid GIT_JOB_* duration");
-        }
-        Ok(Some(Self {
-            wait: Duration::from_secs(wait_secs),
-            deadline: Duration::from_secs(deadline_secs),
-            reserved_bytes,
-            max_active: parsed[3],
-            max_bytes,
-            max_per_binding: parsed[5],
-            max_per_manager: parsed[6],
-            max_bytes_per_manager,
-        }))
-    }
-}
-
 #[derive(Clone)]
 pub struct AppConfig {
     pub bind_addr: String,
@@ -97,7 +19,6 @@ pub struct AppConfig {
     pub server_scopes: Vec<String>,
     pub server_limits: ResourceLimits,
     pub workspace_retention: Duration,
-    pub git_jobs: Option<GitJobSettings>,
     pub database_url: String,
     pub web_session_ttl: Duration,
     pub web_cookie_name: String,
@@ -163,7 +84,6 @@ impl AppConfig {
                 .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
                 .unwrap_or(true),
         };
-        let git_jobs = GitJobSettings::from_env()?;
         let workspace_retention = Duration::from_secs(
             env::var("WORKSPACE_RETENTION_DAYS")
                 .ok()
@@ -202,7 +122,6 @@ impl AppConfig {
             server_scopes,
             server_limits,
             workspace_retention,
-            git_jobs,
             database_url,
             web_session_ttl,
             web_cookie_name,
@@ -248,43 +167,7 @@ fn canonical_workspace_root(name: &str, path: &Path) -> anyhow::Result<PathBuf> 
 
 #[cfg(test)]
 mod tests {
-    use super::{GitJobSettings, comma_separated_values};
-
-    #[test]
-    fn git_job_settings_reject_partial_and_invalid_bounds() {
-        let full = [
-            Some("1".to_owned()),
-            Some("1".to_owned()),
-            Some("1".to_owned()),
-            Some("1".to_owned()),
-            Some("1".to_owned()),
-            Some("1".to_owned()),
-            Some("1".to_owned()),
-            Some("1".to_owned()),
-        ];
-        assert!(GitJobSettings::parse(full.clone()).is_ok());
-        let mut partial = full.clone();
-        partial[6] = None;
-        assert!(GitJobSettings::parse(partial).is_err());
-        let mut overflow = full.clone();
-        overflow[0] = Some("18446744073709551615".to_owned());
-        assert!(GitJobSettings::parse(overflow).is_err());
-        let mut zero = full.clone();
-        zero[3] = Some("0".to_owned());
-        assert!(GitJobSettings::parse(zero).is_err());
-        let mut deadline = full.clone();
-        deadline[0] = Some("2".to_owned());
-        deadline[1] = Some("1".to_owned());
-        assert!(GitJobSettings::parse(deadline).is_err());
-        let mut reservation = full.clone();
-        reservation[2] = Some("2".to_owned());
-        assert!(GitJobSettings::parse(reservation).is_err());
-        assert!(
-            GitJobSettings::parse(std::iter::repeat_n(None, 8))
-                .unwrap()
-                .is_none()
-        );
-    }
+    use super::comma_separated_values;
 
     #[test]
     fn comma_separated_values_trim_and_drop_blanks() {

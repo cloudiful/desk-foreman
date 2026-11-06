@@ -17,6 +17,7 @@ use super::{internal, resolve_task_manager, task_token_is_valid};
 use crate::db::execution_environments::lifecycle::{
     expire_overdue_jobs, find_job_by_id, load_jobs, proof_is_confirmed_stop,
 };
+use crate::db::workspace_bindings::workspace_scope_guard::workspace_scope_holds_binding;
 
 /// Whether the environment is in a shape that admits a task intent.
 ///
@@ -129,6 +130,13 @@ pub(super) async fn admit(
         .map_err(internal)?
         .ok_or(NativeTaskError::NotFound)?;
     check_binding(&binding, application_id, &request)?;
+    if workspace_scope_holds_binding(&mut tx, request.workspace_binding_id)
+        .await
+        .map_err(internal)?
+        .is_some()
+    {
+        return Err(NativeTaskError::UnresolvedBlockers);
+    }
     // A shared workspace carries at most one active task, across environments.
     // The binding row is locked here, so this read is fresh: a task admitted
     // while we waited is visible and refused as a conflict rather than
@@ -253,7 +261,7 @@ fn check_binding(
     if binding.application_id != application_id {
         return Err(NativeTaskError::NotFound);
     }
-    if !binding.is_active_code_project() {
+    if !binding.is_active_resource_workspace() {
         return Err(NativeTaskError::BindingIneligible);
     }
     if binding.lifecycle_blocks_admission() {

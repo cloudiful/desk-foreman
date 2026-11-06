@@ -9,7 +9,9 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use super::types::{ExecutionEnvironment, derive_state_volume_ref};
+use super::types::{
+    EXECUTION_ENVIRONMENT_INITIAL_STATE, ExecutionEnvironment, derive_state_volume_ref,
+};
 
 /// Outcome of an idempotent ensure.
 #[derive(Debug)]
@@ -35,6 +37,20 @@ pub enum InvalidateOutcome {
     NativeTaskActive,
 }
 
+/// The initial persisted state for one ensure identity.
+///
+/// An unscoped row keeps the ordinary `starting` state. A scoped row starts
+/// `absent` so the ordinary lifecycle preflight can pass before the authorized
+/// provision creates the container. This chooses a state; it never repairs an
+/// existing row or weakens a lifecycle guard.
+pub(super) fn initial_state_for_scope(workspace_binding_id: Option<i64>) -> &'static str {
+    if workspace_binding_id.is_some() {
+        "absent"
+    } else {
+        EXECUTION_ENVIRONMENT_INITIAL_STATE
+    }
+}
+
 /// Idempotent ensure for one `(application_id, external_user_id)` pair.
 ///
 /// Trims the opaque inputs, inserts a fresh UUID identity with a derived
@@ -47,10 +63,32 @@ pub async fn ensure_execution_environment(
     external_user_id: &str,
     runtime_kind: &str,
 ) -> anyhow::Result<EnsureOutcome> {
+    ensure_execution_environment_scoped(pool, application_id, external_user_id, runtime_kind, None)
+        .await
+}
+
+/// Idempotent ensure for one `(application_id, external_user_id, workspace_binding_id)` identity.
+///
+/// A `None` scope keeps the unscoped identity and the ordinary initial state;
+/// a positive scope converges only on the same binding and starts `absent` so
+/// ordinary preflight and authorized provision can proceed. The stored scope
+/// is never repaired or updated here.
+pub async fn ensure_execution_environment_scoped(
+    pool: &PgPool,
+    application_id: i64,
+    external_user_id: &str,
+    runtime_kind: &str,
+    workspace_binding_id: Option<i64>,
+) -> anyhow::Result<EnsureOutcome> {
+    if workspace_binding_id.is_some_and(|scope| scope <= 0) {
+        anyhow::bail!("workspace binding id must be positive");
+    }
+
     let external_user_id = external_user_id.trim().to_string();
     let runtime_kind = runtime_kind.trim().to_string();
     let environment_id = Uuid::new_v4();
     let state_volume_ref = derive_state_volume_ref(&environment_id);
+    let initial_state = initial_state_for_scope(workspace_binding_id);
 
     let inserted: Option<ExecutionEnvironment> = sqlx::query_file_as!(
         ExecutionEnvironment,
@@ -60,6 +98,8 @@ pub async fn ensure_execution_environment(
         external_user_id,
         runtime_kind,
         state_volume_ref,
+        workspace_binding_id,
+        initial_state,
     )
     .fetch_optional(pool)
     .await?;
@@ -73,6 +113,7 @@ pub async fn ensure_execution_environment(
         "src/sql/execution_environments/find_execution_environment_by_identity.sql",
         application_id,
         external_user_id,
+        workspace_binding_id,
     )
     .fetch_optional(pool)
     .await?;
@@ -116,6 +157,7 @@ pub async fn find_execution_environment_by_identity(
         "src/sql/execution_environments/find_execution_environment_by_identity.sql",
         application_id,
         external_user_id.trim(),
+        None::<i64>,
     )
     .fetch_optional(pool)
     .await

@@ -16,12 +16,17 @@ use uuid::Uuid;
 
 use crate::{
     AppState,
-    api::{internal::shared::application_actor, validation::ValidatedJson},
+    api::{
+        internal::shared::{application_actor, application_scope_auth},
+        validation::ValidatedJson,
+    },
     db::execution_environments::{
-        EnvironmentOperationDescriptor, LifecycleError,
+        EnvironmentOperationDescriptor, LifecycleError, ScopeAuthority,
         execution_environment_status as lifecycle_status,
         provision_execution_environment as lifecycle_provision,
+        provision_execution_environment_scoped as lifecycle_provision_scoped,
         replace_execution_environment as lifecycle_replace,
+        replace_execution_environment_scoped as lifecycle_replace_scoped,
         stop_execution_environment as lifecycle_stop,
     },
     error::AppError,
@@ -57,14 +62,40 @@ pub async fn provision_execution_environment(
     ValidatedJson(request): ValidatedJson<ProvisionExecutionEnvironmentRequest>,
 ) -> Result<Json<EnvironmentOperationDescriptor>, AppError> {
     let application_id = application_actor(&state, &headers).await?;
-    let descriptor = lifecycle_provision(
-        &state.db,
-        application_id,
-        environment_id,
-        request.expected_generation,
-        &request.operation_token,
-    )
-    .await
+    let stored =
+        crate::db::queries::find_execution_environment(&state.db, application_id, environment_id)
+            .await
+            .map_err(AppError::internal)?;
+    // The routing read chooses the branch only; the scoped sibling re-reads the
+    // stored scope and revalidates the locked binding/lease before any intent.
+    let descriptor = match stored {
+        Some(environment) if environment.workspace_binding_id.is_some() => {
+            let auth = application_scope_auth(&state, &headers).await?;
+            lifecycle_provision_scoped(
+                &state.db,
+                auth.application_id,
+                environment_id,
+                request.expected_generation,
+                &request.operation_token,
+                Some(ScopeAuthority {
+                    workspace_binding_id: auth.workspace_binding.workspace_binding_id,
+                    lease_owner: auth.lease_owner,
+                }),
+                Some(state.runner.as_ref()),
+            )
+            .await
+        }
+        _ => {
+            lifecycle_provision(
+                &state.db,
+                application_id,
+                environment_id,
+                request.expected_generation,
+                &request.operation_token,
+            )
+            .await
+        }
+    }
     .map_err(map_lifecycle_error)?;
     Ok(Json(descriptor))
 }
@@ -135,16 +166,42 @@ pub async fn replace_execution_environment(
     ValidatedJson(request): ValidatedJson<ReplaceExecutionEnvironmentRequest>,
 ) -> Result<Json<EnvironmentOperationDescriptor>, AppError> {
     let application_id = application_actor(&state, &headers).await?;
-    let descriptor = lifecycle_replace(
-        &state.db,
-        application_id,
-        environment_id,
-        request.expected_generation,
-        request.expected_container_generation,
-        request.expected_stop_job_id,
-        &request.operation_token,
-    )
-    .await
+    let stored =
+        crate::db::queries::find_execution_environment(&state.db, application_id, environment_id)
+            .await
+            .map_err(AppError::internal)?;
+    let descriptor = match stored {
+        Some(environment) if environment.workspace_binding_id.is_some() => {
+            let auth = application_scope_auth(&state, &headers).await?;
+            lifecycle_replace_scoped(
+                &state.db,
+                auth.application_id,
+                environment_id,
+                request.expected_generation,
+                request.expected_container_generation,
+                request.expected_stop_job_id,
+                &request.operation_token,
+                Some(ScopeAuthority {
+                    workspace_binding_id: auth.workspace_binding.workspace_binding_id,
+                    lease_owner: auth.lease_owner,
+                }),
+                Some(state.runner.as_ref()),
+            )
+            .await
+        }
+        _ => {
+            lifecycle_replace(
+                &state.db,
+                application_id,
+                environment_id,
+                request.expected_generation,
+                request.expected_container_generation,
+                request.expected_stop_job_id,
+                &request.operation_token,
+            )
+            .await
+        }
+    }
     .map_err(map_lifecycle_error)?;
     Ok(Json(descriptor))
 }
@@ -212,6 +269,19 @@ pub(super) fn map_lifecycle_error(error: LifecycleError) -> AppError {
         }
         LifecycleError::ManagerUnavailable => {
             AppError::service_unavailable("no runner manager is available to provision")
+        }
+        LifecycleError::ScopeAuthorityRequired => AppError::conflict(
+            "workspace-scoped environment requires an authenticated workspace scope",
+        ),
+        LifecycleError::ScopeIneligible => AppError::conflict("workspace scope is not authorized"),
+        LifecycleError::ScopeManagerUnavailable => AppError::service_unavailable(
+            "no single live runner manager is observed for this workspace",
+        ),
+        LifecycleError::ScopeBusy => {
+            AppError::conflict("workspace is busy with another execution owner")
+        }
+        LifecycleError::InvalidState => {
+            AppError::conflict("execution environment is not in a state that admits this operation")
         }
         LifecycleError::Internal(error) => AppError::internal(error),
     }

@@ -20,23 +20,72 @@ pub const EXECUTION_ENVIRONMENT_STOPPED_STATES: [&str; 3] = ["exited", "dead", "
 /// Explicitly absent after a positively identified missing container.
 pub const EXECUTION_ENVIRONMENT_ABSENT_STATE: &str = "absent";
 
-/// Idempotent ensure request. Only the owner travels; image, host paths,
-/// volumes, env, secrets, and endpoints are never accepted from requests.
+/// Internal, server-derived workspace scope for one ensure.
+///
+/// This is never an external image, host path, credential or mount selector:
+/// the manager derives any mount from the stored binding plus this bounded
+/// relative path. Malformed input is rejected, never normalized.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionEnvironmentWorkspaceScope {
+    pub workspace_binding_id: i64,
+    pub workspace_relative_path: String,
+}
+
+/// Idempotent ensure request. Only the owner and an optional internal
+/// workspace scope travel; image, host paths, volumes, env, secrets, and
+/// endpoints are never accepted from requests.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EnsureExecutionEnvironmentRequest {
     pub owner: RunnerOwner,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_scope: Option<ExecutionEnvironmentWorkspaceScope>,
 }
 
 /// Typed acknowledgment for a successful ensure. Echoes the request owner
 /// (including generation) with the observed container state. No secrets,
-/// host paths, or volume details.
+/// host paths, volume details or workspace-relative path.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EnsureExecutionEnvironmentAck {
     pub owner: RunnerOwner,
     pub container_name: String,
     pub state: String,
+    /// Observed workspace binding identity, absent for every ordinary and
+    /// native-task environment. The path is never echoed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_binding_id: Option<i64>,
+}
+
+impl ExecutionEnvironmentWorkspaceScope {
+    /// Validate the bounded relative scope. A refused value is never rewritten
+    /// into an acceptable one.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.workspace_binding_id <= 0 {
+            return Err("workspace scope binding id must be positive".to_string());
+        }
+        let path = self.workspace_relative_path.as_str();
+        if path.is_empty() || path.len() > 4096 {
+            return Err("workspace scope path must be 1..=4096 bytes".to_string());
+        }
+        if path.starts_with('/') {
+            return Err("workspace scope path must be relative".to_string());
+        }
+        if path
+            .bytes()
+            .any(|byte| byte == b'\\' || byte == 0 || byte.is_ascii_control())
+        {
+            return Err("workspace scope path contains a forbidden character".to_string());
+        }
+        if path
+            .split('/')
+            .any(|component| component.is_empty() || component == "." || component == "..")
+        {
+            return Err("workspace scope path has an invalid component".to_string());
+        }
+        Ok(())
+    }
 }
 
 /// Stop request for one exact generation. Only the owner travels.
@@ -184,6 +233,138 @@ mod tests {
         assert!(is_running_or_unknown_status("running"));
         assert!(is_running_or_unknown_status("unknown"));
         assert!(!is_running_or_unknown_status("exited"));
+    }
+
+    #[test]
+    fn workspace_scope_rejects_malformed_relative_paths() {
+        let good = "dir/file.txt";
+        let cases: [(&str, ExecutionEnvironmentWorkspaceScope, bool); 11] = [
+            (
+                "valid",
+                ExecutionEnvironmentWorkspaceScope {
+                    workspace_binding_id: 1,
+                    workspace_relative_path: good.to_string(),
+                },
+                true,
+            ),
+            (
+                "nonpositive binding",
+                ExecutionEnvironmentWorkspaceScope {
+                    workspace_binding_id: 0,
+                    workspace_relative_path: good.to_string(),
+                },
+                false,
+            ),
+            (
+                "empty path",
+                ExecutionEnvironmentWorkspaceScope {
+                    workspace_binding_id: 1,
+                    workspace_relative_path: String::new(),
+                },
+                false,
+            ),
+            (
+                "too long",
+                ExecutionEnvironmentWorkspaceScope {
+                    workspace_binding_id: 1,
+                    workspace_relative_path: "a".repeat(4097),
+                },
+                false,
+            ),
+            (
+                "absolute",
+                ExecutionEnvironmentWorkspaceScope {
+                    workspace_binding_id: 1,
+                    workspace_relative_path: "/dir/file".to_string(),
+                },
+                false,
+            ),
+            (
+                "backslash",
+                ExecutionEnvironmentWorkspaceScope {
+                    workspace_binding_id: 1,
+                    workspace_relative_path: "dir\\file".to_string(),
+                },
+                false,
+            ),
+            (
+                "control",
+                ExecutionEnvironmentWorkspaceScope {
+                    workspace_binding_id: 1,
+                    workspace_relative_path: "dir/\u{1}file".to_string(),
+                },
+                false,
+            ),
+            (
+                "empty component",
+                ExecutionEnvironmentWorkspaceScope {
+                    workspace_binding_id: 1,
+                    workspace_relative_path: "dir//file".to_string(),
+                },
+                false,
+            ),
+            (
+                "trailing slash",
+                ExecutionEnvironmentWorkspaceScope {
+                    workspace_binding_id: 1,
+                    workspace_relative_path: "dir/".to_string(),
+                },
+                false,
+            ),
+            (
+                "dot component",
+                ExecutionEnvironmentWorkspaceScope {
+                    workspace_binding_id: 1,
+                    workspace_relative_path: "dir/./file".to_string(),
+                },
+                false,
+            ),
+            (
+                "dotdot component",
+                ExecutionEnvironmentWorkspaceScope {
+                    workspace_binding_id: 1,
+                    workspace_relative_path: "dir/../file".to_string(),
+                },
+                false,
+            ),
+        ];
+        for (name, scope, expected_ok) in cases {
+            assert_eq!(scope.validate().is_ok(), expected_ok, "case: {name}");
+        }
+    }
+
+    #[test]
+    fn omitted_scope_and_binding_keep_the_old_wire_shape() {
+        let id = "123e4567-e89b-12d3-a456-426614174000";
+        let request = EnsureExecutionEnvironmentRequest {
+            owner: owner(id, 2),
+            workspace_scope: None,
+        };
+        let json = serde_json::to_value(&request).expect("request JSON");
+        assert!(json.get("workspace_scope").is_none());
+
+        let old = serde_json::json!({
+            "owner": {"ExecutionEnvironment": {"environment_id": id, "generation": 2}}
+        });
+        let decoded: EnsureExecutionEnvironmentRequest =
+            serde_json::from_value(old).expect("old request shape");
+        assert!(decoded.workspace_scope.is_none());
+
+        let ack = EnsureExecutionEnvironmentAck {
+            owner: owner(id, 2),
+            container_name: "df-env-test".to_string(),
+            state: "running".to_string(),
+            workspace_binding_id: None,
+        };
+        let ack_json = serde_json::to_value(&ack).expect("ack JSON");
+        assert!(ack_json.get("workspace_binding_id").is_none());
+        let decoded: EnsureExecutionEnvironmentAck = serde_json::from_value(serde_json::json!({
+            "owner": {"ExecutionEnvironment": {"environment_id": id, "generation": 2}},
+            "container_name": "df-env-test",
+            "state": "running"
+        }))
+        .expect("old ack shape");
+        assert!(decoded.workspace_binding_id.is_none());
     }
 
     #[test]

@@ -67,35 +67,6 @@ async fn a_native_task_survives_legacy_transition_attempts() {
     );
     drop(guard_tx);
 
-    // Git sync for this workspace goes through the fenced write lock and must
-    // be refused rather than dispatching.
-    let sync = super::support::call(
-        &fixture.base,
-        "POST",
-        "/api/internal/resource-workspaces/code_project/alpha/git/sync",
-        Some(&fixture.application_token),
-        &[
-            super::support::fence_header(0),
-            (
-                "X-DF-Workspace-Key".to_string(),
-                "code_project:alpha".to_string(),
-            ),
-        ],
-        serde_json::to_vec(&serde_json::json!({
-            "remote_url": "https://example.invalid/repo.git"
-        }))
-        .expect("body")
-        .as_slice(),
-    )
-    .await;
-    // 403 is the fenced-write refusal, so the request reached the guard rather
-    // than failing earlier on routing or validation.
-    assert_eq!(
-        sync.status,
-        403,
-        "a native task must block the legacy git/sync writer: {}",
-        sync.body_text()
-    );
     fixture.teardown().await;
 }
 

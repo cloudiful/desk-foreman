@@ -5,7 +5,10 @@ use std::time::Duration;
 use runner_protocol::RunnerOwner;
 use tokio::sync::RwLock;
 
-use super::{DockerRunnerBackend, docker_lifecycle::legacy_workspace_mount_matches};
+use super::{
+    DockerRunnerBackend,
+    docker_lifecycle::{is_strict_host_workspace_child, legacy_workspace_mount_matches},
+};
 use crate::config::RunnerManagerConfig;
 use crate::runtime::backend::{RunnerBackend, RunnerOperationLease};
 
@@ -19,16 +22,6 @@ pub(super) fn test_config() -> RunnerManagerConfig {
         workspace_root: PathBuf::from("/tmp"),
         host_workspace_root: PathBuf::from("/tmp"),
         image: "test-image".to_string(),
-        git_image: None,
-        git_private_root: None,
-        git_host_private_root: None,
-        git_network: None,
-        git_broker_host: None,
-        git_max_fetch_volume_bytes: None,
-        git_max_bundle_bytes: None,
-        git_max_logical_object_bytes: None,
-        git_max_checkout_bytes: None,
-        git_max_tree_entries: None,
         workdir: "/workspace".to_string(),
         network_enabled: false,
         max_output_bytes: 256,
@@ -247,6 +240,32 @@ fn active_operation_lookup_works_for_another_owner() {
     assert!(!backend.has_active_operation(&key));
 }
 
+#[tokio::test]
+async fn workspace_activity_count_matches_binding_owners_only() {
+    let backend = backend();
+    let binding = RunnerOwner::WorkspaceBinding {
+        workspace_binding_id: 5,
+    };
+    let principal = RunnerOwner::ApplicationPrincipal {
+        application_id: 7,
+        workspace_binding_id: 5,
+        principal_digest: "a".repeat(64),
+    };
+    let other_binding = RunnerOwner::WorkspaceBinding {
+        workspace_binding_id: 6,
+    };
+    let user = RunnerOwner::InternalUser { user_id: 1 };
+    backend.bump_active(&binding.stable_key());
+    backend.bump_active(&principal.stable_key());
+    backend.bump_active(&other_binding.stable_key());
+    backend.bump_active(&user.stable_key());
+    backend.bump_active(&user.stable_key());
+
+    assert_eq!(backend.workspace_activity_count(5).await.unwrap(), 2);
+    assert_eq!(backend.workspace_activity_count(6).await.unwrap(), 1);
+    assert_eq!(backend.workspace_activity_count(7).await.unwrap(), 0);
+}
+
 #[test]
 fn operation_lease_releases_active_owner_on_drop() {
     let backend = backend();
@@ -269,6 +288,87 @@ fn legacy_workspace_mount_must_stay_under_manager_root() {
     assert!(!legacy_workspace_mount_matches(
         &config,
         Some(std::path::Path::new("/other-manager/workspace"))
+    ));
+}
+
+#[test]
+fn workspace_mount_maps_only_a_strict_normal_child() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = temp.path();
+    let child = base.join("workspace");
+    std::fs::create_dir_all(&child).unwrap();
+    let mut config = test_config();
+    config.workspace_root = base.to_path_buf();
+    config.host_workspace_root = PathBuf::from("/host/base");
+    assert_eq!(
+        DockerRunnerBackend::workspace_mount(&config, &child).unwrap(),
+        PathBuf::from("/host/base/workspace")
+    );
+
+    assert!(DockerRunnerBackend::workspace_mount(&config, base).is_err());
+    assert!(
+        DockerRunnerBackend::workspace_mount(&config, &base.parent().unwrap().join("elsewhere"))
+            .is_err()
+    );
+    assert!(DockerRunnerBackend::workspace_mount(&config, std::path::Path::new("/")).is_err());
+    assert!(
+        DockerRunnerBackend::workspace_mount(&config, std::path::Path::new("workspace")).is_err()
+    );
+
+    let file = base.join("file");
+    std::fs::write(&file, b"x").unwrap();
+    assert!(DockerRunnerBackend::workspace_mount(&config, &file).is_err());
+
+    let comma = base.join("a,b");
+    std::fs::create_dir_all(&comma).unwrap();
+    assert!(DockerRunnerBackend::workspace_mount(&config, &comma).is_err());
+
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).unwrap();
+    let link = base.join("alias");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    assert!(DockerRunnerBackend::workspace_mount(&config, &link).is_err());
+
+    let nested = target.join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    let nested_link = base.join("nested-alias");
+    std::os::unix::fs::symlink(&nested, &nested_link).unwrap();
+    assert!(DockerRunnerBackend::workspace_mount(&config, &nested_link).is_err());
+
+    for workdir in [
+        "workspace",
+        "/",
+        "/workspace/",
+        "/work/../space",
+        "/work//space",
+    ] {
+        let mut bad = config.clone();
+        bad.workdir = workdir.to_string();
+        assert!(
+            DockerRunnerBackend::workspace_mount(&bad, &child).is_err(),
+            "workdir {workdir} must be rejected"
+        );
+    }
+
+    assert!(is_strict_host_workspace_child(
+        std::path::Path::new("/host/base"),
+        Some(std::path::Path::new("/host/base/workspace"))
+    ));
+    assert!(!is_strict_host_workspace_child(
+        std::path::Path::new("/host/base"),
+        Some(std::path::Path::new("/host/base"))
+    ));
+    assert!(!is_strict_host_workspace_child(
+        std::path::Path::new("/host/base"),
+        Some(std::path::Path::new("/host/other/workspace"))
+    ));
+    assert!(!is_strict_host_workspace_child(
+        std::path::Path::new("/host/base"),
+        Some(std::path::Path::new("/host/base/../other"))
+    ));
+    assert!(!is_strict_host_workspace_child(
+        std::path::Path::new("/host/base"),
+        None
     ));
 }
 
@@ -1076,9 +1176,7 @@ async fn legacy_ensure_rejects_execution_environment_owner_before_docker() {
         generation: 0,
     };
 
-    let result = backend
-        .ensure_runner(&owner, std::path::Path::new("/tmp"), false)
-        .await;
+    let result = backend.ensure_runner(&owner, temp.path(), false).await;
 
     let error = result.expect_err("environment owners must be rejected by the legacy path");
     assert!(
@@ -1105,13 +1203,255 @@ async fn legacy_ensure_still_enters_docker_for_a_workspace_owner() {
 
     // The guard is scoped to environment owners: a legacy workspace owner still
     // reaches Docker even though the fake CLI cannot complete a real ensure.
-    let _ = backend
-        .ensure_runner(&owner, std::path::Path::new("/tmp"), false)
-        .await;
+    let _ = backend.ensure_runner(&owner, temp.path(), false).await;
 
     let logged = std::fs::read_to_string(&log).expect("read log");
     assert!(
         !logged.is_empty(),
         "a workspace owner must not be blocked before Docker"
+    );
+}
+
+fn backend_from_config(config: RunnerManagerConfig, docker_cli: &str) -> Arc<DockerRunnerBackend> {
+    let mut config = config;
+    config.docker_cli = docker_cli.to_string();
+    DockerRunnerBackend::new(
+        Arc::new(RwLock::new(config)),
+        "test-manager".to_string(),
+        crate::runtime::RunnerLifecycleReporter::noop(),
+        crate::runtime::NativeTaskStore::with_uid_source(
+            None,
+            crate::runtime::execution_environment::service::host_identity::UidSource::Fixed(1000),
+        ),
+    )
+}
+
+fn write_inspect_fake(
+    dir: &std::path::Path,
+    name: &str,
+    log: &std::path::Path,
+    inspect_body: &str,
+) -> std::path::PathBuf {
+    let path = dir.join(name);
+    let script = format!(
+        "#!/bin/bash\nif [ \"$1\" = \"{READY_ARG}\" ]; then exit 0; fi\necho \"$@\" >> '{}'\n{}\n",
+        log.display(),
+        inspect_body
+    );
+    std::fs::write(&path, script).expect("write fake docker");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path)
+            .expect("stat fake docker")
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).expect("chmod fake docker");
+    }
+    probe_fixture_readiness(&path, spawn_fixture_readiness_probe)
+        .expect("published fake docker must be executable");
+    path
+}
+
+fn mount_metadata(
+    owner: &RunnerOwner,
+    manager: serde_json::Value,
+    source: &std::path::Path,
+) -> String {
+    serde_json::json!({
+        "Name": format!("/{}", owner.container_name()),
+        "Id": "test-id",
+        "State": {"Status": "running"},
+        "Config": {"Labels": {
+            "desk-foreman.manager": manager,
+            "desk-foreman.owner": owner.stable_key(),
+            "desk-foreman.managed": "true"
+        }},
+        "Mounts": [{"Destination": "/workspace", "Source": source}]
+    })
+    .to_string()
+}
+
+fn scoped_backend(
+    temp: &std::path::Path,
+    fake: &std::path::Path,
+) -> (Arc<DockerRunnerBackend>, PathBuf) {
+    let child = temp.join("workspace");
+    std::fs::create_dir_all(&child).unwrap();
+    let mut config = test_config();
+    config.workspace_root = temp.to_path_buf();
+    config.host_workspace_root = temp.to_path_buf();
+    let backend = backend_from_config(config, fake.to_str().unwrap());
+    (backend, child)
+}
+
+#[tokio::test]
+async fn current_manager_wide_mount_is_refused_without_cleanup() {
+    let temp = tempfile::tempdir().unwrap();
+    let owner = RunnerOwner::WorkspaceBinding {
+        workspace_binding_id: 42,
+    };
+    let log = temp.path().join("wide-current.log");
+    std::fs::write(&log, "").unwrap();
+    let metadata = mount_metadata(&owner, serde_json::json!("test-manager"), temp.path());
+    let fake = write_inspect_fake(
+        temp.path(),
+        "docker",
+        &log,
+        &format!("if [ \"$1\" = inspect ]; then printf '%s\\n' '{metadata}'; fi"),
+    );
+    let (backend, child) = scoped_backend(temp.path(), &fake);
+    let error = backend
+        .ensure_runner(&owner, &child, false)
+        .await
+        .expect_err("a wide current-manager container must be refused");
+    assert!(
+        error.to_string().contains("incompatible workspace mount"),
+        "{error}"
+    );
+    let logged = std::fs::read_to_string(&log).unwrap();
+    assert!(logged.contains("inspect"));
+    assert!(!logged.lines().any(|line| {
+        line.starts_with("run ")
+            || line.starts_with("start ")
+            || line.starts_with("stop ")
+            || line.starts_with("rm ")
+    }));
+}
+
+#[tokio::test]
+async fn legacy_wide_mount_is_refused_without_cleanup() {
+    let temp = tempfile::tempdir().unwrap();
+    let owner = RunnerOwner::WorkspaceBinding {
+        workspace_binding_id: 43,
+    };
+    let log = temp.path().join("wide-legacy.log");
+    std::fs::write(&log, "").unwrap();
+    let metadata = mount_metadata(&owner, serde_json::Value::Null, temp.path());
+    let fake = write_inspect_fake(
+        temp.path(),
+        "docker",
+        &log,
+        &format!("if [ \"$1\" = inspect ]; then printf '%s\\n' '{metadata}'; fi"),
+    );
+    let (backend, child) = scoped_backend(temp.path(), &fake);
+    let error = backend
+        .ensure_runner(&owner, &child, false)
+        .await
+        .expect_err("a wide legacy container must be refused");
+    assert!(
+        error.to_string().contains("incompatible workspace mount"),
+        "{error}"
+    );
+    let logged = std::fs::read_to_string(&log).unwrap();
+    assert!(logged.contains("inspect"));
+    assert!(!logged.lines().any(|line| {
+        line.starts_with("run ")
+            || line.starts_with("start ")
+            || line.starts_with("stop ")
+            || line.starts_with("rm ")
+    }));
+}
+
+#[tokio::test]
+async fn narrow_existing_container_is_reused_with_exact_mount() {
+    let temp = tempfile::tempdir().unwrap();
+    let owner = RunnerOwner::WorkspaceBinding {
+        workspace_binding_id: 44,
+    };
+    let log = temp.path().join("narrow.log");
+    std::fs::write(&log, "").unwrap();
+    let child_probe = temp.path().join("workspace");
+    std::fs::create_dir_all(&child_probe).unwrap();
+    let metadata = mount_metadata(&owner, serde_json::json!("test-manager"), &child_probe);
+    let fake = write_inspect_fake(
+        temp.path(),
+        "docker",
+        &log,
+        &format!("if [ \"$1\" = inspect ]; then printf '%s\\n' '{metadata}'; fi"),
+    );
+    let (backend, child) = scoped_backend(temp.path(), &fake);
+    assert_eq!(child, child_probe);
+    let name = backend
+        .ensure_runner(&owner, &child, false)
+        .await
+        .expect("a narrow matching container must be reused");
+    assert_eq!(name, owner.container_name());
+    let logged = std::fs::read_to_string(&log).unwrap();
+    assert!(logged.contains("inspect"));
+    assert!(!logged.lines().any(|line| {
+        line.starts_with("run ")
+            || line.starts_with("start ")
+            || line.starts_with("stop ")
+            || line.starts_with("rm ")
+    }));
+}
+
+#[tokio::test]
+async fn create_uses_exact_single_child_mount_and_workdir() {
+    let temp = tempfile::tempdir().unwrap();
+    let owner = RunnerOwner::WorkspaceBinding {
+        workspace_binding_id: 45,
+    };
+    let log = temp.path().join("create.log");
+    std::fs::write(&log, "").unwrap();
+    let fake = write_inspect_fake(
+        temp.path(),
+        "docker",
+        &log,
+        "if [ \"$1\" = inspect ]; then echo 'Error: No such container' >&2; exit 1; fi",
+    );
+    let (backend, child) = scoped_backend(temp.path(), &fake);
+    let _ = backend.ensure_runner(&owner, &child, false).await;
+    let logged = std::fs::read_to_string(&log).unwrap();
+    let run = logged
+        .lines()
+        .find(|line| line.starts_with("run "))
+        .expect("a missing container must be created");
+    assert!(
+        run.contains(&format!("{}:/workspace", child.display())),
+        "run argv must mount the exact single child: {run}"
+    );
+    assert!(run.contains("-w /workspace"), "run argv workdir: {run}");
+}
+
+#[tokio::test]
+async fn reconcile_skips_wide_ordinary_and_leaves_private_containers_alone() {
+    let temp = tempfile::tempdir().unwrap();
+    let wide_owner = RunnerOwner::WorkspaceBinding {
+        workspace_binding_id: 46,
+    };
+    let wide_name = wide_owner.container_name();
+    let private_name = "desk-foreman-execution-environment-private";
+    let private_owner_key = "execution_environment:123e4567-e89b-12d3-a456-426614174000:1";
+    let log = temp.path().join("reconcile.log");
+    std::fs::write(&log, "").unwrap();
+    let wide = mount_metadata(&wide_owner, serde_json::json!("test-manager"), temp.path());
+    let private = serde_json::json!({
+        "Name": format!("/{private_name}"),
+        "Id": "private-id",
+        "State": {"Status": "running"},
+        "Config": {"Labels": {
+            "desk-foreman.manager": "test-manager",
+            "desk-foreman.owner": private_owner_key,
+            "desk-foreman.managed": "true"
+        }},
+        "Mounts": [{"Destination": "/workspace", "Source": temp.path()}]
+    })
+    .to_string();
+    let inspect = format!(
+        "if [ \"$1\" = ps ]; then printf '%s\\n' '{wide_name}' '{private_name}'; exit 0; fi\nif [ \"$1\" = inspect ]; then if [ \"$2\" = '{private_name}' ]; then printf '%s\\n' '{private}'; else printf '%s\\n' '{wide}'; fi; fi"
+    );
+    let fake = write_inspect_fake(temp.path(), "docker", &log, &inspect);
+    let mut config = test_config();
+    config.workspace_root = temp.path().to_path_buf();
+    config.host_workspace_root = temp.path().to_path_buf();
+    let backend = backend_from_config(config, fake.to_str().unwrap());
+    backend.reconcile_containers().await.unwrap();
+    let logged = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        !logged
+            .lines()
+            .any(|line| { line.starts_with("stop ") || line.starts_with("rm ") })
     );
 }

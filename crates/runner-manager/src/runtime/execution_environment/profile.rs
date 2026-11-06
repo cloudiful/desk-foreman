@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use super::DEFAULT_OPERATION_DEADLINE;
-use super::service::ServiceProfile;
+use super::service::{ServiceProfile, ServiceProfileConfig};
 use command::TrustedCommand;
 use workdir::TrustedStateWorkdir;
 
@@ -52,6 +52,19 @@ impl std::fmt::Debug for EnsureProcessProfile<'_> {
             .field("gid", &self.gid)
             .finish()
     }
+}
+
+/// Resolved scoped private-service inputs.
+///
+/// The helper image owns its `ENTRYPOINT`, so the command slice is always
+/// empty. The service profile is required and the resolved uid:gid must be
+/// exactly the ownership of the authorized local workspace root.
+pub(crate) struct EnsureHelperProfile<'a> {
+    pub(crate) state_workdir: &'a str,
+    pub(crate) command: &'a [String],
+    pub(crate) uid: u32,
+    pub(crate) gid: u32,
+    pub(crate) service: &'a ServiceProfileConfig,
 }
 
 /// Trusted manager-level opt-in for environment primitives.
@@ -141,6 +154,56 @@ impl ExecutionEnvironmentProfile {
             state_workdir,
             uid,
             gid,
+        })
+    }
+
+    /// Resolve the scoped private-service launch inputs.
+    ///
+    /// A scoped helper requires the configured pinned image entrypoint to run
+    /// with no command, a non-root uid:gid that exactly owns the authorized
+    /// local workspace root, and a fully configured private-service profile.
+    pub(crate) fn ensure_helper_profile(
+        &self,
+        authorized_user_spec: &str,
+    ) -> anyhow::Result<EnsureHelperProfile<'_>> {
+        let state_workdir = match &self.state_workdir {
+            TrustedStateWorkdir::Configured(path) => path.as_str(),
+            TrustedStateWorkdir::Unset => anyhow::bail!(
+                "execution environment state working directory (RUNNER_EXECUTION_ENVIRONMENT_STATE_WORKDIR) is not configured; refusing to guess a working directory inside the state mount"
+            ),
+            TrustedStateWorkdir::Invalid(reason) => anyhow::bail!("{reason}"),
+        };
+        let (uid, gid) = self.ensure_volume_ownership()?;
+        if uid == 0 {
+            anyhow::bail!(
+                "execution environment volume uid must be a non-root user; refusing to run the scoped helper as root"
+            );
+        }
+        if format!("{uid}:{gid}") != authorized_user_spec {
+            anyhow::bail!(
+                "execution environment uid:gid does not match the authorized local workspace root owner"
+            );
+        }
+        let service = match &self.service {
+            ServiceProfile::Configured(config) => config,
+            ServiceProfile::Unset => anyhow::bail!(
+                "workspace-scoped execution environments require a configured private service profile"
+            ),
+            ServiceProfile::Invalid(reason) => anyhow::bail!("{reason}"),
+        };
+        if crate::runtime::execution_environment::workspace_scope::is_reserved_service_env(
+            &service.auth_env_name,
+        ) {
+            anyhow::bail!(
+                "private service auth variable must not use a reserved execution environment name"
+            );
+        }
+        Ok(EnsureHelperProfile {
+            state_workdir,
+            command: &[],
+            uid,
+            gid,
+            service,
         })
     }
 

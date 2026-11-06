@@ -185,6 +185,7 @@ mod tests {
                         owner: request.owner,
                         container_name: "test-native-task".to_string(),
                         state: "running".to_string(),
+                        workspace_binding_id: None,
                     },
                 })
             })

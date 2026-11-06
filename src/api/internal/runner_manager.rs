@@ -19,9 +19,6 @@ use crate::{AppState, error::AppError};
 use super::runner_manager_environment_jobs::{
     complete_environment_job_result, next_assigned_environment_job, routes_to_durable_handler,
 };
-use super::runner_manager_git_jobs::{
-    complete_git_job_result, next_assigned_git_job, routes_to_git_handler,
-};
 
 /// Authenticate a runner-manager request from its bearer token.
 ///
@@ -105,10 +102,6 @@ pub async fn next_runner_job(
     if let Some(job) = next_assigned_environment_job(&state, manager.runner_manager_id).await? {
         return Ok(Json(Some(job)));
     }
-    // Secret-free Git claims follow the existing durable environment path.
-    if let Some(job) = next_assigned_git_job(&state, manager.runner_manager_id).await? {
-        return Ok(Json(Some(job)));
-    }
     let job = tokio::time::timeout(
         std::time::Duration::from_secs(RUNNER_JOB_POLL_TIMEOUT_SECS),
         state.runner_broker.next_job(manager.runner_manager_id),
@@ -131,11 +124,6 @@ pub async fn complete_runner_job(
     Json(result): Json<RunnerJobResult>,
 ) -> Result<StatusCode, AppError> {
     let manager = runner_manager_from_token(&state, &headers).await?;
-    // Git results use their own reserved prefix and never fall through to a
-    // different durable or legacy job family.
-    if routes_to_git_handler(&result.job_id) {
-        return complete_git_job_result(&state, manager.runner_manager_id, result).await;
-    }
     // A reserved durable id is handled here exclusively; a malformed prefixed
     // id is rejected and never falls back to the legacy broker.
     if routes_to_durable_handler(&result.job_id) {

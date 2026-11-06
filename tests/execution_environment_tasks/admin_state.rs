@@ -28,7 +28,6 @@ pub async fn test_state_with_admin(
         config: Arc::new(config),
         runner: Arc::clone(&base.runner),
         runner_broker: Arc::clone(&base.runner_broker),
-        git_job_credentials: Arc::clone(&base.git_job_credentials),
         db: pool,
     };
     desk_foreman::db::bootstrap_admin(&state.db, &state.config)
