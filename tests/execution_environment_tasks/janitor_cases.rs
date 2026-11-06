@@ -7,7 +7,7 @@
 //! still name what was removed. A silently skipped audit is a failure.
 
 use super::admin_fixture::AdminFixture;
-use super::support::create_code_project_binding;
+use super::support::create_resource_binding;
 
 #[tokio::test]
 async fn the_janitor_skips_a_workspace_a_native_task_owns() {
@@ -69,11 +69,11 @@ async fn orphan_workspace(admin: &AdminFixture) -> (i64, std::path::PathBuf) {
     let orphan_root = admin.admin_state.config.workspace_root.join("orphan");
     std::fs::create_dir_all(&orphan_root).expect("orphan workspace");
     std::fs::write(orphan_root.join("stale.txt"), b"stale").expect("seed orphan file");
-    let orphan_binding = create_code_project_binding(
+    let orphan_binding = create_resource_binding(
         &admin.fixture.database.pool,
         admin.fixture.application_id,
         &orphan_root.to_string_lossy(),
-        "code_project:orphan",
+        "artifact:orphan",
     )
     .await;
     admin.archive_for_janitor(orphan_binding).await;

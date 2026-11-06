@@ -242,7 +242,6 @@ fn app_state_with_runner(root: PathBuf, runner: Arc<dyn RunnerService>) -> AppSt
                 network_enabled: true,
             },
             workspace_retention: Duration::from_secs(30 * 86_400),
-            git_jobs: None,
             database_url: "postgres://example.invalid/test".to_string(),
             web_session_ttl: Duration::from_secs(3600),
             web_cookie_name: "desk_foreman_session".to_string(),
@@ -260,9 +259,6 @@ fn app_state_with_runner(root: PathBuf, runner: Arc<dyn RunnerService>) -> AppSt
             PgPoolOptions::new()
                 .connect_lazy("postgres://example.invalid/test")
                 .expect("lazy pool"),
-        ),
-        git_job_credentials: Arc::new(
-            crate::runner::git_job_credentials::GitJobCredentialStore::new(),
         ),
         db: PgPoolOptions::new()
             .connect_lazy("postgres://example.invalid/test")
@@ -371,7 +367,7 @@ fn test_actor(root: &Path, user_id: i64) -> ActorContext {
     }
 }
 
-/// Application actor bound to a shared `code_project` resource workspace that
+/// Application actor bound to a shared `artifact` resource workspace that
 /// currently holds no write lease, mirroring a caller that sends no
 /// `X-DF-Lease-Owner` header.
 fn resource_workspace_actor(root: &Path, lease_owner: Option<&str>) -> ActorContext {
@@ -383,7 +379,7 @@ fn resource_workspace_actor(root: &Path, lease_owner: Option<&str>) -> ActorCont
         workspace_binding_id: 1,
         application_id: 1,
         external_user_id: "__resource__".to_string(),
-        workspace_key: "code_project:abc".to_string(),
+        workspace_key: "artifact:abc".to_string(),
         external_user_hash: "hash".to_string(),
         workspace_root: "/tmp/ws".to_string(),
         is_active: true,
@@ -392,7 +388,7 @@ fn resource_workspace_actor(root: &Path, lease_owner: Option<&str>) -> ActorCont
         updated_at: Utc::now(),
         lifecycle_state: "active".to_string(),
         archived_at: None,
-        resource_kind: Some("code_project".to_string()),
+        resource_kind: Some("artifact".to_string()),
         resource_id: Some("abc".to_string()),
         write_lease_owner: None,
         write_lease_acquired_at: None,
@@ -423,6 +419,17 @@ async fn resource_workspace_reads_are_lease_free_and_writes_stay_lease_gated() {
     // admit_fenced_write over the locked fresh row; the same gate denies a
     // lease-less caller with the takeover guidance contract ...
     let binding = actor.workspace_binding.as_ref().expect("resource binding");
+    // Container-backed reads revalidate the same fresh row lock but never
+    // require or consult a write lease; a non-active or archived row refuses.
+    crate::actor::admit_read(Some(binding), binding)
+        .expect("an active binding admits reads without a lease");
+    let mut archived = binding.clone();
+    archived.is_active = false;
+    archived.lifecycle_state = "archived".to_string();
+    assert!(
+        crate::actor::admit_read(Some(&archived), binding).is_err(),
+        "a guarded binding must refuse read dispatch"
+    );
     let denied = crate::actor::admit_fenced_write(Some(binding), None)
         .expect_err("mutating admission must deny a lease-less caller");
     assert!(

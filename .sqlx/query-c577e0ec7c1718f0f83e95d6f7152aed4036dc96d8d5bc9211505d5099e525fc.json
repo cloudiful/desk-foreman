@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH\n    deleted_audit AS (\n        DELETE FROM audit_log\n        WHERE workspace_binding_id IN (\n            SELECT workspace_binding_id\n            FROM workspace_bindings\n            WHERE application_id = $1\n        )\n        OR (action = 'workspace.delete' AND target_type = 'workspace_binding' AND target_id = ANY($3::text[]))\n    ),\n    deleted_tasks AS (\n        DELETE FROM execution_environment_tasks WHERE application_id = $1\n    ),\n    deleted_jobs AS (\n        DELETE FROM execution_environment_jobs WHERE application_id = $1\n    ),\n    deleted_environments AS (\n        DELETE FROM execution_environments WHERE application_id = $1\n    ),\n    deleted_bindings AS (\n        DELETE FROM workspace_bindings WHERE application_id = $1\n    ),\n    deleted_manager AS (\n        DELETE FROM runner_managers WHERE runner_manager_id = $2\n    )\nDELETE FROM applications WHERE application_id = $1;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c577e0ec7c1718f0f83e95d6f7152aed4036dc96d8d5bc9211505d5099e525fc"
+}

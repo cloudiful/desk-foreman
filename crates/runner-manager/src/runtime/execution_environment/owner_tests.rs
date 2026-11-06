@@ -130,7 +130,10 @@ mod owner_tests {
         let result = ensure_execution_environment(
             &backend,
             &enabled(&state),
-            EnsureExecutionEnvironmentRequest { owner },
+            EnsureExecutionEnvironmentRequest {
+                owner,
+                workspace_scope: None,
+            },
         )
         .await;
         assert!(
@@ -178,7 +181,10 @@ mod owner_tests {
         let result = ensure_execution_environment(
             &backend,
             &enabled(&state),
-            EnsureExecutionEnvironmentRequest { owner },
+            EnsureExecutionEnvironmentRequest {
+                owner,
+                workspace_scope: None,
+            },
         )
         .await;
         assert!(

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use desk_foreman::runner::RunnerFuture;
@@ -10,6 +11,16 @@ use runner_protocol::{
     StopNativeTaskRequest, StopNativeTaskResult, StopWorkspacePrincipalAck,
     StopWorkspacePrincipalRequest,
 };
+
+/// Exact identity of the one own service container that quiescence must
+/// exempt instead of stopping. Constructed only after the caller has fully
+/// validated the scoped container under the environment locks.
+#[derive(Clone, Debug)]
+pub(crate) struct ExpectedOwnContainer {
+    pub(crate) owner: RunnerOwner,
+    pub(crate) name: String,
+    pub(crate) container_id: String,
+}
 
 pub trait RunnerBackend: Send + Sync {
     fn reconcile<'a>(&'a self) -> RunnerFuture<'a, anyhow::Result<()>>;
@@ -120,6 +131,38 @@ pub trait RunnerBackend: Send + Sync {
     ) -> RunnerFuture<'a, anyhow::Result<NativeTaskExportContent>> {
         Box::pin(async move {
             anyhow::bail!("native task export is not configured on this runner backend")
+        })
+    }
+
+    /// Current in-flight operation count for one workspace binding. Counts are
+    /// busy indicators, not exact job counts. Default fails closed.
+    fn workspace_activity_count<'a>(
+        &'a self,
+        _workspace_binding_id: i64,
+    ) -> RunnerFuture<'a, anyhow::Result<u32>> {
+        Box::pin(async {
+            anyhow::bail!("workspace activity count is not supported by this runner backend")
+        })
+    }
+
+    /// Whether this backend can prove ordinary-container absence for one
+    /// workspace binding. Default refuses so a backend without the scan never
+    /// pretends the binding is quiescent.
+    fn supports_workspace_binding_owner_quiescence(&self) -> bool {
+        false
+    }
+
+    #[allow(dead_code)]
+    fn quiesce_workspace_binding_owners<'a>(
+        &'a self,
+        _workspace_binding_id: i64,
+        _authorized_local_workspace_root: PathBuf,
+        _expected_own: Option<ExpectedOwnContainer>,
+    ) -> RunnerFuture<'a, anyhow::Result<()>> {
+        Box::pin(async {
+            anyhow::bail!(
+                "workspace binding owner quiescence is not supported by this runner backend"
+            )
         })
     }
 

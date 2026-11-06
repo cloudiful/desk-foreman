@@ -107,7 +107,7 @@ intent commits.
   fixed external-user marker is never compared against it: authorization is the
   authenticated application's delegation, and the marker exists only to keep the
   shared row unique.
-- The binding is an active `code_project` resource workspace, and its lifecycle
+- The binding is an active generic resource workspace, and its lifecycle
   admits admission.
 - No legacy write-lease owner is present, **even an expired one**. An expiry is
   a cleanup timer, not evidence that no dispatched process is still writing.
@@ -133,7 +133,6 @@ with no shared fence, so every legacy path refuses while a task is active:
 - fenced write admission (`lock_workspace_binding_for_write`);
 - legacy write-lease acquire, release and force-taking;
 - admin archive and restore;
-- git/sync through the resource workspace route;
 - the archived-workspace janitor sweep, which skips instead of deleting.
 
 Each of those re-reads the native-active guard *after* it holds its own binding

@@ -7,7 +7,8 @@
 #[cfg(test)]
 mod argv_tests {
     use super::super::argv::{
-        EnvironmentRunSpec, ServiceRunSpec, build_environment_run_argv, build_volume_create_argv,
+        EnvironmentRunSpec, ServiceRunSpec, build_environment_run_argv,
+        build_scoped_service_run_argv, build_scoped_state_ownership_argv, build_volume_create_argv,
     };
     use crate::config::RunnerManagerConfig;
 
@@ -170,6 +171,98 @@ mod argv_tests {
     }
 
     #[test]
+    fn scoped_service_argv_uses_entrypoint_image_workspace_mount_and_state_env() {
+        let config = manager_config();
+        let command = command();
+        let image = "registry.example.com/team/service@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let workspace_mount = "type=bind,source=/host/workspace/scope,target=/workspace";
+        let argv = build_scoped_service_run_argv(
+            &service_spec(&config, &command),
+            image,
+            workspace_mount,
+            "/state",
+        );
+        let joined = argv.join(" ");
+
+        // The helper image's entrypoint is the process: the ordinary
+        // configured command must not be appended.
+        assert_eq!(argv.last().map(String::as_str), Some(image));
+        assert!(!argv.iter().any(|arg| arg == &command[0]));
+        assert!(joined.contains("--workdir /workspace"));
+        assert!(joined.contains(&format!("--mount {workspace_mount}")));
+        assert!(joined.contains("-e DF_STATE_DIRECTORY=/state"));
+        assert!(joined.contains("--network df-private"));
+        assert!(joined.contains("--env-file "));
+        assert!(!argv.iter().any(|arg| arg == "-p" || arg == "--publish"));
+        assert_eq!(
+            argv.iter().filter(|arg| arg.as_str() == "-v").count(),
+            1,
+            "the state volume stays the only volume"
+        );
+    }
+
+    #[test]
+    fn scoped_state_ownership_argv_touches_only_the_derived_state_volume() {
+        let image = "registry.example.com/team/service@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let volume = "df-env-123e4567e89b12d3a456426614174000";
+        let argv = build_scoped_state_ownership_argv(
+            volume,
+            image,
+            1000,
+            1001,
+            "123e4567-e89b-12d3-a456-426614174000",
+            4,
+        );
+        let joined = argv.join(" ");
+
+        assert_eq!(argv[0], "run");
+        assert!(argv.contains(&"--rm".to_string()));
+        assert!(joined.contains("--name df-state-init-123e4567e89b12d3a456426614174000-4"));
+        assert!(joined.contains("--network none"));
+        assert!(joined.contains("--read-only"));
+        assert!(joined.contains("--cap-drop ALL"));
+        assert!(joined.contains("--cap-add CHOWN"));
+        assert!(joined.contains("--cap-add FOWNER"));
+        assert!(joined.contains("--security-opt no-new-privileges"));
+        assert!(joined.contains("--user 0:0"));
+        assert!(joined.contains("--entrypoint sh"));
+        assert!(joined.contains("--workdir /"));
+        assert!(joined.contains("--pids-limit 32"));
+        assert!(joined.contains("--memory 64m"));
+        assert!(joined.contains("--cpus 0.1"));
+        assert!(joined.contains(&format!("--mount type=volume,src={volume},dst=/state")));
+
+        assert!(!joined.contains("type=bind"), "no workspace mount");
+        assert!(!joined.contains("--env-file"), "no credential file");
+        assert!(!joined.contains("--publish"));
+        assert!(!joined.contains("--privileged"));
+        assert!(!joined.contains("/workspace"));
+        assert!(
+            !argv.iter().any(|arg| arg.contains("-R")),
+            "no recursive ownership"
+        );
+        assert_eq!(
+            argv.iter().filter(|arg| arg.as_str() == "--mount").count(),
+            1,
+            "the derived state volume is the only mount"
+        );
+
+        let image_index = argv
+            .iter()
+            .position(|arg| arg == image)
+            .expect("helper image present");
+        assert_eq!(argv[image_index + 1], "-c");
+        let script = &argv[image_index + 2];
+        assert!(script.contains("chown \"$1:$2\" /state"));
+        assert!(script.contains("chmod 0700 /state"));
+        assert!(!script.contains("/workspace"));
+        assert_eq!(
+            &argv[argv.len() - 2..],
+            &["1000".to_string(), "1001".to_string()]
+        );
+    }
+
+    #[test]
     fn volume_create_never_deletes() {
         let argv = build_volume_create_argv("df-env-abc", "env-abc");
         assert_eq!(argv[0], "volume");
@@ -209,7 +302,10 @@ mod argv_tests {
         let ack = ensure_execution_environment(
             &backend,
             &support::enabled_profile(&support::state_dir(temp.path())),
-            EnsureExecutionEnvironmentRequest { owner },
+            EnsureExecutionEnvironmentRequest {
+                owner,
+                workspace_scope: None,
+            },
         )
         .await
         .expect("creation must succeed");

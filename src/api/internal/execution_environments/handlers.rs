@@ -45,11 +45,42 @@ pub async fn ensure_execution_environment(
     ValidatedJson(request): ValidatedJson<EnsureExecutionEnvironmentRequest>,
 ) -> Result<Json<ExecutionEnvironment>, AppError> {
     let application_id = application_actor(&state, &headers).await?;
-    match crate::db::queries::ensure_execution_environment(
+    if let Some(workspace_binding_id) = request.workspace_binding_id {
+        let binding =
+            crate::db::queries::find_workspace_binding_by_id(&state.db, workspace_binding_id)
+                .await?
+                .ok_or_else(|| AppError::not_found("workspace binding not found"))?;
+        if binding.application_id != application_id {
+            return Err(AppError::forbidden(
+                "workspace binding belongs to another application",
+            ));
+        }
+        if !binding.is_active
+            || binding.lifecycle_state != "active"
+            || binding.archived_at.is_some()
+        {
+            return Err(AppError::forbidden("workspace binding is not active"));
+        }
+        let resource_owned = binding
+            .resource_kind
+            .as_deref()
+            .is_some_and(|kind| !kind.trim().is_empty())
+            && binding
+                .resource_id
+                .as_deref()
+                .is_some_and(|id| !id.trim().is_empty());
+        if !resource_owned {
+            return Err(AppError::forbidden(
+                "workspace scope requires a resource-owned binding",
+            ));
+        }
+    }
+    match crate::db::queries::ensure_execution_environment_scoped(
         &state.db,
         application_id,
         &request.external_user_id,
         &request.runtime_kind,
+        request.workspace_binding_id,
     )
     .await?
     {

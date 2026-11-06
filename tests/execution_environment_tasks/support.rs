@@ -9,8 +9,8 @@ pub use super::http_client::{HttpOutcome, call};
 
 pub use super::admin_state::{admin_session, test_state_with_admin};
 pub use super::db_fixtures::{
-    create_code_project_binding, create_environment, create_manager, set_cold_fence,
-    set_idle_fence, set_legacy_lease_owner,
+    create_environment, create_manager, create_resource_binding, set_cold_fence, set_idle_fence,
+    set_legacy_lease_owner,
 };
 pub use super::task_seed::{active_task_of, confirmed_stop, seed_executed_task, stored_state};
 
@@ -72,13 +72,8 @@ impl TaskFixture {
         } else {
             set_idle_fence(&database.pool, environment_id, manager_id, 4).await
         }
-        let binding_id = create_code_project_binding(
-            &database.pool,
-            application_id,
-            &root,
-            "code_project:alpha",
-        )
-        .await;
+        let binding_id =
+            create_resource_binding(&database.pool, application_id, &root, "artifact:alpha").await;
         let mut state = super::helpers::test_state(database.pool.clone());
         let mut config = (*state.config).clone();
         config.workspace_root = temp.path().to_path_buf();

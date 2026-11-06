@@ -221,15 +221,33 @@ pub(crate) async fn complete_assigned_manager_environment_job(
         });
     }
 
-    let (state, job_result, error_summary) = match resolve_environment_job_result(&row, result) {
-        EnvironmentJobResolution::Inconsistent(reason) => {
-            return Ok(DurableJobCompletion::Inconsistent(reason));
-        }
-        EnvironmentJobResolution::Succeeded(job_result) => ("succeeded", job_result, None),
-        EnvironmentJobResolution::Uncertain(job_result, diagnostic) => {
-            ("uncertain", job_result, Some(diagnostic))
-        }
+    let expected_workspace_binding_id = if row.job_kind == "ensure" {
+        let environment = crate::db::execution_environments::find_execution_environment(
+            pool,
+            row.application_id,
+            row.environment_id,
+        )
+        .await?;
+        let Some(environment) = environment else {
+            return Ok(DurableJobCompletion::Inconsistent(
+                "durable ensure job has no execution environment row",
+            ));
+        };
+        environment.workspace_binding_id
+    } else {
+        None
     };
+
+    let (state, job_result, error_summary) =
+        match resolve_environment_job_result(&row, result, expected_workspace_binding_id) {
+            EnvironmentJobResolution::Inconsistent(reason) => {
+                return Ok(DurableJobCompletion::Inconsistent(reason));
+            }
+            EnvironmentJobResolution::Succeeded(job_result) => ("succeeded", job_result, None),
+            EnvironmentJobResolution::Uncertain(job_result, diagnostic) => {
+                ("uncertain", job_result, Some(diagnostic))
+            }
+        };
 
     let outcome = complete_execution_environment_job(
         pool,

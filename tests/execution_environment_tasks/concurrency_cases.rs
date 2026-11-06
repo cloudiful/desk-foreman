@@ -13,7 +13,7 @@
 use uuid::Uuid;
 
 use super::support::{
-    HttpOutcome, TaskFixture, call, create_code_project_binding, create_environment, fence_header,
+    HttpOutcome, TaskFixture, call, create_environment, create_resource_binding, fence_header,
     set_idle_fence,
 };
 
@@ -47,11 +47,11 @@ async fn targets(fixture: &TaskFixture, count: usize) -> Vec<Target> {
             4,
         )
         .await;
-        let binding_id = create_code_project_binding(
+        let binding_id = create_resource_binding(
             &fixture.database.pool,
             fixture.application_id,
             &format!("/tmp/race-workspace-{index}"),
-            &format!("code_project:race-{index}"),
+            &format!("artifact:race-{index}"),
         )
         .await;
         targets.push(Target {
@@ -254,11 +254,11 @@ async fn second_target(fixture: &TaskFixture) -> (Uuid, i64) {
         4,
     )
     .await;
-    let binding_id = create_code_project_binding(
+    let binding_id = create_resource_binding(
         &fixture.database.pool,
         fixture.application_id,
         "/tmp/race-second-workspace",
-        "code_project:race-second",
+        "artifact:race-second",
     )
     .await;
     (environment_id, binding_id)

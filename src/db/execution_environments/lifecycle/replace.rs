@@ -1,4 +1,4 @@
-//! Replacement orchestration (issue 742 P3).
+//! Replacement orchestration (issue 742 P3, scoped in issue 1180 P8).
 //!
 //! One owner-scoped transaction: a replacement is admitted only when the
 //! caller's fences match the stored authorization generation, provision
@@ -6,7 +6,10 @@
 //! from the original bound manager, and there is no active stop or unresolved
 //! ensure blocker. The next ensure runs at the current authorization
 //! generation (which must exceed the stopped candidate); the manager binding is
-//! never reassigned.
+//! never reassigned. A stored workspace scope additionally requires
+//! authenticated authority, a fresh bound write lease, one matching live
+//! manager observation and a bounded session-free observation; the unscoped
+//! wrapper keeps its exact behavior.
 
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -14,17 +17,21 @@ use uuid::Uuid;
 use crate::db::execution_environment_jobs::{ExecutionEnvironmentJob, job_token_is_valid};
 
 use super::LifecycleError;
+use super::scope;
 use super::support::{
     NewLifecycleJob, ensure_no_active_native_task, expire_overdue_jobs, find_job_by_id,
     find_job_by_token, insert_job, load_jobs, lock_environment,
 };
 use super::transitions::replace_update;
 use super::types::{
-    EnvironmentOperationDescriptor, confirmed_stop_state, environment_descriptor,
-    operation_descriptor,
+    EnvironmentOperationDescriptor, LIFECYCLE_STATE_REPLACED, ScopeAuthority, confirmed_stop_state,
+    environment_descriptor, operation_descriptor,
 };
 
 /// Admit (or idempotently replay) one replacement.
+///
+/// Keeps the legacy unscoped signature. A stored workspace-scoped environment
+/// is refused even on an identical replay because no authority is supplied.
 pub async fn replace_execution_environment(
     pool: &PgPool,
     application_id: i64,
@@ -33,6 +40,34 @@ pub async fn replace_execution_environment(
     expected_container_generation: i64,
     expected_stop_job_id: Uuid,
     operation_token: &str,
+) -> Result<EnvironmentOperationDescriptor, LifecycleError> {
+    replace_execution_environment_scoped(
+        pool,
+        application_id,
+        environment_id,
+        expected_generation,
+        expected_container_generation,
+        expected_stop_job_id,
+        operation_token,
+        None,
+        None,
+    )
+    .await
+}
+
+/// Admit (or idempotently replay) one replacement with an optional
+/// authenticated workspace scope and the runner seam used for the bounded
+/// pre-intent session observation.
+pub async fn replace_execution_environment_scoped(
+    pool: &PgPool,
+    application_id: i64,
+    environment_id: Uuid,
+    expected_generation: i64,
+    expected_container_generation: i64,
+    expected_stop_job_id: Uuid,
+    operation_token: &str,
+    authority: Option<ScopeAuthority>,
+    runner: Option<&dyn crate::runner::RunnerService>,
 ) -> Result<EnvironmentOperationDescriptor, LifecycleError> {
     if !job_token_is_valid(operation_token) {
         return Err(LifecycleError::InvalidToken);
@@ -43,6 +78,11 @@ pub async fn replace_execution_environment(
     let Some(environment) = lock_environment(&mut tx, application_id, environment_id).await? else {
         return Err(LifecycleError::NotFound);
     };
+
+    // Resolve the stored scope and, when present, lock and validate the fresh
+    // bound binding before any replay or intent decision.
+    let scope_binding =
+        scope::authorize_scope(&mut tx, application_id, environment_id, authority.as_ref()).await?;
 
     // Same-token replay of an identical replacement intent returns the original
     // operation unchanged.
@@ -115,6 +155,20 @@ pub async fn replace_execution_environment(
     if jobs.iter().any(|job| ensure_is_blocker(job)) {
         return Err(LifecycleError::UnresolvedBlockers);
     }
+
+    // A scoped replacement may only continue an environment whose own state is
+    // `replaced`, on the exact observed manager and root, with the binding-level
+    // guards clear. No self-exclusion is needed: the proven `replaced` state
+    // never matches the busy anchor set.
+    let manager_id = match &scope_binding {
+        Some(binding) => {
+            if environment.state != LIFECYCLE_STATE_REPLACED {
+                return Err(LifecycleError::InvalidState);
+            }
+            scope::admit_scoped_intent(&mut tx, binding, Some(manager_id), runner).await?
+        }
+        None => manager_id,
+    };
 
     let new_candidate = environment.generation;
     let Some(environment) =

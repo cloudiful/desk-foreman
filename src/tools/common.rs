@@ -619,7 +619,13 @@ pub(super) async fn run_command_in_runner(
     program: &str,
     args: Vec<String>,
 ) -> Result<CommandOutput, ToolError> {
-    state
+    // Read-only container-backed tools still create a runner container, so
+    // they take the same fresh binding row lock as writes. The lock is held
+    // through the runner call (including the first Running acknowledgement)
+    // and released only after a successful dispatch; an error drops the guard
+    // and rolls the lock back. Reads acquire no write lease.
+    let fence = crate::tools::fenced_read::admit_workspace_read(state, actor).await?;
+    let output = state
         .runner
         .run_command(RunnerCommandRequest {
             owner: actor.runner_owner(),
@@ -632,7 +638,9 @@ pub(super) async fn run_command_in_runner(
             network_enabled: actor.policy.limits.network_enabled,
         })
         .await
-        .map_err(tool_internal)
+        .map_err(tool_internal)?;
+    fence.commit().await?;
+    Ok(output)
 }
 
 pub(super) fn shell_call_result(output: ShellToolOutput) -> CallToolResult {

@@ -9,14 +9,16 @@
 
 mod provision;
 mod replace;
+mod scope;
+mod scope_sessions;
 mod status;
 mod stop;
 mod support;
 mod transitions;
 mod types;
 
-pub use provision::provision_execution_environment;
-pub use replace::replace_execution_environment;
+pub use provision::{provision_execution_environment, provision_execution_environment_scoped};
+pub use replace::{replace_execution_environment, replace_execution_environment_scoped};
 pub use status::execution_environment_status;
 pub use stop::stop_execution_environment;
 
@@ -35,7 +37,7 @@ pub use types::{
     ACCEPTED_CONFIRMED_STOP_STATES, EnvironmentOperationDescriptor, LIFECYCLE_ENVIRONMENT_STATES,
     LIFECYCLE_STATE_READY, LIFECYCLE_STATE_REPLACED, LIFECYCLE_STATE_STARTING,
     LIFECYCLE_STATE_STOPPING, LIFECYCLE_STATE_UNCERTAIN, LifecycleEnvironment, OperationDescriptor,
-    SUPERSEDED_BY_STOP_PROOF_OUTCOME, confirmed_stop_state, ensure_running_result,
+    SUPERSEDED_BY_STOP_PROOF_OUTCOME, ScopeAuthority, confirmed_stop_state, ensure_running_result,
     environment_descriptor, lifecycle_state_is_valid,
 };
 
@@ -67,6 +69,19 @@ pub enum LifecycleError {
     NativeTaskActive,
     /// No manager is enabled, online and recently seen for a first provision.
     ManagerUnavailable,
+    /// A stored workspace-scoped environment requires authenticated scope
+    /// authority.
+    ScopeAuthorityRequired,
+    /// The authenticated scope does not match the stored/fresh binding identity
+    /// or its lease is not usable.
+    ScopeIneligible,
+    /// No single live manager/root observation can authorize this scope.
+    ScopeManagerUnavailable,
+    /// Another execution owner still holds the binding.
+    ScopeBusy,
+    /// The environment's own lifecycle state does not admit this scoped
+    /// operation.
+    InvalidState,
     /// The transaction itself failed; no lifecycle state mutated, but the
     /// caller must report an internal error.
     Internal(anyhow::Error),

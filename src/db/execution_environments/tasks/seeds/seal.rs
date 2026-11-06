@@ -63,7 +63,7 @@ pub(super) async fn seal(
         .await
         .map_err(internal)?
         .ok_or(SeedError::NotFound)?;
-    if binding.application_id != application_id || !binding.is_active_code_project() {
+    if binding.application_id != application_id || !binding.is_active_resource_workspace() {
         return Err(SeedError::BindingIneligible);
     }
 

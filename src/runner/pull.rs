@@ -9,18 +9,17 @@ use uuid::Uuid;
 
 use runner_protocol::{
     CancelSessionRequest, CleanupWorkspaceBindingPrincipalsAck,
-    CleanupWorkspaceBindingPrincipalsRequest, CommandOutput, ExecRequest, GitReceiptReadAck,
-    GitReceiptReadRequest, InputRequest, RUNNER_JOB_TIMEOUT_SECS,
-    RUNNER_MANAGER_HEARTBEAT_TTL_SECS, RunnerCommandRequest, RunnerJob, RunnerJobResult,
-    RunnerOwner, RunnerSessionStatus, ShellToolOutput, StopWorkspacePrincipalAck,
+    CleanupWorkspaceBindingPrincipalsRequest, CommandOutput, ExecRequest, InputRequest,
+    RUNNER_JOB_TIMEOUT_SECS, RUNNER_MANAGER_HEARTBEAT_TTL_SECS, RunnerCommandRequest, RunnerJob,
+    RunnerJobResult, RunnerOwner, RunnerSessionStatus, ShellToolOutput, StopWorkspacePrincipalAck,
     StopWorkspacePrincipalRequest,
 };
 
 use crate::{
     db,
     runner::{
-        RunnerFuture, RunnerService, pull_cancellation::should_skip_abandoned_queued_job,
-        service_relay::RelayRegistry,
+        RunnerFuture, RunnerService, WorkspaceActivity, WorkspaceActivityRequest,
+        pull_cancellation::should_skip_abandoned_queued_job, service_relay::RelayRegistry,
     },
 };
 
@@ -205,25 +204,6 @@ impl RunnerBroker {
         }
     }
 
-    /// Read one receipt from the exact assigned manager over the existing
-    /// manager-targeted pull channel. The request is validated before it is
-    /// enqueued and the ack is validated against that same request.
-    async fn read_git_receipt_from_manager(
-        &self,
-        request: GitReceiptReadRequest,
-    ) -> anyhow::Result<GitReceiptReadAck> {
-        request
-            .validate()
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        let manager_id = request.assigned_manager_id;
-        let ack: GitReceiptReadAck = self
-            .submit_to_manager(manager_id, "read_git_receipt", &request)
-            .await?;
-        ack.validate_matches(&request)
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        Ok(ack)
-    }
-
     pub async fn next_job(&self, manager_id: i64) -> Option<RunnerJob> {
         loop {
             let notified = self.notify.notified();
@@ -374,6 +354,29 @@ impl RunnerService for PullRunnerService {
         Box::pin(async move { self.broker.submit("list_sessions", &()).await })
     }
 
+    fn workspace_activity_for_manager<'a>(
+        &'a self,
+        manager_id: i64,
+        workspace_binding_id: i64,
+    ) -> RunnerFuture<'a, anyhow::Result<WorkspaceActivity>> {
+        Box::pin(async move {
+            if manager_id <= 0 || workspace_binding_id <= 0 {
+                anyhow::bail!("invalid workspace activity request");
+            }
+            let request = WorkspaceActivityRequest {
+                workspace_binding_id,
+            };
+            let activity: WorkspaceActivity = self
+                .broker
+                .submit_to_manager(manager_id, "list_sessions", &request)
+                .await?;
+            if activity.workspace_binding_id != workspace_binding_id {
+                anyhow::bail!("workspace activity response does not match the request");
+            }
+            Ok(activity)
+        })
+    }
+
     fn run_command<'a>(
         &'a self,
         request: RunnerCommandRequest,
@@ -386,12 +389,5 @@ impl RunnerService for PullRunnerService {
         owner: RunnerOwner,
     ) -> RunnerFuture<'a, anyhow::Result<()>> {
         Box::pin(async move { self.broker.cleanup_runner_owner_all(owner).await })
-    }
-
-    fn read_git_receipt<'a>(
-        &'a self,
-        request: GitReceiptReadRequest,
-    ) -> RunnerFuture<'a, anyhow::Result<GitReceiptReadAck>> {
-        Box::pin(async move { self.broker.read_git_receipt_from_manager(request).await })
     }
 }

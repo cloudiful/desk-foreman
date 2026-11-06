@@ -28,6 +28,11 @@ pub struct ExecutionEnvironment {
     pub last_active_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Stored optional workspace binding scope. Kept opaque: it is binding
+    /// identity only, never a path, image or secret. Omitted from the response
+    /// when the row is unscoped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_binding_id: Option<i64>,
 }
 
 /// Allowed lifecycle states for the P1 slice.

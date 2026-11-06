@@ -70,6 +70,49 @@ mod stop_tests {
         support::backend_with_cli(&fake.to_string_lossy())
     }
 
+    /// Fake with a real container id that reports `exited` until `rm` marks it
+    /// removed, after which both id and name inspections report absence.
+    fn exited_until_removed_backend(
+        temp: &Path,
+        name: &str,
+        owner: &RunnerOwner,
+        generation: i64,
+    ) -> (
+        std::sync::Arc<crate::runtime::DockerRunnerBackend>,
+        std::path::PathBuf,
+        String,
+    ) {
+        let container_id = format!("{name}-container-id");
+        let inspect = temp.join(format!("{name}.exited.json"));
+        std::fs::write(
+            &inspect,
+            support::inspect_json_with_id(
+                "exited",
+                &container_id,
+                &owner.stable_key(),
+                support::ENV_ID,
+                &generation.to_string(),
+            ),
+        )
+        .expect("exited json");
+        let removed = temp.join(format!("{name}.removed.marker"));
+        let log = temp.join(format!("{name}.log"));
+        std::fs::write(&log, "").expect("seed log");
+        let script = format!(
+            "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"inspect\" ]; then\n  if [ -f \"{}\" ]; then\n    echo \"Error: No such container: $2\" >&2\n    exit 1\n  fi\n  cat \"{}\"\n  exit 0\nfi\nif [ \"$1\" = \"rm\" ]; then\n  touch \"{}\"\n  exit 0\nfi\nexit 0\n",
+            log.display(),
+            removed.display(),
+            inspect.display(),
+            removed.display()
+        );
+        let fake = support::write_executable(temp, name, &script);
+        (
+            support::backend_with_cli(&fake.to_string_lossy()),
+            log,
+            container_id,
+        )
+    }
+
     #[tokio::test]
     async fn disabled_profile_permits_owner_validated_stop_and_rejects_ensure() {
         // Requirement change (740 P1): stop is cleanup, not a creation
@@ -78,21 +121,8 @@ mod stop_tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let state = support::state_dir(temp.path());
         let owner = support::env_owner(0);
-        let inspect_file = temp.path().join("inspect.json");
-        std::fs::write(
-            &inspect_file,
-            support::inspect_json("exited", &owner.stable_key(), support::ENV_ID, "0"),
-        )
-        .expect("inspect");
-        let log = temp.path().join("stop-disabled.log");
-        std::fs::write(&log, "").expect("seed log");
-        let script = format!(
-            "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"inspect\" ]; then\n  cat \"{}\"\n  exit 0\nfi\nexit 0\n",
-            log.display(),
-            inspect_file.display()
-        );
-        let fake = support::write_executable(temp.path(), "docker-fake", &script);
-        let backend = support::backend_with_cli(&fake.to_string_lossy());
+        let (backend, _log, _) =
+            exited_until_removed_backend(temp.path(), "docker-disabled-stop", &owner, 0);
 
         let ack = stop_execution_environment(
             &backend,
@@ -104,12 +134,15 @@ mod stop_tests {
         .await
         .expect("disabled profile must still stop an existing environment");
         assert!(ack.confirmed);
-        assert_eq!(ack.observed_state, "exited");
+        assert_eq!(ack.observed_state, "absent");
 
         let ensure = ensure_execution_environment(
             &backend,
             &disabled(&state),
-            EnsureExecutionEnvironmentRequest { owner },
+            EnsureExecutionEnvironmentRequest {
+                owner,
+                workspace_scope: None,
+            },
         )
         .await;
         assert!(ensure.is_err(), "disabled profile must still reject ensure");
@@ -163,26 +196,14 @@ mod stop_tests {
     }
 
     #[tokio::test]
-    async fn stop_exited_container_confirms_stopped() {
+    async fn stop_exited_container_removes_by_id_and_confirms_absent() {
         let temp = tempfile::tempdir().expect("tempdir");
         let state = support::state_dir(temp.path());
         let owner = support::env_owner(1);
         let credential = seed_credential(&state, 1);
-        let inspect_file = temp.path().join("inspect.json");
-        std::fs::write(
-            &inspect_file,
-            support::inspect_json("exited", &owner.stable_key(), support::ENV_ID, "1"),
-        )
-        .expect("inspect");
-        let log = temp.path().join("stop-exited.log");
-        std::fs::write(&log, "").expect("seed log");
-        let script = format!(
-            "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"inspect\" ]; then\n  cat \"{}\"\n  exit 0\nfi\nexit 0\n",
-            log.display(),
-            inspect_file.display()
-        );
-        let fake = support::write_executable(temp.path(), "docker-fake", &script);
-        let backend = support::backend_with_cli(&fake.to_string_lossy());
+        let container = owner.container_name();
+        let (backend, log, container_id) =
+            exited_until_removed_backend(temp.path(), "docker-exited", &owner, 1);
         let ack = stop_execution_environment(
             &backend,
             &configured(&state),
@@ -191,13 +212,97 @@ mod stop_tests {
             },
         )
         .await
-        .expect("exited must confirm");
+        .expect("an exited container must be removed and confirm absence");
         assert!(ack.confirmed);
-        assert_eq!(ack.observed_state, "exited");
+        assert_eq!(ack.observed_state, "absent");
         assert_eq!(ack.owner, owner);
         assert!(
             !credential.exists(),
-            "a confirmed exited stop retires its exact credential"
+            "a confirmed absent stop retires its exact credential"
+        );
+        let logged = std::fs::read_to_string(&log).expect("read log");
+        for expected in [format!("stop {container_id}"), format!("rm {container_id}")] {
+            assert!(
+                logged.lines().any(|line| line == expected),
+                "expected `{expected}` in: {logged}"
+            );
+        }
+        for expected in [
+            format!("inspect {container_id} "),
+            format!("inspect {container} "),
+        ] {
+            assert!(
+                logged
+                    .lines()
+                    .any(|line| line.starts_with(expected.as_str())),
+                "expected `{expected}` in: {logged}"
+            );
+        }
+        assert!(
+            !logged.lines().any(
+                |line| line == format!("stop {container}") || line == format!("rm {container}")
+            ),
+            "the canonical name must never be the destructive target: {logged}"
+        );
+        assert!(
+            !logged
+                .lines()
+                .any(|line| line == format!("rm -f {container_id}")),
+            "a successful rm needs no force escalation: {logged}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_remaining_exited_after_unknown_rm_is_unconfirmed() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = support::state_dir(temp.path());
+        let owner = support::env_owner(3);
+        let credential = seed_credential(&state, 3);
+        let container_id = "stop-leftover-id";
+        let inspect_file = temp.path().join("leftover.json");
+        std::fs::write(
+            &inspect_file,
+            support::inspect_json_with_id(
+                "exited",
+                container_id,
+                &owner.stable_key(),
+                support::ENV_ID,
+                "3",
+            ),
+        )
+        .expect("inspect");
+        let log = temp.path().join("stop-leftover.log");
+        std::fs::write(&log, "").expect("seed log");
+        let script = format!(
+            "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"inspect\" ]; then\n  cat \"{}\"\n  exit 0\nfi\nif [ \"$1\" = \"stop\" ]; then\n  exit 0\nfi\nif [ \"$1\" = \"rm\" ] && [ \"$2\" = \"-f\" ]; then\n  exit 0\nfi\nif [ \"$1\" = \"rm\" ]; then\n  echo \"rm transport unknown\" >&2\n  exit 1\nfi\nexit 0\n",
+            log.display(),
+            inspect_file.display()
+        );
+        let fake = support::write_executable(temp.path(), "docker-leftover", &script);
+        let backend = support::backend_with_cli(&fake.to_string_lossy());
+
+        let ack = stop_execution_environment(
+            &backend,
+            &configured(&state),
+            StopExecutionEnvironmentRequest { owner },
+        )
+        .await
+        .expect("a remaining exited object is an observed ack, not an error");
+        assert!(
+            !ack.confirmed,
+            "a matching object that still exists is not absence"
+        );
+        assert_eq!(ack.observed_state, "exited");
+        assert!(
+            credential.exists(),
+            "an unconfirmed stop never retires the credential"
+        );
+        let logged = std::fs::read_to_string(&log).expect("read log");
+        assert!(
+            logged
+                .lines()
+                .any(|line| line == format!("rm -f {container_id}")),
+            "an unknown rm escalates to force removal by id: {logged}"
         );
     }
 

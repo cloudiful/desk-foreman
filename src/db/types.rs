@@ -702,40 +702,6 @@ pub struct ApplicationCapabilitiesResponse {
 
 pub use super::execution_environments::types::ExecutionEnvironment;
 
-#[derive(Clone, Deserialize, ToSchema, Validate)]
-pub struct GitWorkspaceSyncRequest {
-    #[schema(write_only)]
-    #[validate(custom(function = "validate_non_blank"))]
-    pub remote_url: String,
-    pub branch: Option<String>,
-    #[serde(default)]
-    pub preserve_existing: bool,
-    pub code_project_id: Uuid,
-    pub authorization_generation: Uuid,
-}
-
-impl std::fmt::Debug for GitWorkspaceSyncRequest {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("GitWorkspaceSyncRequest")
-            .field("remote_url", &"[redacted]")
-            .field("branch", &self.branch)
-            .field("preserve_existing", &self.preserve_existing)
-            .field("code_project_id", &self.code_project_id)
-            .field("authorization_generation", &self.authorization_generation)
-            .finish()
-    }
-}
-
-#[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct GitWorkspaceSyncResponse {
-    pub status: String,
-    pub cloned: bool,
-    pub dirty: bool,
-    pub branch: Option<String>,
-    pub head_commit: Option<String>,
-}
-
 #[derive(Clone, Debug)]
 pub struct McpTokenPolicy {
     pub expires_at: Option<DateTime<Utc>>,
@@ -1091,7 +1057,7 @@ mod tests {
                 workspace_binding_id: 7,
                 application_id: 1,
                 external_user_id: "__resource__".to_string(),
-                workspace_key: "code_project:abc".to_string(),
+                workspace_key: "artifact:abc".to_string(),
                 external_user_hash: "hash".to_string(),
                 workspace_root: "/tmp/ws".to_string(),
                 is_active: true,
@@ -1100,7 +1066,7 @@ mod tests {
                 updated_at: Utc::now(),
                 lifecycle_state: "active".to_string(),
                 archived_at: None,
-                resource_kind: Some("code_project".to_string()),
+                resource_kind: Some("artifact".to_string()),
                 resource_id: Some("abc".to_string()),
                 write_lease_owner: Some("conversation:b".to_string()),
                 write_lease_acquired_at: Some(Utc::now()),
@@ -1137,10 +1103,10 @@ mod tests {
             current: super::WorkspaceLeaseStatusResponse {
                 workspace_binding_id: 9,
                 application_id: 1,
-                workspace_key: "code_project:xyz".to_string(),
+                workspace_key: "artifact:xyz".to_string(),
                 is_active: true,
                 lifecycle_state: "active".to_string(),
-                resource_kind: Some("code_project".to_string()),
+                resource_kind: Some("artifact".to_string()),
                 resource_id: Some("xyz".to_string()),
                 write_lease_owner: Some("conversation:a".to_string()),
                 write_lease_acquired_at: Some(Utc::now()),

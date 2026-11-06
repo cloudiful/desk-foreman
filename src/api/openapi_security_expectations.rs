@@ -4,7 +4,7 @@
 //! Split from `openapi_security_tests.rs` so no file exceeds the size budget:
 //! the flat `(path, method, operation id)` table is data, not logic.
 
-pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 33] = [
+pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 32] = [
     (
         "/api/internal/principal-workspace-capabilities",
         "get",
@@ -172,10 +172,5 @@ pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 33] = [
         "/api/internal/application/capabilities",
         "get",
         "application_capabilities",
-    ),
-    (
-        "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/git/sync",
-        "post",
-        "sync_resource_workspace_git",
     ),
 ];

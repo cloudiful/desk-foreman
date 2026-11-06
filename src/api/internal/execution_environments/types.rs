@@ -26,6 +26,11 @@ pub struct EnsureExecutionEnvironmentRequest {
     pub external_user_id: String,
     #[validate(custom(function = "validate_non_blank"), length(min = 1, max = 64))]
     pub runtime_kind: String,
+    /// Optional workspace scope. Accepted but refused with `409` until
+    /// workspace-scoped execution environments are enabled.
+    #[serde(default)]
+    #[validate(range(min = 1))]
+    pub workspace_binding_id: Option<i64>,
 }
 
 /// Owner-scoped invalidate request.

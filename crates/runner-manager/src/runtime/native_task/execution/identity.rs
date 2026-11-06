@@ -52,6 +52,7 @@ pub(super) fn start_result(
             owner: request.owner.clone(),
             container_name,
             state: protocol::EXECUTION_ENVIRONMENT_RUNNING_STATE.to_string(),
+            workspace_binding_id: None,
         },
     }
 }

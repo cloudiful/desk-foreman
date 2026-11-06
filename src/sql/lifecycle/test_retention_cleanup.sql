@@ -8,11 +8,11 @@ WITH
         )
         OR (action = 'workspace.delete' AND target_type = 'workspace_binding' AND target_id = ANY($3::text[]))
     ),
-    deleted_jobs AS (
-        DELETE FROM workspace_git_jobs WHERE application_id = $1
-    ),
     deleted_tasks AS (
         DELETE FROM execution_environment_tasks WHERE application_id = $1
+    ),
+    deleted_jobs AS (
+        DELETE FROM execution_environment_jobs WHERE application_id = $1
     ),
     deleted_environments AS (
         DELETE FROM execution_environments WHERE application_id = $1

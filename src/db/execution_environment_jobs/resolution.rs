@@ -73,9 +73,14 @@ pub(crate) enum EnvironmentJobResolution {
 }
 
 /// Pure evaluation of one manager result against its durable row.
+///
+/// `expected_workspace_binding_id` is the immutable stored scope of the
+/// environment for an ensure job, and `None` for an unscoped environment or a
+/// non-ensure job. An ensure ack must carry exactly that scope.
 pub(crate) fn resolve_environment_job_result(
     row: &ExecutionEnvironmentJob,
     result: &RunnerJobResult,
+    expected_workspace_binding_id: Option<i64>,
 ) -> EnvironmentJobResolution {
     if !result.ok {
         let diagnosed = result
@@ -99,6 +104,12 @@ pub(crate) fn resolve_environment_job_result(
     match row.job_kind.as_str() {
         "ensure" => match serde_json::from_value::<EnsureExecutionEnvironmentAck>(value) {
             Ok(ack) => {
+                if ack.workspace_binding_id != expected_workspace_binding_id {
+                    return EnvironmentJobResolution::Uncertain(
+                        uncertain_result_for_kind(&row.job_kind),
+                        "assigned runner manager reported a mismatched execution environment workspace scope",
+                    );
+                }
                 if let Err(reason) =
                     owner_ack_matches(&ack.owner, &ack.container_name, &expected_owner)
                 {

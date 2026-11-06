@@ -24,6 +24,7 @@ use crate::runtime::docker_command::is_missing_container_error;
 
 #[derive(Clone, Debug)]
 pub(crate) struct EnvContainerInfo {
+    pub(crate) container_id: Option<String>,
     pub(crate) status: String,
     pub(crate) owner_key: Option<String>,
     pub(crate) environment_id: Option<String>,
@@ -203,6 +204,107 @@ pub(crate) fn ensure_native_task_stop_mounts_match(
     Ok(())
 }
 
+/// Full identity of one scoped private-service container.
+pub(crate) struct ScopedEnvironmentExpectation<'a> {
+    pub(crate) image: &'a str,
+    pub(crate) user_spec: &'a str,
+    pub(crate) workdir: &'a str,
+    pub(crate) state_volume: &'a str,
+    pub(crate) state_mount_target: &'a str,
+    pub(crate) workspace_source: &'a Path,
+    pub(crate) workspace_mount_target: &'a str,
+}
+
+/// Validate the exact managed, owned, scoped service identity and mounts.
+///
+/// Unlike the ordinary environment guard, a scoped helper must prove its
+/// private-service profile: exact image, non-root user, configured working
+/// directory, exactly one RW workspace bind and one RW state volume, no
+/// published ports, no privilege, and no unknown mounts (one private `/tmp`
+/// tmpfs is allowed and may be absent from Docker's mount list).
+pub(crate) fn ensure_scoped_environment_matches(
+    info: &EnvContainerInfo,
+    owner: &RunnerOwner,
+    manager_id: &str,
+    expected: &ScopedEnvironmentExpectation<'_>,
+) -> anyhow::Result<()> {
+    ensure_owner_matches(info, owner)?;
+    if info.labels.get(LABEL_MANAGED).map(String::as_str) != Some("true")
+        || info.labels.get(LABEL_MANAGER).map(String::as_str) != Some(manager_id)
+    {
+        anyhow::bail!("scoped service container management labels do not match");
+    }
+    if info
+        .container_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .is_none()
+    {
+        anyhow::bail!("scoped service container id is unverifiable");
+    }
+    if info.image.as_deref() != Some(expected.image)
+        || info.user.as_deref() != Some(expected.user_spec)
+        || info.working_dir.as_deref() != Some(expected.workdir)
+        || info.privileged != Some(false)
+        || info.publish_all_ports != Some(false)
+        || !info.port_bindings_empty
+    {
+        anyhow::bail!("scoped service container identity or process configuration does not match");
+    }
+    if !normal_absolute(expected.workspace_mount_target)
+        || !normal_absolute(expected.state_mount_target)
+        || expected.workspace_mount_target == expected.state_mount_target
+        || Path::new(expected.workspace_mount_target).starts_with(expected.state_mount_target)
+        || Path::new(expected.state_mount_target).starts_with(expected.workspace_mount_target)
+    {
+        anyhow::bail!("scoped service container mount targets overlap or are not normal");
+    }
+
+    let mounts = info
+        .mounts
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("scoped service container mount metadata is unavailable"))?;
+    let workspace_source = expected.workspace_source.to_string_lossy();
+    let has_state = mounts.iter().any(|mount| {
+        mount.kind.as_deref() == Some("volume")
+            && mount.name.as_deref() == Some(expected.state_volume)
+            && mount.destination.as_deref() == Some(expected.state_mount_target)
+            && mount.read_write == Some(true)
+    });
+    let has_workspace = mounts.iter().any(|mount| {
+        mount.kind.as_deref() == Some("bind")
+            && mount.source.as_deref() == Some(workspace_source.as_ref())
+            && mount.destination.as_deref() == Some(expected.workspace_mount_target)
+            && mount.read_write == Some(true)
+    });
+    let unknown = mounts.iter().any(|mount| {
+        let is_state = mount.kind.as_deref() == Some("volume")
+            && mount.name.as_deref() == Some(expected.state_volume)
+            && mount.destination.as_deref() == Some(expected.state_mount_target)
+            && mount.read_write == Some(true);
+        let is_workspace = mount.kind.as_deref() == Some("bind")
+            && mount.source.as_deref() == Some(workspace_source.as_ref())
+            && mount.destination.as_deref() == Some(expected.workspace_mount_target)
+            && mount.read_write == Some(true);
+        let is_private_tmpfs =
+            mount.kind.as_deref() == Some("tmpfs") && mount.destination.as_deref() == Some("/tmp");
+        !is_state && !is_workspace && !is_private_tmpfs
+    });
+    if !has_state || !has_workspace || unknown {
+        anyhow::bail!("scoped service container mounts do not match its private roots");
+    }
+    Ok(())
+}
+
+fn normal_absolute(value: &str) -> bool {
+    let path = Path::new(value);
+    path.is_absolute()
+        && !path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
+        && path != Path::new("/")
+}
+
 fn expected_binding_directory(info: &EnvContainerInfo) -> anyhow::Result<String> {
     let raw = info.labels.get(LABEL_NATIVE_BINDING_ID).ok_or_else(|| {
         anyhow::anyhow!(
@@ -312,6 +414,10 @@ pub(crate) async fn inspect_environment_container(
                 .collect()
         });
     Ok(Some(EnvContainerInfo {
+        container_id: value
+            .get("Id")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
         status,
         owner_key: get_label(LABEL_OWNER),
         environment_id: get_label(LABEL_ENVIRONMENT),

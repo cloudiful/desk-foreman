@@ -119,10 +119,10 @@ mod tests {
             current: crate::db::types::WorkspaceLeaseStatusResponse {
                 workspace_binding_id: 9,
                 application_id: 1,
-                workspace_key: "code_project:xyz".to_string(),
+                workspace_key: "artifact:xyz".to_string(),
                 is_active: true,
                 lifecycle_state: "active".to_string(),
-                resource_kind: Some("code_project".to_string()),
+                resource_kind: Some("artifact".to_string()),
                 resource_id: Some("xyz".to_string()),
                 write_lease_owner: Some("conversation:a".to_string()),
                 write_lease_acquired_at: Some(chrono::Utc::now()),

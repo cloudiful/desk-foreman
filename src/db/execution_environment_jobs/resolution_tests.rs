@@ -73,8 +73,9 @@ mod resolution_tests {
             owner: owner(2),
             container_name: owner(2).container_name(),
             state: "running".into(),
+            workspace_binding_id: None,
         }));
-        match resolve_environment_job_result(&row("ensure", 2), &running) {
+        match resolve_environment_job_result(&row("ensure", 2), &running, None) {
             EnvironmentJobResolution::Succeeded(result) => {
                 assert_eq!(result.outcome, "ensure_running");
                 assert_eq!(result.observed_state.as_deref(), Some("running"));
@@ -86,9 +87,10 @@ mod resolution_tests {
             owner: owner(3),
             container_name: owner(3).container_name(),
             state: "running".into(),
+            workspace_binding_id: None,
         }));
         assert!(matches!(
-            resolve_environment_job_result(&row("ensure", 2), &wrong_generation),
+            resolve_environment_job_result(&row("ensure", 2), &wrong_generation, None),
             EnvironmentJobResolution::Inconsistent(_)
         ));
 
@@ -96,9 +98,10 @@ mod resolution_tests {
             owner: owner(2),
             container_name: "someone-elses-container".into(),
             state: "running".into(),
+            workspace_binding_id: None,
         }));
         assert!(matches!(
-            resolve_environment_job_result(&row("ensure", 2), &wrong_name),
+            resolve_environment_job_result(&row("ensure", 2), &wrong_name, None),
             EnvironmentJobResolution::Inconsistent(_)
         ));
 
@@ -106,10 +109,47 @@ mod resolution_tests {
             owner: owner(2),
             container_name: owner(2).container_name(),
             state: "exited".into(),
+            workspace_binding_id: None,
         }));
         assert!(matches!(
-            resolve_environment_job_result(&row("ensure", 2), &not_running),
+            resolve_environment_job_result(&row("ensure", 2), &not_running, None),
             EnvironmentJobResolution::Inconsistent(_)
+        ));
+    }
+
+    #[test]
+    fn ensure_ack_scope_must_exactly_match_the_stored_scope() {
+        let ack = |workspace_binding_id: Option<i64>| {
+            ok_result(json!(EnsureExecutionEnvironmentAck {
+                owner: owner(2),
+                container_name: owner(2).container_name(),
+                state: "running".into(),
+                workspace_binding_id,
+            }))
+        };
+        let row = row("ensure", 2);
+
+        assert!(matches!(
+            resolve_environment_job_result(&row, &ack(Some(9)), Some(9)),
+            EnvironmentJobResolution::Succeeded(_)
+        ));
+        for refused in [None, Some(8)] {
+            assert!(
+                matches!(
+                    resolve_environment_job_result(&row, &ack(refused), Some(9)),
+                    EnvironmentJobResolution::Uncertain(_, _)
+                ),
+                "{refused:?} must not satisfy the stored scope"
+            );
+        }
+
+        assert!(matches!(
+            resolve_environment_job_result(&row, &ack(None), None),
+            EnvironmentJobResolution::Succeeded(_)
+        ));
+        assert!(matches!(
+            resolve_environment_job_result(&row, &ack(Some(9)), None),
+            EnvironmentJobResolution::Uncertain(_, _)
         ));
     }
 
@@ -122,7 +162,7 @@ mod resolution_tests {
                 confirmed: true,
                 observed_state: state.into(),
             }));
-            match resolve_environment_job_result(&row("stop", 0), &ack) {
+            match resolve_environment_job_result(&row("stop", 0), &ack, None) {
                 EnvironmentJobResolution::Succeeded(result) => {
                     assert_eq!(result.outcome, "stop_confirmed");
                     assert_eq!(result.confirmed, Some(true));
@@ -139,7 +179,7 @@ mod resolution_tests {
             observed_state: "removed".into(),
         }));
         assert!(matches!(
-            resolve_environment_job_result(&row("stop", 0), &removed),
+            resolve_environment_job_result(&row("stop", 0), &removed, None),
             EnvironmentJobResolution::Inconsistent(_)
         ));
 
@@ -150,7 +190,7 @@ mod resolution_tests {
             observed_state: "whatever".into(),
         }));
         assert!(matches!(
-            resolve_environment_job_result(&row("stop", 0), &arbitrary),
+            resolve_environment_job_result(&row("stop", 0), &arbitrary, None),
             EnvironmentJobResolution::Inconsistent(_)
         ));
 
@@ -160,7 +200,7 @@ mod resolution_tests {
             confirmed: false,
             observed_state: "running".into(),
         }));
-        match resolve_environment_job_result(&row("stop", 0), &unconfirmed) {
+        match resolve_environment_job_result(&row("stop", 0), &unconfirmed, None) {
             EnvironmentJobResolution::Uncertain(result, diagnostic) => {
                 assert_eq!(result.outcome, "stop_unconfirmed");
                 assert_eq!(result.confirmed, Some(false));
@@ -178,7 +218,7 @@ mod resolution_tests {
             result: None,
             error: Some("boom".to_string()),
         };
-        match resolve_environment_job_result(&row("ensure", 0), &diagnosed) {
+        match resolve_environment_job_result(&row("ensure", 0), &diagnosed, None) {
             EnvironmentJobResolution::Uncertain(result, diagnostic) => {
                 assert_eq!(result.outcome, "ensure_uncertain");
                 assert!(result.confirmed.is_none());
@@ -194,7 +234,7 @@ mod resolution_tests {
             error: None,
         };
         assert!(matches!(
-            resolve_environment_job_result(&row("ensure", 0), &undiagnosed),
+            resolve_environment_job_result(&row("ensure", 0), &undiagnosed, None),
             EnvironmentJobResolution::Inconsistent(_)
         ));
 
@@ -205,13 +245,13 @@ mod resolution_tests {
             error: None,
         };
         assert!(matches!(
-            resolve_environment_job_result(&row("ensure", 0), &no_payload),
+            resolve_environment_job_result(&row("ensure", 0), &no_payload, None),
             EnvironmentJobResolution::Inconsistent(_)
         ));
 
         let garbage = ok_result(json!({"not": "an ack"}));
         assert!(matches!(
-            resolve_environment_job_result(&row("ensure", 0), &garbage),
+            resolve_environment_job_result(&row("ensure", 0), &garbage, None),
             EnvironmentJobResolution::Inconsistent(_)
         ));
     }

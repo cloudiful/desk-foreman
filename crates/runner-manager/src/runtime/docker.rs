@@ -21,6 +21,9 @@ pub struct DockerRunnerBackend {
     pub(crate) manager_id: String,
     pub(crate) reporter: Arc<RunnerLifecycleReporter>,
     pub(crate) observed: Mutex<HashMap<String, runner_protocol::RunnerLifecycleEvent>>,
+    /// Last container id whose first Running observation the control plane
+    /// acknowledged, keyed by owner. A changed id re-acknowledges.
+    pub(crate) reported: Mutex<HashMap<String, Option<String>>>,
     /// Serializes container create/start reconciliation per owner so concurrent
     /// first requests cannot race on `docker run --name <same-name>`.
     pub(crate) runner_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -47,6 +50,7 @@ impl DockerRunnerBackend {
             manager_id,
             reporter,
             observed: Mutex::new(HashMap::new()),
+            reported: Mutex::new(HashMap::new()),
             runner_locks: Mutex::new(HashMap::new()),
             last_active: Mutex::new(HashMap::new()),
             active_ops: Mutex::new(HashMap::new()),
@@ -88,23 +92,34 @@ impl DockerRunnerBackend {
         let _guard = lock.lock().await;
         let network_enabled = requested_network_enabled && config.network_enabled;
         let container_name = owner.container_name();
-        let host_workspace_root = Self::host_workspace_root(&config, workspace_root)?;
+        let host_workspace_root = Self::workspace_mount(&config, workspace_root)?;
         let mut inspected = self.inspect_container_metadata(&container_name).await?;
         if let Some(metadata) = &inspected {
             if matches!(owner, RunnerOwner::ApplicationPrincipal { .. }) {
                 super::principal_admission::verified_id(self, owner, metadata)?;
             }
-            if metadata.manager_id.as_deref() == Some(self.manager_id.as_str())
-                && metadata.owner_key.as_deref() == Some(owner.stable_key().as_str())
-            {
-                // This container belongs to the current runner manager.
-            } else if metadata.manager_id.is_none()
-                && metadata.owner_key.as_deref() == Some(owner.stable_key().as_str())
-                && super::docker_lifecycle::legacy_workspace_mount_matches(
-                    &config,
-                    metadata.workspace_source.as_deref(),
-                )
-            {
+            let same_owner = metadata.owner_key.as_deref() == Some(owner.stable_key().as_str());
+            let exact_mount =
+                metadata.workspace_source.as_deref() == Some(host_workspace_root.as_path());
+            if metadata.manager_id.as_deref() == Some(self.manager_id.as_str()) && same_owner {
+                // The current manager's existing container is reused only when
+                // it already mounts the exact expected child; never start a
+                // wide or foreign layout.
+                if !exact_mount {
+                    anyhow::bail!("{}", incompatible_workspace_mount(&container_name));
+                }
+            } else if metadata.manager_id.is_none() && same_owner {
+                // A legacy same-owner container may still recreate, but only
+                // when its inspected mount is exactly the expected child.
+                // Any other mount is incompatible and left untouched.
+                if !exact_mount
+                    || !super::docker_lifecycle::legacy_workspace_mount_matches(
+                        &config,
+                        metadata.workspace_source.as_deref(),
+                    )
+                {
+                    anyhow::bail!("{}", incompatible_workspace_mount(&container_name));
+                }
                 self.stop_and_remove(&container_name).await?;
                 inspected = None;
             } else {
@@ -148,6 +163,13 @@ impl DockerRunnerBackend {
                 })?;
         }
 
+        // Every ordinary owner variant must prove the exact expected mount on
+        // the freshly inspected container, including a newly created one, so a
+        // reuse/start never returns behind a wide or foreign layout.
+        if inspected.workspace_source.as_deref() != Some(host_workspace_root.as_path()) {
+            anyhow::bail!("{}", incompatible_workspace_mount(&container_name));
+        }
+
         let target = if matches!(owner, RunnerOwner::ApplicationPrincipal { .. }) {
             let id = super::principal_admission::verified_id(self, owner, &inspected)?;
             super::principal_admission::admit(self, owner, id).await?;
@@ -155,7 +177,8 @@ impl DockerRunnerBackend {
         } else {
             container_name.clone()
         };
-        self.observe_running(owner, workspace_root, network_enabled, &config, &inspected);
+        self.observe_running(owner, workspace_root, network_enabled, &config, &inspected)
+            .await?;
         self.last_active
             .lock()
             .expect("runner activity map poisoned")
@@ -337,15 +360,102 @@ impl DockerRunnerBackend {
         Ok(target.to_string_lossy().to_string())
     }
 
-    fn host_workspace_root(
+    pub(super) fn workspace_mount(
         config: &RunnerManagerConfig,
         workspace_root: &Path,
     ) -> anyhow::Result<PathBuf> {
-        let relative = workspace_root
+        if !workspace_root.is_absolute() {
+            anyhow::bail!("workspace root must be an absolute path");
+        }
+        let trusted_base = config
+            .workspace_root
+            .canonicalize()
+            .context("trusted workspace root is unavailable")?;
+        if !trusted_base.is_dir() {
+            anyhow::bail!("trusted workspace root is not a directory");
+        }
+        let requested = workspace_root
+            .canonicalize()
+            .context("workspace root is unavailable")?;
+        if !requested.is_dir() {
+            anyhow::bail!("workspace root is not a directory");
+        }
+        let canonical_relative = requested
+            .strip_prefix(&trusted_base)
+            .ok()
+            .filter(|relative| !relative.as_os_str().is_empty())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "workspace root must be a strict descendant of the trusted workspace root"
+                )
+            })?;
+
+        // Walk the component names from the original request under the
+        // canonical trusted base. Canonicalizing first would accept an alias
+        // symlink that resolves elsewhere inside the same trusted tree.
+        let original_relative = workspace_root
             .strip_prefix(&config.workspace_root)
-            .with_context(|| "workspace root is outside runner-manager WORKSPACE_ROOT")?;
-        Ok(config.host_workspace_root.join(relative))
+            .map_err(|_| {
+                anyhow::anyhow!("workspace root must be under the trusted workspace root")
+            })?;
+        let mut current = trusted_base.clone();
+        for component in original_relative.components() {
+            let std::path::Component::Normal(name) = component else {
+                anyhow::bail!("workspace root contains a non-normal path component");
+            };
+            current.push(name);
+            let metadata = std::fs::symlink_metadata(&current)
+                .with_context(|| "workspace root component is unavailable".to_string())?;
+            if metadata.file_type().is_symlink() {
+                anyhow::bail!("workspace root may not traverse a symbolic link");
+            }
+        }
+
+        let source = config.host_workspace_root.join(canonical_relative);
+        validate_mount_value(&source, "workspace mount source")?;
+        validate_container_workdir(&config.workdir)?;
+        Ok(source)
     }
+}
+
+fn incompatible_workspace_mount(container_name: &str) -> String {
+    format!(
+        "runner container {container_name} has an incompatible workspace mount; operator review and manual cleanup are required"
+    )
+}
+
+fn validate_mount_value(path: &Path, what: &str) -> anyhow::Result<()> {
+    let Some(text) = path.to_str() else {
+        anyhow::bail!("{what} must be valid UTF-8");
+    };
+    if text.is_empty()
+        || text
+            .bytes()
+            .any(|byte| byte == b',' || byte == 0 || byte.is_ascii_control())
+    {
+        anyhow::bail!("{what} contains a forbidden character");
+    }
+    Ok(())
+}
+
+fn validate_container_workdir(workdir: &str) -> anyhow::Result<()> {
+    validate_mount_value(Path::new(workdir), "container workdir")?;
+    let path = Path::new(workdir);
+    if !path.is_absolute() {
+        anyhow::bail!("container workdir must be absolute");
+    }
+    let mut normalized = PathBuf::from("/");
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir => {}
+            std::path::Component::Normal(name) => normalized.push(name),
+            _ => anyhow::bail!("container workdir must be normalized"),
+        }
+    }
+    if normalized == Path::new("/") || normalized.as_os_str() != path.as_os_str() {
+        anyhow::bail!("container workdir must be a normalized absolute non-root path");
+    }
+    Ok(())
 }
 
 pub(super) fn docker_host_env(config: &RunnerManagerConfig) -> Vec<(String, String)> {

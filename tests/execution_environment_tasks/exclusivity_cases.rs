@@ -21,11 +21,11 @@ async fn a_second_task_cannot_share_the_environment_or_the_binding() {
 
     // A second, independent workspace on the same environment is still
     // refused: the environment anchor is the exclusive slot.
-    let other_binding = super::support::create_code_project_binding(
+    let other_binding = super::support::create_resource_binding(
         &fixture.database.pool,
         fixture.application_id,
         "/tmp/other-workspace",
-        "code_project:beta",
+        "artifact:beta",
     )
     .await;
     let other_workspace = fixture
@@ -126,26 +126,26 @@ async fn any_legacy_lease_owner_blocks_admission_even_when_expired() {
 }
 
 #[tokio::test]
-async fn an_inactive_or_non_code_project_binding_is_refused() {
+async fn an_inactive_or_non_resource_binding_is_refused() {
     let fixture = TaskFixture::setup().await;
     sqlx::query(
-        "UPDATE workspace_bindings SET resource_kind = 'other_thing' WHERE workspace_binding_id = $1",
+        "UPDATE workspace_bindings SET resource_kind = NULL, resource_id = NULL WHERE workspace_binding_id = $1",
     )
     .bind(fixture.binding_id)
     .execute(&fixture.database.pool)
     .await
-    .expect("change resource kind");
+    .expect("clear resource ownership");
     assert_eq!(
         fixture
             .admit_default(Uuid::new_v4(), "op-kind")
             .await
             .status,
         409,
-        "only a code project workspace may carry a native task"
+        "only a resource-owned workspace may carry a native task"
     );
 
     sqlx::query(
-        "UPDATE workspace_bindings SET resource_kind = 'code_project', is_active = FALSE WHERE workspace_binding_id = $1",
+        "UPDATE workspace_bindings SET resource_kind = 'artifact', resource_id = 'alpha', is_active = FALSE WHERE workspace_binding_id = $1",
     )
     .bind(fixture.binding_id)
     .execute(&fixture.database.pool)

@@ -18,11 +18,16 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::{AppState, api::internal::shared::application_actor, error::AppError};
+use crate::{
+    AppState,
+    api::internal::shared::{application_actor, application_scope_auth},
+    db::execution_environments::find_execution_environment,
+    error::AppError,
+};
 
 use super::{
-    BoundsRefusal, SERVICE_GENERATION_HEADER, bounds::bounded_service_request,
-    relay::relay_service_request,
+    BoundsRefusal, SERVICE_GENERATION_HEADER, admission::ScopeRelayAuth,
+    bounds::bounded_service_request, relay::relay_service_request,
 };
 
 /// Declare one relayed method with its own documented operation.
@@ -101,17 +106,52 @@ async fn serve_service_request(
         Err(BoundsRefusal::BodyTooLarge) => return Ok(body_too_large_response()),
         Err(refusal) => return Err(refuse_bounds(refusal)),
     };
+    let scope_auth = scope_relay_auth(&state, &headers, application_id, environment_id).await?;
     relay_service_request(
         state.runner_broker.service_relay(),
         &state.db,
         application_id,
         environment_id,
         presented_generation,
+        scope_auth.as_ref(),
         method.as_str(),
         bounds,
         body,
     )
     .await
+}
+
+/// Resolve the optional relay scope from the environment's stored identity.
+///
+/// An unscoped environment needs no scope headers and keeps the bearer-only
+/// path. A scoped environment requires the same authenticated scope headers as
+/// scoped provision and must name the stored binding; a header-selected
+/// binding never changes the stored target.
+async fn scope_relay_auth(
+    state: &AppState,
+    headers: &HeaderMap,
+    application_id: i64,
+    environment_id: Uuid,
+) -> Result<Option<ScopeRelayAuth>, AppError> {
+    let stored = find_execution_environment(&state.db, application_id, environment_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("execution environment not found"))?;
+    let Some(stored_binding_id) = stored.workspace_binding_id else {
+        return Ok(None);
+    };
+    let auth = application_scope_auth(state, headers).await?;
+    if auth.application_id != application_id
+        || auth.workspace_binding.workspace_binding_id != stored_binding_id
+    {
+        return Err(AppError::forbidden(
+            "workspace scope is not authorized for this execution environment",
+        ));
+    }
+    Ok(Some(ScopeRelayAuth {
+        application_id: auth.application_id,
+        workspace_binding_id: stored_binding_id,
+        lease_owner: auth.lease_owner,
+    }))
 }
 
 /// Read the caller's expected generation fence.

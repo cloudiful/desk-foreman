@@ -21,19 +21,16 @@ use super::resource_binding_fixtures::{
 async fn unauthenticated_callers_are_denied_without_creating_a_binding() {
     let fixture = BindingFixture::setup().await;
 
-    let (status, _) = fixture.resolve(None, "code_project", "alpha").await;
+    let (status, _) = fixture.resolve(None, "artifact", "alpha").await;
     assert_eq!(status, 401, "a missing application bearer must be rejected");
 
     let (status, _) = fixture
-        .resolve(Some("dfm-not-a-real-token"), "code_project", "alpha")
+        .resolve(Some("dfm-not-a-real-token"), "artifact", "alpha")
         .await;
     assert_eq!(status, 401, "an unknown bearer must be rejected");
 
     assert!(
-        fixture
-            .resource_row("code_project", "alpha")
-            .await
-            .is_none(),
+        fixture.resource_row("artifact", "alpha").await.is_none(),
         "a denied resolution must not create a resource binding"
     );
 
@@ -45,12 +42,12 @@ async fn application_bearer_resolves_one_stable_lease_free_binding() {
     let fixture = BindingFixture::setup().await;
     let token = fixture.token.clone();
 
-    let (status, created) = fixture.resolve(Some(&token), "code_project", "alpha").await;
+    let (status, created) = fixture.resolve(Some(&token), "artifact", "alpha").await;
     assert_eq!(status, 200);
     assert_eq!(created["application_id"], fixture.application_id);
-    assert_eq!(created["resource_kind"], "code_project");
+    assert_eq!(created["resource_kind"], "artifact");
     assert_eq!(created["resource_id"], "alpha");
-    assert_eq!(created["workspace_key"], "code_project:alpha");
+    assert_eq!(created["workspace_key"], "artifact:alpha");
     assert_eq!(created["external_user_id"], RESOURCE_MARKER);
     assert_eq!(created["lifecycle_state"], "active");
     assert_eq!(created["is_active"], true);
@@ -61,7 +58,7 @@ async fn application_bearer_resolves_one_stable_lease_free_binding() {
         .as_i64()
         .expect("binding id");
 
-    let (status, replayed) = fixture.resolve(Some(&token), "code_project", "alpha").await;
+    let (status, replayed) = fixture.resolve(Some(&token), "artifact", "alpha").await;
     assert_eq!(status, 200);
     assert_eq!(
         replayed["workspace_binding_id"], binding_id,
@@ -80,12 +77,10 @@ async fn distinct_applications_resolve_separate_bindings_for_one_resource() {
     let token = fixture.token.clone();
     let (other_application_id, other_token) = fixture.other_application("binding-other").await;
 
-    let (status, mine) = fixture
-        .resolve(Some(&token), "code_project", "shared")
-        .await;
+    let (status, mine) = fixture.resolve(Some(&token), "artifact", "shared").await;
     assert_eq!(status, 200);
     let (status, theirs) = fixture
-        .resolve(Some(&other_token), "code_project", "shared")
+        .resolve(Some(&other_token), "artifact", "shared")
         .await;
     assert_eq!(status, 200);
 
@@ -98,16 +93,14 @@ async fn distinct_applications_resolve_separate_bindings_for_one_resource() {
     );
 
     // Each application still sees only its own binding on a replay.
-    let (status, mine_again) = fixture
-        .resolve(Some(&token), "code_project", "shared")
-        .await;
+    let (status, mine_again) = fixture.resolve(Some(&token), "artifact", "shared").await;
     assert_eq!(status, 200);
     assert_eq!(
         mine_again["workspace_binding_id"],
         mine["workspace_binding_id"]
     );
     let (_, theirs_again) = fixture
-        .resolve(Some(&other_token), "code_project", "shared")
+        .resolve(Some(&other_token), "artifact", "shared")
         .await;
     assert_eq!(
         theirs_again["workspace_binding_id"], theirs["workspace_binding_id"],
@@ -125,8 +118,8 @@ async fn invalid_resource_components_are_denied_without_a_new_row() {
 
     for (kind, id) in [
         ("code.project", "alpha"),
-        ("code_project", "alpha.beta"),
-        ("code_project", too_long.as_str()),
+        ("artifact", "alpha.beta"),
+        ("artifact", too_long.as_str()),
     ] {
         let (status, _) = fixture.resolve(Some(&token), kind, id).await;
         assert_eq!(status, 400, "{kind}/{id} must be rejected");
@@ -140,7 +133,7 @@ async fn invalid_resource_components_are_denied_without_a_new_row() {
 }
 
 #[tokio::test]
-async fn any_valid_resource_kind_resolves_but_stays_native_ineligible() {
+async fn any_valid_resource_kind_resolves_and_admits_a_native_task() {
     let fixture = BindingFixture::setup().await;
     let token = fixture.token.clone();
     fixture.online_manager("binding-kind-manager").await;
@@ -152,12 +145,14 @@ async fn any_valid_resource_kind_resolves_but_stays_native_ineligible() {
     let binding_id = body["workspace_binding_id"].as_i64().expect("binding id");
     assert_lease_free(&fixture.row(binding_id).await);
 
-    // An arbitrary kind resolves, but it never becomes native-task eligible.
-    let refused = fixture
+    // Any valid resource kind is now native-task eligible.
+    let admitted = fixture
         .admit(binding_id, "prompt-subject", Uuid::new_v4())
         .await
-        .expect_err("a non code_project resource must not admit a native task");
-    assert_eq!(refused.code(), "binding_ineligible");
+        .expect("a generic resource workspace must admit a native task");
+    assert_eq!(admitted.workspace_binding_id, binding_id);
+    assert_eq!(admitted.application_id, fixture.application_id);
+    assert_eq!(admitted.subject_external_user_id, "prompt-subject");
 
     fixture.teardown().await;
 }
@@ -167,9 +162,7 @@ async fn archived_binding_is_rejected_and_never_resurrected() {
     let fixture = BindingFixture::setup().await;
     let token = fixture.token.clone();
 
-    let (status, created) = fixture
-        .resolve(Some(&token), "code_project", "retired")
-        .await;
+    let (status, created) = fixture.resolve(Some(&token), "artifact", "retired").await;
     assert_eq!(status, 200);
     let binding_id = created["workspace_binding_id"]
         .as_i64()
@@ -179,9 +172,7 @@ async fn archived_binding_is_rejected_and_never_resurrected() {
         .expect("archive binding")
         .expect("archive binding row");
 
-    let (status, _) = fixture
-        .resolve(Some(&token), "code_project", "retired")
-        .await;
+    let (status, _) = fixture.resolve(Some(&token), "artifact", "retired").await;
     assert_eq!(
         status, 401,
         "the existing active-lifecycle policy must refuse an archived binding"
@@ -200,9 +191,7 @@ async fn live_legacy_lease_survives_binding_resolution() {
     let fixture = BindingFixture::setup().await;
     let token = fixture.token.clone();
 
-    let (status, created) = fixture
-        .resolve(Some(&token), "code_project", "leased")
-        .await;
+    let (status, created) = fixture.resolve(Some(&token), "artifact", "leased").await;
     assert_eq!(status, 200);
     let binding_id = created["workspace_binding_id"]
         .as_i64()
@@ -218,9 +207,7 @@ async fn live_legacy_lease_survives_binding_resolution() {
     assert_eq!(status, 200);
     assert_eq!(leased["write_lease_owner"], "legacy-writer");
 
-    let (status, resolved) = fixture
-        .resolve(Some(&token), "code_project", "leased")
-        .await;
+    let (status, resolved) = fixture.resolve(Some(&token), "artifact", "leased").await;
     assert_eq!(status, 200);
     assert_eq!(resolved["workspace_binding_id"], binding_id);
     assert_eq!(
@@ -262,9 +249,7 @@ async fn native_active_binding_survives_binding_resolution() {
     let token = fixture.token.clone();
     fixture.online_manager("binding-native-manager").await;
 
-    let (status, created) = fixture
-        .resolve(Some(&token), "code_project", "native")
-        .await;
+    let (status, created) = fixture.resolve(Some(&token), "artifact", "native").await;
     assert_eq!(status, 200);
     let binding_id = created["workspace_binding_id"]
         .as_i64()
@@ -277,9 +262,7 @@ async fn native_active_binding_survives_binding_resolution() {
         .expect("admit native task");
     let environment_id = admitted.environment_id;
 
-    let (status, resolved) = fixture
-        .resolve(Some(&token), "code_project", "native")
-        .await;
+    let (status, resolved) = fixture.resolve(Some(&token), "artifact", "native").await;
     assert_eq!(status, 200);
     assert_eq!(resolved["workspace_binding_id"], binding_id);
     assert_eq!(
@@ -318,10 +301,10 @@ async fn concurrent_first_resolution_returns_one_binding_id() {
     let token = fixture.token.clone();
 
     let outcomes = tokio::join!(
-        fixture.resolve(Some(&token), "code_project", "raced"),
-        fixture.resolve(Some(&token), "code_project", "raced"),
-        fixture.resolve(Some(&token), "code_project", "raced"),
-        fixture.resolve(Some(&token), "code_project", "raced"),
+        fixture.resolve(Some(&token), "artifact", "raced"),
+        fixture.resolve(Some(&token), "artifact", "raced"),
+        fixture.resolve(Some(&token), "artifact", "raced"),
+        fixture.resolve(Some(&token), "artifact", "raced"),
     );
     let ids: Vec<Value> = [outcomes.0, outcomes.1, outcomes.2, outcomes.3]
         .into_iter()
@@ -337,7 +320,7 @@ async fn concurrent_first_resolution_returns_one_binding_id() {
 
     let stored = fixture.row(ids[0].as_i64().expect("binding id")).await;
     assert_eq!(stored.application_id, fixture.application_id);
-    assert_eq!(stored.workspace_key, "code_project:raced");
+    assert_eq!(stored.workspace_key, "artifact:raced");
     assert_lease_free(&stored);
 
     fixture.teardown().await;

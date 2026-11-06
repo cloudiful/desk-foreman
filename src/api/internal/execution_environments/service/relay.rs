@@ -27,24 +27,34 @@ use crate::{
 };
 
 use super::{
-    admission::{ServiceAdmission, admit_service_request, fence_outcome, refuse_admission},
+    admission::{
+        ScopeRelayAuth, ServiceAdmission, admit_service_request, fence_outcome, refuse_admission,
+        validate_service_scope,
+    },
     bounds::{ServiceRequestBounds, header_entry},
     response::relay_response,
 };
 
 /// Relay one already-bounded request to its environment's private agent.
-pub async fn relay_service_request(
+pub(super) async fn relay_service_request(
     registry: &Arc<RelayRegistry>,
     pool: &PgPool,
     application_id: i64,
     environment_id: Uuid,
     presented_generation: i64,
+    scope_auth: Option<&ScopeRelayAuth>,
     method: &str,
     bounds: ServiceRequestBounds,
     body: Body,
 ) -> Result<axum::response::Response, AppError> {
-    let ServiceAdmission { manager_id } =
-        admit_service_request(pool, application_id, environment_id, presented_generation).await?;
+    let ServiceAdmission { manager_id } = admit_service_request(
+        pool,
+        application_id,
+        environment_id,
+        presented_generation,
+        scope_auth,
+    )
+    .await?;
     let call = registry
         .open_stream(StreamRequest {
             stream_id: RelayId::from_bytes(Uuid::new_v4().into_bytes()),
@@ -61,6 +71,7 @@ pub async fn relay_service_request(
         application_id,
         environment_id,
         presented_generation,
+        scope_auth,
         &call,
     )
     .await
@@ -112,6 +123,7 @@ async fn recheck_fence(
     application_id: i64,
     environment_id: Uuid,
     presented_generation: i64,
+    scope_auth: Option<&ScopeRelayAuth>,
     call: &RelayCall,
 ) -> Result<(), AppError> {
     if !call.epoch_is_current() {
@@ -129,11 +141,10 @@ async fn recheck_fence(
         return Err(AppError::not_found("execution environment not found"));
     };
     let outcome = fence_outcome(&row, presented_generation);
-    if outcome == super::admission::FenceOutcome::Servable {
-        Ok(())
-    } else {
-        Err(refuse_admission(outcome))
+    if outcome != super::admission::FenceOutcome::Servable {
+        return Err(refuse_admission(outcome));
     }
+    validate_service_scope(pool, application_id, environment_id, scope_auth).await
 }
 
 /// Forward the caller's body to the agent side, slice by slice.

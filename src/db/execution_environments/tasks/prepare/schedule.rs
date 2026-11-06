@@ -80,7 +80,7 @@ pub(super) async fn schedule(
         .await
         .map_err(internal)?
         .ok_or(PrepareError::NotFound)?;
-    if binding.application_id != application_id || !binding.is_active_code_project() {
+    if binding.application_id != application_id || !binding.is_active_resource_workspace() {
         return Err(PrepareError::BindingIneligible);
     }
 

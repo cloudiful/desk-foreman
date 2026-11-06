@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use desk_foreman::runner::RunnerService;
 use reqwest::Client;
-use runner_protocol::{GitReceiptReadRequest, RunnerJob, RunnerJobResult};
+use runner_protocol::{RunnerJob, RunnerJobResult};
 
 #[path = "native_execution.rs"]
 mod native_execution;
@@ -37,12 +37,6 @@ pub(super) async fn execute_job(
     gate: &Arc<SessionGate>,
     job: RunnerJob,
 ) -> RunnerJobResult {
-    if job.kind == "git_operation" {
-        return super::git_operation::execute_job(runner, config, job).await;
-    }
-    if job.kind == "read_git_receipt" {
-        return read_git_receipt_job(runner, job).await;
-    }
     let job_id = job.job_id.clone();
     let outcome = if job.kind == "prepare_native_task" {
         let (token, manager_id) = {
@@ -77,50 +71,5 @@ pub(super) async fn execute_job(
                 error: Some(error.to_string()),
             }
         }
-    }
-}
-
-const RECEIPT_UNAVAILABLE: &str = "git receipt read unavailable";
-const RECEIPT_UNCONFIRMED: &str = "git receipt read is unconfirmed";
-
-/// Read-only receipt lookup over the authenticated manager pull channel.
-///
-/// The payload is parsed and validated before the runner call, and the ack is
-/// validated against the same request. Failures never include paths, URLs,
-/// credentials, or raw Git errors.
-pub(super) async fn read_git_receipt_job(
-    runner: &dyn RunnerService,
-    job: RunnerJob,
-) -> RunnerJobResult {
-    let job_id = job.job_id.clone();
-    let Ok(request) = serde_json::from_value::<GitReceiptReadRequest>(job.payload) else {
-        return receipt_failure(job_id, RECEIPT_UNAVAILABLE);
-    };
-    if request.validate().is_err() {
-        return receipt_failure(job_id, RECEIPT_UNAVAILABLE);
-    }
-    let Ok(ack) = runner.read_git_receipt(request.clone()).await else {
-        return receipt_failure(job_id, RECEIPT_UNAVAILABLE);
-    };
-    if ack.validate_matches(&request).is_err() {
-        return receipt_failure(job_id, RECEIPT_UNCONFIRMED);
-    }
-    let Ok(value) = serde_json::to_value(ack) else {
-        return receipt_failure(job_id, RECEIPT_UNAVAILABLE);
-    };
-    RunnerJobResult {
-        job_id,
-        ok: true,
-        result: Some(value),
-        error: None,
-    }
-}
-
-fn receipt_failure(job_id: String, message: &str) -> RunnerJobResult {
-    RunnerJobResult {
-        job_id,
-        ok: false,
-        result: None,
-        error: Some(message.to_owned()),
     }
 }

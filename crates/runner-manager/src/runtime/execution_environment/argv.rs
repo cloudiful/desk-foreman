@@ -60,7 +60,107 @@ pub struct ServiceRunSpec<'a> {
 
 /// Build the hardened legacy environment argv, preserving its state-only mount.
 pub fn build_environment_run_argv(spec: &EnvironmentRunSpec<'_>) -> Vec<String> {
-    build_environment_run_argv_with(spec, spec.state_workdir, &[], None)
+    build_environment_run_argv_with(
+        spec,
+        spec.state_workdir,
+        &[],
+        None,
+        None,
+        spec.command,
+        None,
+        &[],
+    )
+}
+
+/// Build one scoped private-service launch.
+///
+/// The trusted image owns the entrypoint, so the command is empty; the
+/// workspace bind is the only extra mount and the state mount stays the
+/// existing durable volume. The state directory is passed as a non-secret
+/// environment variable, never as a command or credential argument.
+pub fn build_scoped_service_run_argv(
+    spec: &EnvironmentRunSpec<'_>,
+    image: &str,
+    workspace_mount: &str,
+    state_directory: &str,
+) -> Vec<String> {
+    build_environment_run_argv_with(
+        spec,
+        &spec.config.workdir,
+        &[],
+        None,
+        Some(image),
+        &[],
+        Some(workspace_mount),
+        &[("DF_STATE_DIRECTORY", state_directory.to_string())],
+    )
+}
+
+/// Fixed root-only ownership script for one derived state volume root.
+///
+/// The uid and gid arrive as separate positional arguments, so no configured
+/// value is ever interpolated into the script text.
+const SCOPED_STATE_OWNERSHIP_SCRIPT: &str = "set -eu;chown \"$1:$2\" /state;chmod 0700 /state";
+
+/// Build the one-shot root-owned state alignment for a scoped service.
+///
+/// This temporary root container can only touch the derived named state
+/// volume at `/state`: no workspace bind, no service environment file, no
+/// credential, no published port, and no other source. The name is derived
+/// from the canonical environment id and generation so one attempt cannot
+/// overlap another.
+pub fn build_scoped_state_ownership_argv(
+    volume_name: &str,
+    image: &str,
+    uid: u32,
+    gid: u32,
+    environment_id: &str,
+    generation: i64,
+) -> Vec<String> {
+    let simple: String = environment_id
+        .chars()
+        .filter(|c| *c != '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let container_name = format!("df-state-init-{simple}-{generation}");
+    let state_mount = format!("type=volume,src={volume_name},dst=/state");
+    vec![
+        "run".to_string(),
+        "--rm".to_string(),
+        "--name".to_string(),
+        container_name,
+        "--network".to_string(),
+        "none".to_string(),
+        "--read-only".to_string(),
+        "--cap-drop".to_string(),
+        "ALL".to_string(),
+        "--cap-add".to_string(),
+        "CHOWN".to_string(),
+        "--cap-add".to_string(),
+        "FOWNER".to_string(),
+        "--security-opt".to_string(),
+        "no-new-privileges".to_string(),
+        "--user".to_string(),
+        "0:0".to_string(),
+        "--entrypoint".to_string(),
+        "sh".to_string(),
+        "--workdir".to_string(),
+        "/".to_string(),
+        "--pids-limit".to_string(),
+        "32".to_string(),
+        "--memory".to_string(),
+        "64m".to_string(),
+        "--cpus".to_string(),
+        "0.1".to_string(),
+        "--mount".to_string(),
+        state_mount,
+        image.to_string(),
+        "-c".to_string(),
+        SCOPED_STATE_OWNERSHIP_SCRIPT.to_string(),
+        "--".to_string(),
+        uid.to_string(),
+        gid.to_string(),
+    ]
 }
 
 /// Build one native-task launch with a typed identity and derived task bind.
@@ -88,14 +188,28 @@ pub fn build_native_task_run_argv(
     ];
     let workspace_directory = native_task_workspace_directory(task.workspace_binding_id);
     let task_mount = format!("type=bind,source={task_tree_source},target={workspace_directory}");
-    build_environment_run_argv_with(spec, &workspace_directory, &labels, Some(&task_mount))
+    build_environment_run_argv_with(
+        spec,
+        &workspace_directory,
+        &labels,
+        Some(&task_mount),
+        None,
+        spec.command,
+        None,
+        &[],
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_environment_run_argv_with(
     spec: &EnvironmentRunSpec<'_>,
     container_workdir: &str,
     extra_labels: &[(&str, String)],
     task_mount: Option<&str>,
+    image_override: Option<&str>,
+    command: &[String],
+    workspace_mount: Option<&str>,
+    extra_env: &[(&str, String)],
 ) -> Vec<String> {
     let config = spec.config;
     let mut args = vec![
@@ -128,6 +242,14 @@ fn build_environment_run_argv_with(
         "-v".to_string(),
         format!("{}:{}", spec.volume_name, spec.state_mount_target),
     ]);
+    for (key, value) in extra_env {
+        args.push("-e".to_string());
+        args.push(format!("{key}={value}"));
+    }
+    if let Some(workspace_mount) = workspace_mount {
+        args.push("--mount".to_string());
+        args.push(workspace_mount.to_string());
+    }
     if let Some(task_mount) = task_mount {
         args.push("--mount".to_string());
         args.push(task_mount.to_string());
@@ -162,8 +284,12 @@ fn build_environment_run_argv_with(
         args.push("--network".to_string());
         args.push("none".to_string());
     }
-    args.push(config.image.clone());
-    args.extend(spec.command.iter().cloned());
+    args.push(
+        image_override
+            .map(str::to_string)
+            .unwrap_or_else(|| config.image.clone()),
+    );
+    args.extend(command.iter().cloned());
     args
 }
 

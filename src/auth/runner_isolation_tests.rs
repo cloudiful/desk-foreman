@@ -9,7 +9,7 @@ use crate::lease_test_support as support;
 
 #[tokio::test]
 async fn non_isolated_resource_workspace_is_forbidden_403() {
-    let error = require_isolated_resource_workspace(false, "code_project:one")
+    let error = require_isolated_resource_workspace(false, "artifact:one")
         .expect_err("a non-isolated resource workspace must be rejected");
     let message = match &error {
         AppError::Forbidden(message) => message,
@@ -31,7 +31,7 @@ async fn non_isolated_resource_workspace_is_forbidden_403() {
 
 #[test]
 fn isolated_resource_workspace_is_allowed() {
-    require_isolated_resource_workspace(true, "code_project:one")
+    require_isolated_resource_workspace(true, "artifact:one")
         .expect("an isolated resource workspace is allowed");
 }
 
@@ -45,7 +45,7 @@ fn non_isolated_personal_workspace_is_allowed() {
 
 #[test]
 fn malformed_resource_workspace_keeps_personal_semantics() {
-    for workspace_key in ["code_project", "code_project:", "Code:one"] {
+    for workspace_key in ["artifact", "artifact:", "Code:one"] {
         require_isolated_resource_workspace(false, workspace_key).unwrap_or_else(|_| {
             panic!("malformed resource key {workspace_key} must stay personal")
         });
@@ -140,7 +140,7 @@ async fn authentication_carries_checked_principal_without_invalid_binding_creati
     );
     headers.insert(
         "x-df-workspace-key",
-        HeaderValue::from_static("code_project:one"),
+        HeaderValue::from_static("artifact:one"),
     );
     headers.insert("x-df-lease-owner", HeaderValue::from_static("person-b"));
     assert!(
@@ -149,7 +149,7 @@ async fn authentication_carries_checked_principal_without_invalid_binding_creati
             .is_err()
     );
     assert!(
-        queries::find_workspace_binding_by_resource(&pool, 817301, "code_project", "one")
+        queries::find_workspace_binding_by_resource(&pool, 817301, "artifact", "one")
             .await?
             .is_none()
     );
@@ -164,7 +164,7 @@ async fn authentication_carries_checked_principal_without_invalid_binding_creati
             .is_err()
     );
     assert!(
-        queries::find_workspace_binding_by_resource(&pool, 817301, "code_project", "one")
+        queries::find_workspace_binding_by_resource(&pool, 817301, "artifact", "one")
             .await?
             .is_none()
     );
@@ -181,7 +181,7 @@ async fn authentication_carries_checked_principal_without_invalid_binding_creati
         817301,
         actor.workspace_binding_id,
         "person-a",
-        "code_project:one",
+        "artifact:one",
     )
     .unwrap();
     assert_eq!(actor.runner_owner(), expected);
@@ -197,7 +197,7 @@ async fn authentication_carries_checked_principal_without_invalid_binding_creati
                 817301,
                 actor.workspace_binding_id,
                 "person-b",
-                "code_project:one",
+                "artifact:one",
             )
             .unwrap(),
         );

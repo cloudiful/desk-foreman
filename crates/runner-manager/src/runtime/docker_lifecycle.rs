@@ -14,6 +14,16 @@ impl DockerRunnerBackend {
         &self,
         container_name: &str,
     ) -> anyhow::Result<Option<ContainerMetadata>> {
+        let workspace_destination = self.config.read().await.workdir.clone();
+        self.inspect_container_metadata_with_workdir(container_name, &workspace_destination)
+            .await
+    }
+
+    pub(crate) async fn inspect_container_metadata_with_workdir(
+        &self,
+        container_name: &str,
+        workspace_destination: &str,
+    ) -> anyhow::Result<Option<ContainerMetadata>> {
         let output = self
             .docker_output(["inspect", container_name, "--format", "{{json .}}"])
             .await;
@@ -44,19 +54,38 @@ impl DockerRunnerBackend {
             .and_then(|labels| labels.get("desk-foreman.owner"))
             .and_then(Value::as_str)
             .map(str::to_string);
-        let workspace_destination = self.config.read().await.workdir.clone();
-        let workspace_source = value
-            .get("Mounts")
-            .and_then(Value::as_array)
-            .and_then(|mounts| {
-                mounts.iter().find_map(|mount| {
-                    (mount.get("Destination").and_then(Value::as_str)
-                        == Some(workspace_destination.as_str()))
-                    .then(|| mount.get("Source").and_then(Value::as_str))
-                    .flatten()
-                    .map(PathBuf::from)
+        let mounts = value.get("Mounts").and_then(Value::as_array).map(|mounts| {
+            mounts
+                .iter()
+                .map(|mount| {
+                    let object = mount.as_object();
+                    ContainerMountInfo {
+                        kind: object
+                            .and_then(|object| object.get("Type"))
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        source: object
+                            .and_then(|object| object.get("Source"))
+                            .and_then(Value::as_str)
+                            .map(PathBuf::from),
+                        destination: object
+                            .and_then(|object| object.get("Destination"))
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        read_write: object
+                            .and_then(|object| object.get("RW"))
+                            .and_then(Value::as_bool),
+                    }
                 })
-            });
+                .collect::<Vec<_>>()
+        });
+        let workspace_source = mounts.as_ref().and_then(|mounts| {
+            mounts.iter().find_map(|mount| {
+                (mount.destination.as_deref() == Some(workspace_destination))
+                    .then(|| mount.source.clone())
+                    .flatten()
+            })
+        });
         let name = value
             .get("Name")
             .and_then(Value::as_str)
@@ -75,6 +104,7 @@ impl DockerRunnerBackend {
             manager_id,
             owner_key,
             workspace_source,
+            mounts,
         }))
     }
 
@@ -137,6 +167,34 @@ impl DockerRunnerBackend {
                 && metadata.manager_id.is_none()
                 && legacy_workspace_mount_matches(&config, metadata.workspace_source.as_deref());
             if !manager_owned && !legacy_owned {
+                continue;
+            }
+            // A recognized ordinary owner whose inspected mount is missing,
+            // the host base itself, outside it, or not a normal strict child is
+            // incompatible: leave it untouched for operator-reviewed cleanup
+            // instead of stopping or removing it.
+            let ordinary_owner = metadata
+                .owner_key
+                .as_deref()
+                .and_then(owner_from_stable_key)
+                .is_some_and(|owner| {
+                    matches!(
+                        owner,
+                        RunnerOwner::InternalUser { .. }
+                            | RunnerOwner::WorkspaceBinding { .. }
+                            | RunnerOwner::ApplicationPrincipal { .. }
+                    )
+                });
+            if ordinary_owner
+                && !is_strict_host_workspace_child(
+                    &config.host_workspace_root,
+                    metadata.workspace_source.as_deref(),
+                )
+            {
+                tracing::warn!(
+                    container = %container_name,
+                    "skipping managed container with an incompatible workspace mount"
+                );
                 continue;
             }
             if matches!(metadata.status.as_str(), "running" | "restarting")
@@ -313,14 +371,14 @@ impl DockerRunnerBackend {
         }
     }
 
-    pub(crate) fn observe_running(
+    pub(crate) async fn observe_running(
         &self,
         owner: &RunnerOwner,
         workspace_root: &Path,
         network_enabled: bool,
         config: &RunnerManagerConfig,
         metadata: &ContainerMetadata,
-    ) {
+    ) -> anyhow::Result<()> {
         let event = RunnerLifecycleEvent {
             owner: owner.clone(),
             container_name: owner.container_name(),
@@ -333,11 +391,25 @@ impl DockerRunnerBackend {
             network_enabled: Some(network_enabled),
             last_error: None,
         };
+        let owner_key = event.owner.stable_key();
         self.observed
             .lock()
             .expect("runner observation map poisoned")
             .insert(event.container_name.clone(), event.clone());
-        self.reporter.report(event);
+        let first = {
+            let reported = self.reported.lock().expect("runner report map poisoned");
+            reported.get(&owner_key) != Some(&event.container_id)
+        };
+        if first {
+            self.reporter.report_and_wait(event.clone()).await?;
+            self.reported
+                .lock()
+                .expect("runner report map poisoned")
+                .insert(owner_key, event.container_id);
+        } else {
+            self.reporter.report(event);
+        }
+        Ok(())
     }
 
     pub(crate) fn report_removed(&self, container_name: &str) {
@@ -349,6 +421,7 @@ impl DockerRunnerBackend {
         else {
             return;
         };
+        self.forget_reported(&event.owner.stable_key(), event.container_id.as_deref());
         event.status = RunnerLifecycleStatus::Removed;
         event.last_error = None;
         self.reporter.report(event);
@@ -364,12 +437,27 @@ impl DockerRunnerBackend {
         else {
             return;
         };
+        self.forget_reported(&event.owner.stable_key(), event.container_id.as_deref());
         event.status = RunnerLifecycleStatus::CleanupFailed;
         event.last_error = Some(error.to_string());
         self.reporter.report(event);
     }
 
-    fn report_removed_metadata(&self, metadata: &ContainerMetadata, container_name: &str) {
+    fn forget_reported(&self, owner_key: &str, container_id: Option<&str>) {
+        let mut reported = self.reported.lock().expect("runner report map poisoned");
+        if reported
+            .get(owner_key)
+            .is_some_and(|current| current.as_deref() == container_id)
+        {
+            reported.remove(owner_key);
+        }
+    }
+
+    pub(crate) fn report_removed_metadata(
+        &self,
+        metadata: &ContainerMetadata,
+        container_name: &str,
+    ) {
         let Some(owner_key) = metadata
             .owner_key
             .as_deref()
@@ -377,6 +465,7 @@ impl DockerRunnerBackend {
         else {
             return;
         };
+        self.forget_reported(&owner_key.stable_key(), metadata.container_id.as_deref());
         self.reporter.report(RunnerLifecycleEvent {
             owner: owner_key,
             container_name: container_name.to_string(),
@@ -404,6 +493,7 @@ impl DockerRunnerBackend {
         else {
             return;
         };
+        self.forget_reported(&owner_key.stable_key(), metadata.container_id.as_deref());
         self.reporter.report(RunnerLifecycleEvent {
             owner: owner_key,
             container_name: container_name.to_string(),
@@ -503,23 +593,27 @@ mod principal_parser_tests {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct ContainerMountInfo {
+    pub(crate) kind: Option<String>,
+    pub(crate) source: Option<PathBuf>,
+    pub(crate) destination: Option<String>,
+    pub(crate) read_write: Option<bool>,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct ContainerMetadata {
-    name: Option<String>,
-    managed: bool,
+    pub(crate) name: Option<String>,
+    pub(crate) managed: bool,
     pub(crate) status: String,
     pub(crate) container_id: Option<String>,
     pub(crate) manager_id: Option<String>,
     pub(crate) owner_key: Option<String>,
     pub(crate) workspace_source: Option<PathBuf>,
+    pub(crate) mounts: Option<Vec<ContainerMountInfo>>,
 }
 
 impl ContainerMetadata {
-    pub(crate) fn matches_principal(
-        &self,
-        owner: &RunnerOwner,
-        name: &str,
-        manager_id: &str,
-    ) -> bool {
+    pub(crate) fn matches_owner(&self, owner: &RunnerOwner, name: &str, manager_id: &str) -> bool {
         self.managed
             && self
                 .container_id
@@ -530,6 +624,15 @@ impl ContainerMetadata {
             && self.owner_key.as_deref() == Some(owner.stable_key().as_str())
             && self.manager_id.as_deref() == Some(manager_id)
     }
+
+    pub(crate) fn matches_principal(
+        &self,
+        owner: &RunnerOwner,
+        name: &str,
+        manager_id: &str,
+    ) -> bool {
+        self.matches_owner(owner, name, manager_id)
+    }
 }
 
 pub(crate) fn legacy_workspace_mount_matches(
@@ -537,4 +640,24 @@ pub(crate) fn legacy_workspace_mount_matches(
     workspace_source: Option<&Path>,
 ) -> bool {
     workspace_source.is_some_and(|source| source.starts_with(&config.host_workspace_root))
+}
+
+/// True when `source` is a normalized strict descendant of the trusted host
+/// base. Pure lexical check: the daemon-reported path is never stat'ed.
+pub(crate) fn is_strict_host_workspace_child(base: &Path, source: Option<&Path>) -> bool {
+    let Some(source) = source else {
+        return false;
+    };
+    if !base.is_absolute() || !source.is_absolute() {
+        return false;
+    }
+    let Ok(relative) = source.strip_prefix(base) else {
+        return false;
+    };
+    if relative.as_os_str().is_empty() {
+        return false;
+    }
+    relative
+        .components()
+        .all(|component| matches!(component, std::path::Component::Normal(_)))
 }

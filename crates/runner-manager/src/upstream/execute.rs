@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use anyhow::bail;
-use desk_foreman::runner::RunnerService;
+use desk_foreman::runner::{RunnerService, WorkspaceActivityRequest};
 use runner_protocol::{
     CancelSessionRequest, ExecRequest, InputRequest, RunnerCommandRequest, RunnerOwner,
 };
@@ -47,7 +47,21 @@ pub(super) async fn execute_job_inner(
                 .cancel_session(serde_json::from_value::<CancelSessionRequest>(payload)?)
                 .await?,
         )?),
-        "list_sessions" => Ok(serde_json::to_value(runner.list_sessions().await?)?),
+        "list_sessions" => {
+            if payload.is_null() {
+                Ok(serde_json::to_value(runner.list_sessions().await?)?)
+            } else {
+                let request = serde_json::from_value::<WorkspaceActivityRequest>(payload)?;
+                if request.workspace_binding_id <= 0 {
+                    bail!("invalid workspace binding id");
+                }
+                Ok(serde_json::to_value(
+                    runner
+                        .workspace_activity(request.workspace_binding_id)
+                        .await?,
+                )?)
+            }
+        }
         "run_command" => {
             let mut request = serde_json::from_value::<RunnerCommandRequest>(payload)?;
             let _permit = gate.acquire(config).await;
@@ -205,16 +219,6 @@ mod tests {
             workspace_root: PathBuf::from("/tmp"),
             host_workspace_root: PathBuf::from("/tmp"),
             image: "test-image".to_string(),
-            git_image: None,
-            git_private_root: None,
-            git_host_private_root: None,
-            git_network: None,
-            git_broker_host: None,
-            git_max_fetch_volume_bytes: None,
-            git_max_bundle_bytes: None,
-            git_max_logical_object_bytes: None,
-            git_max_checkout_bytes: None,
-            git_max_tree_entries: None,
             workdir: "/workspace".to_string(),
             network_enabled: false,
             max_output_bytes: 100,
@@ -414,6 +418,123 @@ mod tests {
         .await
         .unwrap_err();
         assert!(error.to_string().contains("not supported"));
+    }
+
+    #[tokio::test]
+    async fn list_sessions_keeps_legacy_mode_and_uses_strict_activity_object_mode() {
+        struct ActivityRunner;
+        impl desk_foreman::runner::RunnerService for ActivityRunner {
+            fn exec_shell<'a>(
+                &'a self,
+                _: runner_protocol::ExecRequest,
+            ) -> desk_foreman::runner::RunnerFuture<
+                'a,
+                anyhow::Result<runner_protocol::ShellToolOutput>,
+            > {
+                Box::pin(async { anyhow::bail!("unused") })
+            }
+            fn write_stdin<'a>(
+                &'a self,
+                _: runner_protocol::InputRequest,
+            ) -> desk_foreman::runner::RunnerFuture<
+                'a,
+                anyhow::Result<runner_protocol::ShellToolOutput>,
+            > {
+                Box::pin(async { anyhow::bail!("unused") })
+            }
+            fn cancel_session<'a>(
+                &'a self,
+                _: runner_protocol::CancelSessionRequest,
+            ) -> desk_foreman::runner::RunnerFuture<
+                'a,
+                anyhow::Result<runner_protocol::RunnerSessionStatus>,
+            > {
+                Box::pin(async { anyhow::bail!("unused") })
+            }
+            fn list_sessions<'a>(
+                &'a self,
+            ) -> desk_foreman::runner::RunnerFuture<
+                'a,
+                anyhow::Result<Vec<runner_protocol::RunnerSessionStatus>>,
+            > {
+                Box::pin(async { Ok(Vec::new()) })
+            }
+            fn workspace_activity<'a>(
+                &'a self,
+                workspace_binding_id: i64,
+            ) -> desk_foreman::runner::RunnerFuture<
+                'a,
+                anyhow::Result<desk_foreman::runner::WorkspaceActivity>,
+            > {
+                Box::pin(async move {
+                    Ok(desk_foreman::runner::WorkspaceActivity {
+                        workspace_binding_id,
+                        active_operations: 1,
+                        live_sessions: 0,
+                        binding_rpc_active: false,
+                    })
+                })
+            }
+            fn run_command<'a>(
+                &'a self,
+                _: runner_protocol::RunnerCommandRequest,
+            ) -> desk_foreman::runner::RunnerFuture<
+                'a,
+                anyhow::Result<runner_protocol::CommandOutput>,
+            > {
+                Box::pin(async { anyhow::bail!("unused") })
+            }
+            fn cleanup_runner_owner<'a>(
+                &'a self,
+                _: runner_protocol::RunnerOwner,
+            ) -> desk_foreman::runner::RunnerFuture<'a, anyhow::Result<()>> {
+                Box::pin(async { anyhow::bail!("unused") })
+            }
+        }
+
+        let config: SharedRunnerManagerConfig = Arc::new(tokio::sync::RwLock::new(config()));
+        let gate = SessionGate::new();
+        let legacy = super::execute_job_inner(
+            &ActivityRunner,
+            &config,
+            &gate,
+            "list_sessions",
+            serde_json::Value::Null,
+        )
+        .await
+        .expect("null mode keeps the legacy Vec result");
+        assert_eq!(legacy, serde_json::json!([]));
+
+        let activity = super::execute_job_inner(
+            &ActivityRunner,
+            &config,
+            &gate,
+            "list_sessions",
+            serde_json::json!({"workspace_binding_id": 5}),
+        )
+        .await
+        .expect("object mode reports strict activity");
+        assert_eq!(
+            activity,
+            serde_json::json!({
+                "workspace_binding_id": 5,
+                "active_operations": 1,
+                "live_sessions": 0,
+                "binding_rpc_active": false
+            })
+        );
+
+        for payload in [
+            serde_json::json!({"workspace_binding_id": 0}),
+            serde_json::json!({"workspace_binding_id": 5, "extra": true}),
+            serde_json::json!([]),
+        ] {
+            assert!(
+                super::execute_job_inner(&ActivityRunner, &config, &gate, "list_sessions", payload)
+                    .await
+                    .is_err()
+            );
+        }
     }
 
     #[test]

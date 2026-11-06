@@ -200,9 +200,9 @@ async fn real_resource_marker_admission_and_no_evidence_fence() -> anyhow::Resul
     let binding = crate::auth::identity::resolve_or_create_resource_binding(
         &state,
         &app,
-        "code_project",
+        "artifact",
         "one",
-        "code_project:one",
+        "artifact:one",
     )
     .await
     .expect("resource binding");
@@ -219,14 +219,14 @@ async fn real_resource_marker_admission_and_no_evidence_fence() -> anyhow::Resul
         817501,
         binding.workspace_binding_id,
         "principal-a",
-        "code_project:one",
+        "artifact:one",
     )
     .unwrap();
     let other = application_principal_owner(
         817501,
         binding.workspace_binding_id,
         "principal-b",
-        "code_project:one",
+        "artifact:one",
     )
     .unwrap();
     assert_ne!(owner, other);
@@ -251,9 +251,9 @@ async fn real_resource_marker_admission_and_no_evidence_fence() -> anyhow::Resul
     let empty = crate::auth::identity::resolve_or_create_resource_binding(
         &state,
         &app,
-        "code_project",
+        "artifact",
         "two",
-        "code_project:two",
+        "artifact:two",
     )
     .await
     .expect("second resource binding");
@@ -270,7 +270,7 @@ async fn real_resource_marker_admission_and_no_evidence_fence() -> anyhow::Resul
         817501,
         empty.workspace_binding_id,
         "principal-b",
-        "code_project:two",
+        "artifact:two",
     )
     .unwrap();
     assert_eq!(
@@ -290,9 +290,9 @@ async fn real_resource_marker_admission_and_no_evidence_fence() -> anyhow::Resul
     let race = crate::auth::identity::resolve_or_create_resource_binding(
         &state,
         &app,
-        "code_project",
+        "artifact",
         "race",
-        "code_project:race",
+        "artifact:race",
     )
     .await
     .expect("race resource binding");
@@ -308,7 +308,7 @@ async fn real_resource_marker_admission_and_no_evidence_fence() -> anyhow::Resul
         817501,
         race.workspace_binding_id,
         "principal-c",
-        "code_project:race",
+        "artifact:race",
     )
     .unwrap();
     let (admission, fence) = tokio::join!(

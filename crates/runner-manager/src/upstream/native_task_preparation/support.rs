@@ -71,16 +71,6 @@ pub(crate) fn manager_config(
         workspace_root: PathBuf::from("/tmp"),
         host_workspace_root: PathBuf::from("/tmp"),
         image: "test-image".to_string(),
-        git_image: None,
-        git_private_root: None,
-        git_host_private_root: None,
-        git_network: None,
-        git_broker_host: None,
-        git_max_fetch_volume_bytes: None,
-        git_max_bundle_bytes: None,
-        git_max_logical_object_bytes: None,
-        git_max_checkout_bytes: None,
-        git_max_tree_entries: None,
         workdir: "/workspace".to_string(),
         network_enabled: false,
         max_output_bytes: 65_536,
@@ -165,12 +155,12 @@ async fn prepare_environment_with(pool: &PgPool, app_id: i64, manager_id: Option
 }
 
 /// Create one live code-project resource workspace binding.
-async fn code_project_binding(pool: &PgPool, app_id: i64) -> i64 {
+async fn artifact_binding(pool: &PgPool, app_id: i64) -> i64 {
     let (id,): (i64,) = sqlx::query_as(
         "INSERT INTO workspace_bindings ( \
              application_id, external_user_id, workspace_key, external_user_hash, \
              workspace_root, is_active, lifecycle_state, resource_kind, resource_id \
-         ) VALUES ($1, 'prep-user', 'code_project:alpha', 'hash', '/tmp/ws', TRUE, 'active', 'code_project', 'alpha') \
+         ) VALUES ($1, 'prep-user', 'artifact:alpha', 'hash', '/tmp/ws', TRUE, 'active', 'artifact', 'alpha') \
          RETURNING workspace_binding_id",
     )
     .bind(app_id)
@@ -202,7 +192,7 @@ impl Rig {
         } else {
             prepare_environment(&db.pool, app_id, manager_id).await
         };
-        let binding_id = code_project_binding(&db.pool, app_id).await;
+        let binding_id = artifact_binding(&db.pool, app_id).await;
         let temp = tempfile::tempdir().expect("tempdir");
         let state = test_state(db.pool.clone());
         let (base, handle) = spawn_df(state).await;

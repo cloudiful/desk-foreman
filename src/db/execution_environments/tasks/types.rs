@@ -114,13 +114,17 @@ pub struct TaskBinding {
 }
 
 impl TaskBinding {
-    /// True when this binding is a live code project resource workspace.
+    /// True when this binding is a live generic resource workspace.
     ///
     /// The fixed external-user marker is deliberately NOT compared against the
     /// subject: authorization is the authenticated application's delegation,
     /// and the marker only exists to keep the shared row unique.
-    pub fn is_active_code_project(&self) -> bool {
-        self.resource_kind.as_deref() == Some("code_project") && self.is_active
+    pub fn is_active_resource_workspace(&self) -> bool {
+        self.is_active
+            && self
+                .resource_kind
+                .as_deref()
+                .is_some_and(|kind| !kind.trim().is_empty())
     }
 
     /// True while any legacy writer holds this binding, expired or not.
@@ -247,9 +251,30 @@ pub fn task_subject_is_valid(subject: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        NATIVE_TASK_ACTIVE_STATES, NATIVE_TASK_TOKEN_MAX_BYTES, task_subject_is_valid,
+        NATIVE_TASK_ACTIVE_STATES, NATIVE_TASK_TOKEN_MAX_BYTES, TaskBinding, task_subject_is_valid,
         task_token_is_valid,
     };
+
+    fn task_binding(kind: Option<&str>, active: bool) -> TaskBinding {
+        TaskBinding {
+            workspace_binding_id: 1,
+            application_id: 1,
+            external_user_id: "__resource__".to_string(),
+            workspace_key: "artifact:one".to_string(),
+            is_active: active,
+            lifecycle_state: "active".to_string(),
+            resource_kind: kind.map(str::to_string),
+            write_lease_owner: None,
+        }
+    }
+
+    #[test]
+    fn generic_resource_predicate_requires_active_and_nonblank_kind() {
+        assert!(task_binding(Some("artifact"), true).is_active_resource_workspace());
+        assert!(!task_binding(Some("artifact"), false).is_active_resource_workspace());
+        assert!(!task_binding(Some("   "), true).is_active_resource_workspace());
+        assert!(!task_binding(None, true).is_active_resource_workspace());
+    }
 
     #[test]
     fn the_active_state_set_matches_the_partial_unique_indexes() {

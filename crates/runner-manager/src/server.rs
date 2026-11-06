@@ -10,15 +10,14 @@ use axum::{
 };
 use desk_foreman::{error::ErrorResponse, runner::RunnerService};
 use runner_protocol::{
-    CancelSessionRequest, CommandOutput, ExecRequest, GitRuntimeAvailability, InputRequest,
-    RunnerCommandRequest, RunnerSessionStatus, ShellToolOutput,
+    CancelSessionRequest, CommandOutput, ExecRequest, InputRequest, RunnerCommandRequest,
+    RunnerSessionStatus, ShellToolOutput,
 };
 
 use crate::config::{RunnerBackendKind, SharedRunnerManagerConfig};
 use crate::runtime::{
     DirectRunnerBackend, DockerRunnerBackend, LocalRunnerService, RunnerBackend,
     RunnerLifecycleReporter, execution_environment::service::host_identity::UidSource,
-    git_authority::check_git_runtime,
 };
 
 #[derive(Clone)]
@@ -35,7 +34,6 @@ pub(crate) fn build_app(state: RunnerManagerState) -> Router {
         .route("/internal/runner/cancel-session", post(cancel_session))
         .route("/internal/runner/list-sessions", post(list_sessions))
         .route("/internal/runner/run-command", post(run_command))
-        .route("/internal/runner/git-availability", get(git_availability))
         .with_state(state.clone())
         .route_layer(middleware::from_fn_with_state(
             state,
@@ -89,12 +87,6 @@ pub(crate) async fn build_runner_service(
 
 async fn healthz() -> &'static str {
     "ok"
-}
-
-async fn git_availability(State(state): State<RunnerManagerState>) -> Json<GitRuntimeAvailability> {
-    let config = state.config.read().await;
-    let euid = UidSource::Proc.effective_uid().ok();
-    Json(check_git_runtime(&config, euid))
 }
 
 async fn exec_shell(
@@ -265,8 +257,7 @@ mod tests {
     use desk_foreman::runner::RunnerOwner;
     use reqwest::{Client, StatusCode};
     use runner_protocol::{
-        CommandOutput, ExecRequest, GitRuntimeAvailability, GitRuntimeReason, GitRuntimeStatus,
-        InputRequest, RunnerCommandRequest, ShellToolOutput,
+        CommandOutput, ExecRequest, InputRequest, RunnerCommandRequest, ShellToolOutput,
     };
     use tempfile::{Builder, TempDir, tempdir};
 
@@ -309,16 +300,6 @@ mod tests {
             workspace_root: std::path::PathBuf::from("/tmp"),
             host_workspace_root: std::path::PathBuf::from("/tmp"),
             image: "test-image".to_string(),
-            git_image: None,
-            git_private_root: None,
-            git_host_private_root: None,
-            git_network: None,
-            git_broker_host: None,
-            git_max_fetch_volume_bytes: None,
-            git_max_bundle_bytes: None,
-            git_max_logical_object_bytes: None,
-            git_max_checkout_bytes: None,
-            git_max_tree_entries: None,
             workdir: "/workspace".to_string(),
             network_enabled: false,
             max_output_bytes: 262_144,
@@ -359,23 +340,6 @@ mod tests {
         std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o700))
             .expect("private fixture mode");
         fixture
-    }
-
-    fn git_config() -> RunnerManagerConfig {
-        let mut config = test_config();
-        config.backend = RunnerBackendKind::Docker;
-        config
-    }
-
-    fn configured_git_config() -> (RunnerManagerConfig, TempDir, TempDir) {
-        let workspace = private_dir("workspace");
-        let private = private_dir("git-private");
-        let mut config = git_config();
-        config.workspace_root = workspace.path().to_path_buf();
-        config.host_workspace_root = workspace.path().to_path_buf();
-        config.git_image = Some(format!("helper@sha256:{}", "a".repeat(64)));
-        config.git_private_root = Some(private.path().to_path_buf());
-        (config, workspace, private)
     }
 
     fn owner() -> RunnerOwner {
@@ -594,111 +558,6 @@ mod tests {
         assert_eq!(response.text().await?, "ok");
         handle.abort();
         Ok(())
-    }
-
-    #[tokio::test]
-    async fn git_availability_requires_bearer_auth() -> anyhow::Result<()> {
-        let (base_url, handle) = spawn_test_server().await?;
-        let client = Client::new();
-        let url = format!("{base_url}/internal/runner/git-availability");
-        assert_eq!(
-            client.get(&url).send().await?.status(),
-            StatusCode::UNAUTHORIZED
-        );
-        assert_eq!(
-            client
-                .get(&url)
-                .bearer_auth("wrong-token")
-                .send()
-                .await?
-                .status(),
-            StatusCode::UNAUTHORIZED
-        );
-        let response = client.get(&url).bearer_auth("test-token").send().await?;
-        assert_eq!(response.status(), StatusCode::OK);
-        handle.abort();
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn git_availability_reports_only_typed_structural_status() -> anyhow::Result<()> {
-        let (base_url, handle) = spawn_test_server_with_config(git_config()).await?;
-        let client = Client::new();
-        let url = format!("{base_url}/internal/runner/git-availability");
-
-        let response = client.get(&url).bearer_auth("test-token").send().await?;
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response.text().await?;
-        assert_eq!(
-            layout(&body)?,
-            (
-                GitRuntimeStatus::Unconfigured,
-                Some(GitRuntimeReason::ImageMissing)
-            )
-        );
-        assert!(!body.contains("test-image"));
-        assert!(!body.contains("/"));
-
-        let mut invalid = git_config();
-        invalid.git_image = Some("runner:latest".to_owned());
-        let (base_url, handle_invalid) = spawn_test_server_with_config(invalid).await?;
-        let response = client
-            .get(format!("{base_url}/internal/runner/git-availability"))
-            .bearer_auth("test-token")
-            .send()
-            .await?;
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            layout(&response.text().await?)?,
-            (
-                GitRuntimeStatus::Invalid,
-                Some(GitRuntimeReason::ImageNotDigestPinned)
-            )
-        );
-        handle_invalid.abort();
-        handle.abort();
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn git_availability_configured_status_uses_a_real_private_root() -> anyhow::Result<()> {
-        let (config, workspace, private) = configured_git_config();
-        let private_path = private.path().to_path_buf();
-        let (base_url, handle) = spawn_test_server_with_config(config).await?;
-        let response = Client::new()
-            .get(format!("{base_url}/internal/runner/git-availability"))
-            .bearer_auth("test-token")
-            .send()
-            .await?;
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response.text().await?;
-        assert_eq!(
-            layout(&body)?,
-            (GitRuntimeStatus::ConfiguredUnverified, None)
-        );
-        assert!(!body.contains(private_path.to_string_lossy().as_ref()));
-        assert!(!body.contains(workspace.path().to_string_lossy().as_ref()));
-        assert!(!body.contains("helper@sha256"));
-        assert_eq!(
-            std::fs::metadata(&private_path)
-                .expect("private root")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o700
-        );
-        handle.abort();
-        Ok(())
-    }
-
-    fn layout(body: &str) -> anyhow::Result<(GitRuntimeStatus, Option<GitRuntimeReason>)> {
-        let decoded: GitRuntimeAvailability = serde_json::from_str(body)?;
-        let value: serde_json::Value = serde_json::from_str(body)?;
-        let object = value.as_object().expect("availability object");
-        assert_eq!(object.len(), 2);
-        assert!(object.contains_key("status"));
-        assert!(object.contains_key("reason"));
-        Ok((decoded.status, decoded.reason))
     }
 
     #[tokio::test]

@@ -25,16 +25,6 @@ pub fn test_manager_config(docker_cli: &str) -> RunnerManagerConfig {
         workspace_root: PathBuf::from("/tmp"),
         host_workspace_root: PathBuf::from("/tmp"),
         image: "test-image".to_string(),
-        git_image: None,
-        git_private_root: None,
-        git_host_private_root: None,
-        git_network: None,
-        git_broker_host: None,
-        git_max_fetch_volume_bytes: None,
-        git_max_bundle_bytes: None,
-        git_max_logical_object_bytes: None,
-        git_max_checkout_bytes: None,
-        git_max_tree_entries: None,
         workdir: "/workspace".to_string(),
         network_enabled: false,
         max_output_bytes: 256,
@@ -155,8 +145,21 @@ pub fn write_hang_fake_with_pid(
 
 /// Inspect JSON for one environment container.
 pub fn inspect_json(status: &str, owner_key: &str, env_id: &str, generation: &str) -> String {
-    inspect_json_with_networks(
+    inspect_json_with_id(status, "abc123", owner_key, env_id, generation)
+}
+
+/// Inspect JSON with an explicit container id so stop tests can prove the
+/// captured id, not the canonical name, is the removal and confirmation target.
+pub fn inspect_json_with_id(
+    status: &str,
+    container_id: &str,
+    owner_key: &str,
+    env_id: &str,
+    generation: &str,
+) -> String {
+    inspect_json_tagged(
         status,
+        container_id,
         owner_key,
         env_id,
         generation,
@@ -172,8 +175,19 @@ pub fn inspect_json_with_networks(
     generation: &str,
     networks: &serde_json::Value,
 ) -> String {
+    inspect_json_tagged(status, "abc123", owner_key, env_id, generation, networks)
+}
+
+fn inspect_json_tagged(
+    status: &str,
+    container_id: &str,
+    owner_key: &str,
+    env_id: &str,
+    generation: &str,
+    networks: &serde_json::Value,
+) -> String {
     serde_json::json!({
-        "Id": "abc123",
+        "Id": container_id,
         "State": {"Status": status},
         "Config": {"Labels": {
             "desk-foreman.owner": owner_key,
@@ -286,8 +300,8 @@ pub fn write_creation_fake(
 }
 
 /// Fake that drives a running-to-stopped stop: `inspect` reports the owner
-/// `running` until `stop` touches the marker, after which it reports
-/// `exited`; `rm` succeeds.
+/// `running` until `stop` touches the marker, then `exited`; `rm` marks the
+/// container removed so the final id/name confirmation observes absence.
 pub fn write_stop_fake(
     dir: &Path,
     name: &str,
@@ -298,6 +312,7 @@ pub fn write_stop_fake(
     let running_file = dir.join(format!("{name}.running.json"));
     let stopped_file = dir.join(format!("{name}.stopped.json"));
     let marker = dir.join(format!("{name}.stopped.marker"));
+    let removed = dir.join(format!("{name}.removed.marker"));
     std::fs::write(
         &running_file,
         inspect_json("running", owner_key, ENV_ID, &generation.to_string()),
@@ -309,12 +324,14 @@ pub fn write_stop_fake(
     )
     .expect("stopped json");
     let script = format!(
-        "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"inspect\" ]; then\n  if [ -f \"{}\" ]; then\n    cat \"{}\"\n    exit 0\n  fi\n  cat \"{}\"\n  exit 0\nfi\nif [ \"$1\" = \"stop\" ]; then\n  touch \"{}\"\n  exit 0\nfi\nexit 0\n",
+        "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"inspect\" ]; then\n  if [ -f \"{}\" ]; then\n    echo \"Error: No such container: $2\" >&2\n    exit 1\n  fi\n  if [ -f \"{}\" ]; then\n    cat \"{}\"\n    exit 0\n  fi\n  cat \"{}\"\n  exit 0\nfi\nif [ \"$1\" = \"stop\" ]; then\n  touch \"{}\"\n  exit 0\nfi\nif [ \"$1\" = \"rm\" ]; then\n  touch \"{}\"\n  exit 0\nfi\nexit 0\n",
         log.display(),
+        removed.display(),
         marker.display(),
         stopped_file.display(),
         running_file.display(),
-        marker.display()
+        marker.display(),
+        removed.display()
     );
     write_executable(dir, name, &script)
 }

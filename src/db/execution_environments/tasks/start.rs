@@ -64,7 +64,7 @@ pub(super) async fn start(
     {
         return Err(TaskExecutionError::StaleGeneration);
     }
-    if !binding.is_active_code_project()
+    if !binding.is_active_resource_workspace()
         || binding.lifecycle_blocks_admission()
         || binding.has_legacy_write_owner()
         || environment.active_native_task_id != Some(task_id)

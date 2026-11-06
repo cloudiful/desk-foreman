@@ -11,13 +11,13 @@
 
 use sqlx::{PgPool, Postgres, Transaction};
 
-use crate::db::workspace_bindings::git_job_guard::git_job_holds_binding;
 use crate::db::workspace_bindings::native_task_guard::native_task_holds_binding;
+use crate::db::workspace_bindings::workspace_scope_guard::workspace_scope_holds_binding;
 
 /// True when durable evidence still references this binding.
 ///
 /// Read on the janitor transaction while the binding row lock is held. Any
-/// audit, Git job, native task or task-export row keeps the binding and its
+/// audit, native task or task-export row keeps the binding and its
 /// directory intact; proof is never purged to make cleanup succeed.
 async fn workspace_binding_has_retained_references(
     tx: &mut Transaction<'_, Postgres>,
@@ -85,10 +85,11 @@ pub(crate) async fn lock_binding_for_cleanup(
     if native_task_holds_binding(&mut tx, binding_id)
         .await?
         .is_some()
-        || git_job_holds_binding(&mut tx, binding_id).await?.is_some()
+        || workspace_scope_holds_binding(&mut tx, binding_id)
+            .await?
+            .is_some()
     {
-        // An active Git job (pending, claimed, or uncertain) still owns this
-        // workspace, so the janitor skips it exactly like a native task.
+        // An active native task or busy scoped environment blocks cleanup.
         return Ok(CleanupGuard::Skip(tx));
     }
     if workspace_binding_has_retained_references(&mut tx, binding_id).await? {

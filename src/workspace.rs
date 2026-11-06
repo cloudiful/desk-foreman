@@ -76,7 +76,7 @@ pub fn resolve_application_workspace(
 
 /// Resolves a shared resource-owned workspace for an application.
 ///
-/// Resource workspaces (e.g. `code_project:<id>`) are shared across external
+/// Resource workspaces (e.g. `artifact:<id>`) are shared across external
 /// users, so the path is derived from the resource identity rather than the
 /// requesting user.
 pub fn resolve_resource_workspace(
@@ -268,28 +268,28 @@ mod resource_tests {
     #[test]
     fn parses_valid_resource_keys() {
         assert_eq!(
-            parse_resource_workspace_key("code_project:123e4567-e89b-12d3-a456-426614174000"),
+            parse_resource_workspace_key("artifact:123e4567-e89b-12d3-a456-426614174000"),
             Some((
-                "code_project".to_string(),
+                "artifact".to_string(),
                 "123e4567-e89b-12d3-a456-426614174000".to_string()
             ))
         );
         assert_eq!(
-            parse_resource_workspace_key("code_project:project_1"),
-            Some(("code_project".to_string(), "project_1".to_string()))
+            parse_resource_workspace_key("artifact:project_1"),
+            Some(("artifact".to_string(), "project_1".to_string()))
         );
     }
 
     #[test]
     fn rejects_malformed_resource_keys() {
         assert_eq!(parse_resource_workspace_key("default"), None);
-        assert_eq!(parse_resource_workspace_key("code_project:"), None);
+        assert_eq!(parse_resource_workspace_key("artifact:"), None);
         assert_eq!(parse_resource_workspace_key(":id"), None);
-        assert_eq!(parse_resource_workspace_key("code_project:a/b"), None);
+        assert_eq!(parse_resource_workspace_key("artifact:a/b"), None);
         assert_eq!(parse_resource_workspace_key("code project:abc"), None);
         assert_eq!(parse_resource_workspace_key("CODE:abc"), None);
         assert_eq!(
-            parse_resource_workspace_key(&format!("code_project:{}", "x".repeat(200))),
+            parse_resource_workspace_key(&format!("artifact:{}", "x".repeat(200))),
             None
         );
     }

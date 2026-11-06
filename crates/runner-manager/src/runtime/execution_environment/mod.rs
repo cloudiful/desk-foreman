@@ -67,6 +67,7 @@ pub(crate) mod test_support;
 pub(crate) mod tombstone;
 #[cfg(test)]
 mod tombstone_tests;
+pub(crate) mod workspace_scope;
 
 pub use ensure::ensure_execution_environment;
 pub use profile::ExecutionEnvironmentProfile;

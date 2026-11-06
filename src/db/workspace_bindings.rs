@@ -8,8 +8,9 @@
 //! can never overlap. The guard is wiring only: each call site re-reads it
 //! after its own binding row lock, inside its own transaction.
 
-pub(crate) mod git_job_guard;
 pub(crate) mod native_task_guard;
+pub(crate) mod scope_admission;
+pub(crate) mod workspace_scope_guard;
 
 use chrono::{DateTime, Utc};
 use std::{future::Future, time::Duration};
@@ -134,7 +135,7 @@ async fn change_lease<F: Future<Output = anyhow::Result<()>>>(
         || native_task_guard::native_task_holds_binding(&mut tx, binding_id)
             .await?
             .is_some()
-        || git_job_guard::git_job_holds_binding(&mut tx, binding_id)
+        || workspace_scope_guard::workspace_scope_holds_binding(&mut tx, binding_id)
             .await?
             .is_some()
     {
@@ -246,6 +247,9 @@ pub async fn release_workspace_write_lease_in_transaction(
 /// the write is issued. Takeover locks the same row, so the two sides
 /// serialize: an already-admitted old-owner write either dispatches
 /// before the handover or fails its check after it, but never crosses it.
+/// The lock is `FOR NO KEY UPDATE`, so it still serializes fenced writers
+/// and lease/lifecycle mutations while admitting the KEY SHARE lock an
+/// observation insert into `workspace_runners` takes for its foreign key.
 /// Dropping the transaction without committing rolls the lock back.
 pub async fn lock_workspace_binding_for_write<'a>(
     pool: &'a PgPool,
@@ -267,7 +271,7 @@ pub async fn lock_workspace_binding_for_write<'a>(
     if native_task_guard::native_task_holds_binding(&mut tx, workspace_binding_id)
         .await?
         .is_some()
-        || git_job_guard::git_job_holds_binding(&mut tx, workspace_binding_id)
+        || workspace_scope_guard::workspace_scope_holds_binding(&mut tx, workspace_binding_id)
             .await?
             .is_some()
     {
@@ -411,12 +415,15 @@ mod tests {
     #[test]
     fn fenced_write_lock_sql_holds_row_lock() {
         // The write fence is only authoritative while it serializes against
-        // takeover on the same row. Pin the FOR UPDATE lock so a future
-        // edit cannot silently downgrade the fence to a plain reread.
+        // takeover on the same row. Pin the exact FOR NO KEY UPDATE lock so a
+        // future edit cannot silently downgrade the fence to a plain reread or
+        // a narrower lock that stops admitting FK observation inserts.
         let sql = include_str!("../sql/lock_workspace_binding_for_write.sql");
         assert!(
-            sql.to_ascii_uppercase().contains("FOR UPDATE"),
-            "fenced write admission must lock the binding row"
+            sql.trim_end()
+                .to_ascii_uppercase()
+                .ends_with("FOR NO KEY UPDATE;"),
+            "fenced write admission must lock the binding row FOR NO KEY UPDATE"
         );
     }
 }

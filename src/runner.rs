@@ -1,5 +1,4 @@
 mod backend;
-pub mod git_job_credentials;
 pub mod principal_stop;
 mod pull;
 mod pull_cancellation;
@@ -12,5 +11,5 @@ mod pull_cancellation_tests;
 pub use backend::RunnerFuture;
 pub use pull::{PullRunnerService, RunnerBroker};
 pub use runner_protocol::{RunnerCommandRequest, RunnerOwner, RunnerShellRequest};
-pub use service::RunnerService;
+pub use service::{RunnerService, WorkspaceActivity, WorkspaceActivityRequest};
 pub use service_relay::{RelayCall, RelayRegistry, StreamRequest};

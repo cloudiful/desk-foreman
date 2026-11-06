@@ -11,21 +11,21 @@ use std::{sync::Arc, time::Duration};
 use anyhow::Context;
 use desk_foreman::runner::RunnerService;
 use reqwest::Client;
-use runner_protocol::{RUNNER_JOB_TIMEOUT_SECS, RunnerJob};
+use runner_protocol::{
+    ExecRequest, RUNNER_JOB_TIMEOUT_SECS, RunnerCommandRequest, RunnerJob, RunnerOwner,
+};
 use tokio::time::Instant;
 use tokio::time::sleep;
 
 use crate::config::SharedRunnerManagerConfig;
-use crate::runtime::RunnerBackend;
 use crate::runtime::session_gate::SessionGate;
+use crate::runtime::{RunnerBackend, RunnerOperationLease};
 
+#[cfg(test)]
+#[path = "upstream/activity_tests.rs"]
+mod activity_tests;
 mod dispatch;
 mod execute;
-#[path = "upstream/git_operation.rs"]
-mod git_operation;
-#[cfg(test)]
-#[path = "upstream/git_operation_tests.rs"]
-mod git_operation_tests;
 #[path = "upstream/native_task.rs"]
 mod native_task;
 
@@ -35,6 +35,44 @@ mod native_task_preparation;
 
 const RETRY_DELAY: Duration = Duration::from_secs(5);
 const CONFIG_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+
+/// The only job kinds that start model work and may later create a container.
+/// Cleanup/stop/list/environment/native/Git kinds are deliberately excluded.
+fn job_activity_owner(kind: &str, payload: &serde_json::Value) -> Option<RunnerOwner> {
+    let owner = match kind {
+        "exec_shell" => {
+            serde_json::from_value::<ExecRequest>(payload.clone())
+                .ok()?
+                .owner
+        }
+        "run_command" => {
+            serde_json::from_value::<RunnerCommandRequest>(payload.clone())
+                .ok()?
+                .owner
+        }
+        _ => return None,
+    };
+    match &owner {
+        RunnerOwner::WorkspaceBinding {
+            workspace_binding_id,
+        }
+        | RunnerOwner::ApplicationPrincipal {
+            workspace_binding_id,
+            ..
+        } if *workspace_binding_id > 0 => Some(owner),
+        _ => None,
+    }
+}
+
+/// Register the operation lease synchronously, before the job's worker future
+/// is spawned or polled, so the next scope probe sees scheduled model work.
+fn preregister_job_activity(
+    backend: &Arc<dyn RunnerBackend>,
+    job: &RunnerJob,
+) -> Option<RunnerOperationLease> {
+    job_activity_owner(&job.kind, &job.payload)
+        .map(|owner| RunnerOperationLease::new(Arc::clone(backend), owner))
+}
 
 pub async fn run(
     config: SharedRunnerManagerConfig,
@@ -103,7 +141,9 @@ pub async fn run(
         let gate = Arc::clone(&gate);
         let result_url = format!("{base_url}/api/internal/runner-manager/jobs/result");
         let poll_base = base_url.clone();
+        let activity_lease = preregister_job_activity(&backend, &job);
         tokio::spawn(async move {
+            let _activity_lease = activity_lease;
             let result = dispatch::execute_job(
                 &*runner, &*backend, &client, &poll_base, &config, &gate, job,
             )

@@ -18,4 +18,5 @@ RETURNING
     state_volume_ref,
     last_active_at,
     created_at,
-    updated_at;
+    updated_at,
+    workspace_binding_id;
