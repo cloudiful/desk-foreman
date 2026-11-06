@@ -9,6 +9,7 @@
 
 #[cfg(test)]
 mod stop_tests {
+    use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
     use runner_protocol::{
@@ -16,10 +17,17 @@ mod stop_tests {
     };
 
     use super::super::{
-        ExecutionEnvironmentProfile, ensure::ensure_execution_environment,
-        stop::stop_execution_environment, test_support as support,
+        ExecutionEnvironmentProfile,
+        ensure::ensure_execution_environment,
+        service::{
+            ServiceProfile, credential::ServiceCredentialStore, profile::ServiceProfileConfig,
+        },
+        stop::stop_execution_environment,
+        test_support as support,
     };
     use crate::runtime::RunnerBackend;
+
+    const ENV_NAME: &str = "DF_AGENT_TOKEN";
 
     fn enabled(state_root: &Path) -> ExecutionEnvironmentProfile {
         support::enabled_profile(state_root)
@@ -27,6 +35,39 @@ mod stop_tests {
 
     fn disabled(state_root: &Path) -> ExecutionEnvironmentProfile {
         support::disabled_profile(state_root)
+    }
+
+    fn configured(state_root: &Path) -> ExecutionEnvironmentProfile {
+        let mut profile = enabled(state_root);
+        profile.service = ServiceProfile::Configured(ServiceProfileConfig {
+            network: "df-private".to_string(),
+            port: 8443,
+            auth_username: "agent".to_string(),
+            auth_env_name: ENV_NAME.to_string(),
+        });
+        profile
+    }
+
+    fn seed_credential(state_root: &Path, generation: i64) -> std::path::PathBuf {
+        ServiceCredentialStore::new(state_root)
+            .obtain(support::ENV_ID, generation, ENV_NAME)
+            .expect("seed service credential")
+            .env_file()
+            .to_path_buf()
+    }
+
+    fn absent_backend(
+        temp: &Path,
+        name: &str,
+    ) -> std::sync::Arc<crate::runtime::DockerRunnerBackend> {
+        let log = temp.join("stop-absent.log");
+        std::fs::write(&log, "").expect("seed log");
+        let script = format!(
+            "#!/bin/bash\necho \"$@\" >> \"{}\"\nif [ \"$1\" = \"inspect\" ]; then\n  echo \"Error: No such container: $2\" >&2\n  exit 1\nfi\nexit 0\n",
+            log.display()
+        );
+        let fake = support::write_executable(temp, name, &script);
+        support::backend_with_cli(&fake.to_string_lossy())
     }
 
     #[tokio::test]
@@ -80,6 +121,7 @@ mod stop_tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let state = support::state_dir(temp.path());
         let owner = support::env_owner(0);
+        let credential = seed_credential(&state, 0);
         let container = owner.container_name();
         let log = temp.path().join("stop-absent.log");
         std::fs::write(&log, "").expect("seed log");
@@ -91,7 +133,7 @@ mod stop_tests {
         let backend = support::backend_with_cli(&fake.to_string_lossy());
         let ack = stop_execution_environment(
             &backend,
-            &enabled(&state),
+            &configured(&state),
             StopExecutionEnvironmentRequest {
                 owner: owner.clone(),
             },
@@ -102,6 +144,10 @@ mod stop_tests {
         assert_eq!(ack.observed_state, "absent");
         assert_eq!(ack.owner, owner);
         assert_eq!(ack.container_name, container);
+        assert!(
+            !credential.exists(),
+            "a confirmed absent stop retires its exact credential"
+        );
         let logged = std::fs::read_to_string(&log).expect("read log");
         assert!(
             !logged
@@ -121,6 +167,7 @@ mod stop_tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let state = support::state_dir(temp.path());
         let owner = support::env_owner(1);
+        let credential = seed_credential(&state, 1);
         let inspect_file = temp.path().join("inspect.json");
         std::fs::write(
             &inspect_file,
@@ -138,7 +185,7 @@ mod stop_tests {
         let backend = support::backend_with_cli(&fake.to_string_lossy());
         let ack = stop_execution_environment(
             &backend,
-            &enabled(&state),
+            &configured(&state),
             StopExecutionEnvironmentRequest {
                 owner: owner.clone(),
             },
@@ -148,25 +195,34 @@ mod stop_tests {
         assert!(ack.confirmed);
         assert_eq!(ack.observed_state, "exited");
         assert_eq!(ack.owner, owner);
+        assert!(
+            !credential.exists(),
+            "a confirmed exited stop retires its exact credential"
+        );
     }
 
     #[tokio::test]
     async fn stop_daemon_failure_never_confirms() {
         let temp = tempfile::tempdir().expect("tempdir");
         let state = support::state_dir(temp.path());
+        let credential = seed_credential(&state, 0);
         let log = temp.path().join("stop-fail.log");
         std::fs::write(&log, "").expect("seed log");
         let fake = support::write_simple_fake(temp.path(), "docker-fail", &log, "fail");
         let backend = support::backend_with_cli(&fake.to_string_lossy());
         let result = stop_execution_environment(
             &backend,
-            &enabled(&state),
+            &configured(&state),
             StopExecutionEnvironmentRequest {
                 owner: support::env_owner(0),
             },
         )
         .await;
         assert!(result.is_err(), "daemon failure must fail closed");
+        assert!(
+            credential.exists(),
+            "a daemon failure never retires the credential"
+        );
         let logged = std::fs::read_to_string(&log).expect("read log");
         assert!(!logged.contains("volume rm"));
     }
@@ -175,11 +231,12 @@ mod stop_tests {
     async fn stop_hanging_daemon_is_bounded() {
         let temp = tempfile::tempdir().expect("tempdir");
         let state = support::state_dir(temp.path());
+        let credential = seed_credential(&state, 0);
         let log = temp.path().join("stop-hang.log");
         std::fs::write(&log, "").expect("seed log");
         let fake = support::write_simple_fake(temp.path(), "docker-hang", &log, "hang");
         let backend = support::backend_with_cli(&fake.to_string_lossy());
-        let mut profile = enabled(&state);
+        let mut profile = configured(&state);
         profile.stop_timeout = std::time::Duration::from_millis(80);
         let result = stop_execution_environment(
             &backend,
@@ -191,12 +248,17 @@ mod stop_tests {
         .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("timed out"));
+        assert!(
+            credential.exists(),
+            "a bounded timeout never retires the credential"
+        );
     }
 
     #[tokio::test]
     async fn stop_invalid_inspect_json_cannot_confirm() {
         let temp = tempfile::tempdir().expect("tempdir");
         let state = support::state_dir(temp.path());
+        let credential = seed_credential(&state, 0);
         let log = temp.path().join("stop-badjson.log");
         std::fs::write(&log, "").expect("seed log");
         let script = format!(
@@ -207,13 +269,17 @@ mod stop_tests {
         let backend = support::backend_with_cli(&fake.to_string_lossy());
         let result = stop_execution_environment(
             &backend,
-            &enabled(&state),
+            &configured(&state),
             StopExecutionEnvironmentRequest {
                 owner: support::env_owner(0),
             },
         )
         .await;
         assert!(result.is_err(), "invalid JSON must not confirm");
+        assert!(
+            credential.exists(),
+            "an unconfirmed inspection never retires the credential"
+        );
     }
 
     #[tokio::test]
@@ -221,6 +287,7 @@ mod stop_tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let state = support::state_dir(temp.path());
         let owner = support::env_owner(0);
+        let credential = seed_credential(&state, 0);
         let inspect_file = temp.path().join("inspect.json");
         std::fs::write(
             &inspect_file,
@@ -238,7 +305,7 @@ mod stop_tests {
         let backend = support::backend_with_cli(&fake.to_string_lossy());
         let ack = stop_execution_environment(
             &backend,
-            &enabled(&state),
+            &configured(&state),
             StopExecutionEnvironmentRequest {
                 owner: owner.clone(),
             },
@@ -248,6 +315,10 @@ mod stop_tests {
         assert!(!ack.confirmed, "running must not confirm stop");
         assert_eq!(ack.observed_state, "running");
         assert_eq!(ack.owner, owner);
+        assert!(
+            credential.exists(),
+            "an unconfirmed stop never retires the credential"
+        );
     }
 
     #[tokio::test]
@@ -317,5 +388,103 @@ mod stop_tests {
             .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not supported"));
+    }
+
+    #[tokio::test]
+    async fn unset_retains_sibling_credentials_and_a_configured_retry_removes_only_its_generation()
+    {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = support::state_dir(temp.path());
+        let owner = support::env_owner(0);
+        let retired = seed_credential(&state, 0);
+        let sibling = seed_credential(&state, 1);
+        let backend = absent_backend(temp.path(), "docker-unset");
+
+        let unset = stop_execution_environment(
+            &backend,
+            &enabled(&state),
+            StopExecutionEnvironmentRequest {
+                owner: owner.clone(),
+            },
+        )
+        .await
+        .expect("an unset profile still confirms the stop");
+        assert!(unset.confirmed);
+        assert!(
+            retired.exists() && sibling.exists(),
+            "an unset service profile deletes no credential and makes no cleanup claim"
+        );
+
+        let configured_ack = stop_execution_environment(
+            &backend,
+            &configured(&state),
+            StopExecutionEnvironmentRequest { owner },
+        )
+        .await
+        .expect("a configured profile retires the confirmed generation");
+        assert!(configured_ack.confirmed);
+        assert!(!retired.exists(), "the exact generation is unlinked");
+        assert!(sibling.exists(), "a sibling generation stays untouched");
+        let barrier = support::read_barrier(&state).expect("barrier");
+        assert_eq!(barrier["stopped_generation"], serde_json::json!(0));
+        assert!(
+            !support::lock_path(&state).exists(),
+            "the file lock is released after retirement"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_retirement_keeps_the_file_and_a_corrected_retry_removes_it() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = support::state_dir(temp.path());
+        let owner = support::env_owner(0);
+        let credential = seed_credential(&state, 0);
+        let service_dir = credential
+            .parent()
+            .expect("service directory")
+            .to_path_buf();
+        std::fs::set_permissions(&credential, std::fs::Permissions::from_mode(0o644))
+            .expect("widen credential mode");
+        let backend = absent_backend(temp.path(), "docker-invalid-credential");
+
+        let error = stop_execution_environment(
+            &backend,
+            &configured(&state),
+            StopExecutionEnvironmentRequest {
+                owner: owner.clone(),
+            },
+        )
+        .await
+        .expect_err("a failed retirement surfaces after the container stop");
+        assert!(error.to_string().contains("0600"), "got: {error}");
+        assert!(credential.exists(), "a refused credential is not removed");
+        let barrier = support::read_barrier(&state).expect("the stop persisted its barrier");
+        assert_eq!(barrier["stopped_generation"], serde_json::json!(0));
+        assert!(
+            !support::lock_path(&state).exists(),
+            "a failed retirement still releases the file lock"
+        );
+
+        std::fs::set_permissions(&credential, std::fs::Permissions::from_mode(0o600))
+            .expect("correct the fixture mode");
+        let retry = stop_execution_environment(
+            &backend,
+            &configured(&state),
+            StopExecutionEnvironmentRequest { owner },
+        )
+        .await
+        .expect("an absent-confirm retry removes the corrected credential");
+        assert!(retry.confirmed);
+        assert!(
+            !credential.exists(),
+            "the corrected credential is retried and removed"
+        );
+        assert_eq!(
+            std::fs::read_dir(&service_dir)
+                .expect("service directory")
+                .count(),
+            0,
+            "no temporary or credential file is left behind"
+        );
     }
 }

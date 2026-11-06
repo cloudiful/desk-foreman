@@ -116,7 +116,6 @@ export interface MessageSchema {
       cancelled: string
       timed_out: string
       exited: string
-      resetting: string
       ready: string
       unknown: string
     }

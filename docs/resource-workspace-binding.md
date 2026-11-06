@@ -42,7 +42,7 @@ fields.
 
 ## Principal-isolated execution
 
-Authenticated application resource requests can select isolated execution with `X-DF-Runner-Isolation: principal`. Supply one `X-DF-External-User-Id`, `X-DF-Workspace-Key` and `X-DF-Lease-Owner`; the external user and lease owner must match and the workspace key must identify a resource. Existing write-lease and scope checks still apply. Execution requires a Docker-backed runner manager. A principal stop fence is permanent for that identity; a new lifecycle needs a fresh identity. Without the isolation header, existing runner ownership remains unchanged.
+Authenticated application resource requests can select isolated execution with `X-DF-Runner-Isolation: principal`. Supply one `X-DF-External-User-Id`, `X-DF-Workspace-Key` and `X-DF-Lease-Owner`; the external user and lease owner must match and the workspace key must identify a resource. Existing write-lease and scope checks still apply. Execution requires a Docker-backed runner manager. A principal stop fence is permanent for that identity; a new lifecycle needs a fresh identity. A resource workspace request without the isolation header is rejected with `403` (`resource workspace requires an isolated principal`). Personal, non-resource application workspaces retain their ownership behavior. Workspace reconstruction is explicit; authentication never resets or rewrites workspace contents.
 
 ## Principal stop and protocol discovery
 
@@ -52,7 +52,15 @@ Authenticated application resource requests can select isolated execution with `
 
 ## Git sync
 
-`POST /api/internal/resource-workspaces/{resource_kind}/{resource_id}/git/sync` requires the resource write lease, shell scope, and network access. Supply `remote_url` and optionally `branch`. The optional `preserve_existing` flag defaults to `false`: an existing checkout must be clean and is pulled fast-forward only. With `true`, an existing checkout is not fetched or pulled, and its work and branch are retained. An empty workspace is cloned normally. Successful sync sets the managed origin fetch and push URLs to the supplied URL and reports the current HEAD, branch and dirty state.
+`POST /api/internal/resource-workspaces/{resource_kind}/{resource_id}/git/sync` requires the resource write lease, shell scope, and network access. Supply the legacy scoped broker `remote_url`, the matching `code_project_id`, a non-nil `authorization_generation`, and optionally `branch`. The server splits the scoped URL privately and never sends the scoped password through model commands, job payloads, database rows, results, errors, or repository configuration.
+
+An existing checkout with `preserve_existing: true` is inspected with a fixed credential-free sandbox probe: no fetch, pull, network, configuration write, or new job occurs. Repositories with includes, unsafe config shape, external object directories, or credential-bearing legacy origin URLs return `409` with `legacy_git_cleanup_required` and are left unchanged; that response preserves work but is not a legacy migration.
+
+The default `preserve_existing: false` path performs a clean fast-forward on an existing checkout. The request must name the canonical branch explicitly, the probe must report it clean and attached, and the actual HEAD becomes the job's expected base. A dirty, detached, branch-mismatched, or otherwise unsafe checkout returns `409` unchanged. The trusted manager holds the binding write fence and refuses live bound Shell sessions; it imports only the already-verified bundle, publishes the exact descendant with a compare-and-set ref update and `read-tree`, and preserves unrelated refs and history. A non-fast-forward or mismatched-base change is refused with the refs and worktree unchanged. A non-empty non-repository directory still returns `409`.
+
+A durable first clone passes no expected base and keeps its existing behavior. If a job is `pending` or `claimed`, the route polls that same job within the original wait budget and never admits a fresh job, resets the credential deadline, or replays work. If the job is `uncertain`, reconciliation is proof-only and read-only: the manager reads its completed, published, cleanup-confirmed receipt and independently inspects the clean actual HEAD. Only a matching proof lets the server compare-and-set that uncertain row to succeeded using the strict stored result; a missing, malformed, mismatched, expired, busy, or dirty proof is an explicit `503` and never triggers an external Git write, fetch, pull, push, replay, credential registration, or new job.
+
+An absent `.git` in an empty target admits one durable first-clone job for the manager already observed serving that binding; `branch` is required and must be canonical. With no live observation the route performs one credential-free bootstrap probe and re-reads the observation once. Zero or ambiguous live managers return `503`. Successful first clone returns `cloned: true`, `dirty: false`, the canonical branch, and the verified head. Pending, uncertain, or timed-out work is never replayed.
 
 ## Ownership boundary
 

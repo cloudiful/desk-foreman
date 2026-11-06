@@ -702,13 +702,29 @@ pub struct ApplicationCapabilitiesResponse {
 
 pub use super::execution_environments::types::ExecutionEnvironment;
 
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
+#[derive(Clone, Deserialize, ToSchema, Validate)]
 pub struct GitWorkspaceSyncRequest {
+    #[schema(write_only)]
     #[validate(custom(function = "validate_non_blank"))]
     pub remote_url: String,
     pub branch: Option<String>,
     #[serde(default)]
     pub preserve_existing: bool,
+    pub code_project_id: Uuid,
+    pub authorization_generation: Uuid,
+}
+
+impl std::fmt::Debug for GitWorkspaceSyncRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GitWorkspaceSyncRequest")
+            .field("remote_url", &"[redacted]")
+            .field("branch", &self.branch)
+            .field("preserve_existing", &self.preserve_existing)
+            .field("code_project_id", &self.code_project_id)
+            .field("authorization_generation", &self.authorization_generation)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]

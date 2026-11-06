@@ -13,8 +13,8 @@ import type {
   WorkspaceBindingResponse,
 } from '../generated/openapi/types.gen'
 
-type LifecycleFilter = 'all' | 'active' | 'archived' | 'resetting'
-type BindingAction = 'archive' | 'restore' | 'reset'
+type LifecycleFilter = 'all' | 'active' | 'archived'
+type BindingAction = 'archive' | 'restore'
 
 // Bindings use a smaller page size so the existing pagination is visible
 // for normal datasets without changing the shared admin page size.
@@ -97,22 +97,18 @@ function confirmAction(
 
 function actionLabel(action: BindingAction): string {
   if (action === 'archive') return t('workspaceBindings.actions.archive')
-  if (action === 'restore') return t('workspaceBindings.actions.restore')
-  return t('workspaceBindings.actions.reset')
+  return t('workspaceBindings.actions.restore')
 }
 
 function actionError(action: BindingAction): string {
   if (action === 'archive') return t('workspaceBindings.errors.archive')
-  if (action === 'restore') return t('workspaceBindings.errors.restore')
-  return t('workspaceBindings.errors.reset')
+  return t('workspaceBindings.errors.restore')
 }
 
 function actionSuccess(action: BindingAction): string {
   if (action === 'archive')
     return t('workspaceBindings.notifications.archiveSuccess')
-  if (action === 'restore')
-    return t('workspaceBindings.notifications.restoreSuccess')
-  return t('workspaceBindings.notifications.resetSuccess')
+  return t('workspaceBindings.notifications.restoreSuccess')
 }
 
 function parseApplicationId(value: string): number | undefined {
@@ -154,9 +150,7 @@ const actionDescription = computed(() => {
   const id = `#${target.binding.workspace_binding_id}`
   if (target.action === 'archive')
     return t('workspaceBindings.confirmations.archiveDescription', { id })
-  if (target.action === 'restore')
-    return t('workspaceBindings.confirmations.restoreDescription', { id })
-  return t('workspaceBindings.confirmations.resetDescription', { id })
+  return t('workspaceBindings.confirmations.restoreDescription', { id })
 })
 
 const actionTitle = computed(() =>
@@ -234,10 +228,6 @@ onMounted(() => void load())
             {
               label: t('workspaceBindings.filters.archived'),
               value: 'archived',
-            },
-            {
-              label: t('workspaceBindings.filters.resetting'),
-              value: 'resetting',
             },
           ]"
           class="w-36"
@@ -339,19 +329,6 @@ onMounted(() => void load())
                 )
               "
             />
-            <UButton
-              icon="i-lucide-refresh-ccw"
-              variant="ghost"
-              color="error"
-              size="sm"
-              :aria-label="t('workspaceBindings.actions.reset')"
-              @click="
-                confirmAction(
-                  row as unknown as WorkspaceBindingResponse,
-                  'reset',
-                )
-              "
-            />
           </div>
         </template>
       </DataTable>
@@ -377,7 +354,7 @@ onMounted(() => void load())
       :title="actionTitle"
       :description="actionDescription"
       :confirm-label="actionConfirmLabel"
-      :confirm-color="actionTarget?.action === 'reset' ? 'error' : 'primary'"
+      :confirm-color="'primary'"
       :loading="acting"
       @confirm="runAction"
     />

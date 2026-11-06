@@ -118,7 +118,6 @@ const enUS = {
       cancelled: 'Cancelled',
       timed_out: 'Timed out',
       exited: 'Exited',
-      resetting: 'Resetting',
       ready: 'Ready',
       unknown: 'Unknown',
     },

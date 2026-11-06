@@ -61,6 +61,7 @@ pub async fn shell(
 ) -> Result<ShellToolOutput, ToolError> {
     let started = Instant::now();
     ensure_scope(state, actor, crate::policy::WORKSPACE_SHELL)?;
+    let owner = actor.runner_owner();
     if let Some(limit) = actor.policy.limits.max_sessions {
         let active = state
             .runner
@@ -68,7 +69,7 @@ pub async fn shell(
             .await
             .map_err(tool_internal)?
             .into_iter()
-            .filter(|session| session.owner == actor.runner_owner())
+            .filter(|session| session.owner == owner)
             .count();
         if active >= limit {
             return Err(ToolError::Forbidden("session limit reached".to_string()));
@@ -90,7 +91,7 @@ pub async fn shell(
     let output = state
         .runner
         .exec_shell(ExecRequest {
-            owner: actor.runner_owner(),
+            owner: owner.clone(),
             session_key: Some(actor.principal_id.clone()),
             workspace_root: actor.workspace_root.clone(),
             cmd: params.command.clone(),
@@ -137,6 +138,7 @@ pub async fn write_stdin(
 ) -> Result<ShellToolOutput, ToolError> {
     let started = Instant::now();
     ensure_scope(state, actor, crate::policy::WORKSPACE_SHELL)?;
+    let owner = actor.runner_owner();
     let needs_fence = !params.chars.is_empty();
     // Admit under the row lock immediately before dispatch and hold the
     // fence across it, so a concurrent takeover cannot commit in between.
@@ -149,7 +151,7 @@ pub async fn write_stdin(
     let output = state
         .runner
         .write_stdin(InputRequest {
-            owner: actor.runner_owner(),
+            owner: owner.clone(),
             session_key: Some(actor.principal_id.clone()),
             session_id: params.session_id,
             chars: params.chars.clone(),
@@ -192,10 +194,11 @@ pub async fn cancel_session(
     params: &crate::tools::params::CancelSessionParams,
 ) -> Result<CancelSessionOutput, ToolError> {
     ensure_scope(state, actor, crate::policy::WORKSPACE_SHELL)?;
+    let owner = actor.runner_owner();
     let status = state
         .runner
         .cancel_session(CancelSessionRequest {
-            owner: actor.runner_owner(),
+            owner: owner.clone(),
             session_key: Some(actor.principal_id.clone()),
             session_id: params.session_id,
         })

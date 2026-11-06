@@ -1,0 +1,117 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO runner_principal_admission (owner_key, application_id, workspace_binding_id, principal_digest, runner_manager_id, container_id)\nVALUES ($1, $2, $3, $4, $5, $6)\nON CONFLICT (runner_manager_id, owner_key, container_id) DO UPDATE SET owner_key = EXCLUDED.owner_key\nWHERE runner_principal_admission.stopped_at IS NULL\nRETURNING owner_key, application_id, workspace_binding_id, principal_digest, runner_manager_id, container_id, admitted_at, stopped_at;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runner_principal_admission",
+            "name": "owner_key"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "application_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runner_principal_admission",
+            "name": "application_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "workspace_binding_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runner_principal_admission",
+            "name": "workspace_binding_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "principal_digest",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runner_principal_admission",
+            "name": "principal_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "runner_manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runner_principal_admission",
+            "name": "runner_manager_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "container_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runner_principal_admission",
+            "name": "container_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "admitted_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runner_principal_admission",
+            "name": "admitted_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "stopped_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runner_principal_admission",
+            "name": "stopped_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "6079868b6e8877238280e12dbc7502ed7ad66e035d198d4dac0164ecce914818"
+}

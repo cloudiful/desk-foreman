@@ -118,8 +118,15 @@ async fn find_stop_proof(
 /// Every proof fact, checked together: kind, success, the task's own manager,
 /// the task's own generation, the typed native-task link, and positive
 /// quiescence from the existing confirmed-stop helper.
+///
+/// The task's target, its container generation, and the proof's target must be
+/// the same generation: a stop receipt for an older or newer container never
+/// proves this task's historical execution stopped.
 fn proof_matches_task(proof: Option<&TaskStopProof>, task: &NativeTask) -> bool {
     let Some(proof) = proof else {
+        return false;
+    };
+    let Some(container_generation) = task.container_generation else {
         return false;
     };
     let preparation_quiescent = proof
@@ -134,7 +141,9 @@ fn proof_matches_task(proof: Option<&TaskStopProof>, task: &NativeTask) -> bool 
         && proof.state == "succeeded"
         && proof.native_task_id == Some(task.task_id)
         && proof.assigned_manager_id == task.assigned_manager_id
+        && task.target_generation == container_generation
         && proof.target_generation == task.target_generation
+        && proof.target_generation == container_generation
         && preparation_quiescent
         && confirmed_stop_state(proof.result.as_ref()).is_some()
 }
@@ -243,6 +252,24 @@ mod tests {
             Some(&proof(Some(task.task_id), 7, 4, "succeeded", unconfirmed)),
             &task
         ));
+        // A positive flag with an observation that is not a confirmed stopped
+        // state is equally not a receipt.
+        let invalid_observation = serde_json::json!({
+            "outcome": "stop_confirmed",
+            "observed_state": "running",
+            "confirmed": true,
+            "preparation_quiescent": true
+        });
+        assert!(!proof_matches_task(
+            Some(&proof(
+                Some(task.task_id),
+                7,
+                4,
+                "succeeded",
+                invalid_observation
+            )),
+            &task
+        ));
         // A missing or unparsable result is equally not a confirmation.
         let mut empty = proof(Some(task.task_id), 7, 4, "succeeded", confirmed());
         empty.result = None;
@@ -261,6 +288,23 @@ mod tests {
             Some(&proof(Some(task.task_id), 7, 4, "succeeded", result)),
             &task
         ));
+        // Explicit false quiescence is not positive quiescence either.
+        let false_quiescence = serde_json::json!({
+            "outcome": "stop_confirmed",
+            "observed_state": "exited",
+            "confirmed": true,
+            "preparation_quiescent": false
+        });
+        assert!(!proof_matches_task(
+            Some(&proof(
+                Some(task.task_id),
+                7,
+                4,
+                "succeeded",
+                false_quiescence
+            )),
+            &task
+        ));
     }
 
     #[test]
@@ -269,5 +313,40 @@ mod tests {
         let mut ensure = proof(Some(task.task_id), 7, 4, "succeeded", confirmed());
         ensure.job_kind = "ensure".to_string();
         assert!(!proof_matches_task(Some(&ensure), &task));
+    }
+
+    #[test]
+    fn a_task_without_a_container_generation_never_has_a_stop_receipt() {
+        let mut task = task();
+        task.container_generation = None;
+        let p = proof(Some(task.task_id), 7, 4, "succeeded", confirmed());
+        assert!(!proof_matches_task(Some(&p), &task));
+    }
+
+    #[test]
+    fn a_target_container_or_proof_generation_mismatch_never_matches() {
+        let mut mismatched = task();
+        mismatched.target_generation = 5;
+        let p = proof(Some(mismatched.task_id), 7, 5, "succeeded", confirmed());
+        assert!(
+            !proof_matches_task(Some(&p), &mismatched),
+            "a target/container generation mismatch must not match even when the proof follows the target"
+        );
+
+        let mut stale_task = task();
+        stale_task.target_generation = 5;
+        stale_task.container_generation = Some(5);
+        let stale = proof(Some(stale_task.task_id), 7, 4, "succeeded", confirmed());
+        assert!(
+            !proof_matches_task(Some(&stale), &stale_task),
+            "an older proof generation must not match a newer container"
+        );
+
+        let valid_task = task();
+        let valid = proof(Some(valid_task.task_id), 7, 4, "succeeded", confirmed());
+        assert!(
+            proof_matches_task(Some(&valid), &valid_task),
+            "the equal target/container/proof generation remains accepted"
+        );
     }
 }

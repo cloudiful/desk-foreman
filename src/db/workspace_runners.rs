@@ -62,7 +62,7 @@ mod tests {
                 None,
                 Some(4),
                 Some(3),
-                Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             )
         );
         for owner in [
@@ -103,16 +103,45 @@ pub async fn list_workspace_runners(
         .bind(runner_protocol::RUNNER_MANAGER_HEARTBEAT_TTL_SECS as i64)
         .fetch_one(pool)
         .await?;
-    let items = sqlx::query_as::<_, WorkspaceRunnerRecord>(include_str!(
-        "../sql/list_workspace_runners.sql"
-    ))
-    .bind(&params.status)
-    .bind(&params.owner_kind)
-    .bind(runner_protocol::RUNNER_MANAGER_HEARTBEAT_TTL_SECS as i64)
-    .bind(limit)
-    .bind(offset)
+    let rows = sqlx::query_file!(
+        "src/sql/list_workspace_runners.sql",
+        params.status.as_deref(),
+        params.owner_kind.as_deref(),
+        runner_protocol::RUNNER_MANAGER_HEARTBEAT_TTL_SECS as i64,
+        limit,
+        offset,
+    )
     .fetch_all(pool)
     .await?;
+    let items = rows
+        .into_iter()
+        .map(|row| {
+            Ok(WorkspaceRunnerRecord {
+                runner_id: row.runner_id,
+                runner_manager_id: row.runner_manager_id,
+                owner_kind: row.owner_kind,
+                owner_user_id: row.owner_user_id,
+                owner_workspace_binding_id: row.owner_workspace_binding_id,
+                owner_application_id: row.owner_application_id,
+                owner_principal_digest: row.owner_principal_digest,
+                container_name: row.container_name,
+                container_id: row.container_id,
+                runtime: row.runtime,
+                runtime_class: row.runtime_class,
+                image_name: row.image_name,
+                status: row
+                    .status
+                    .ok_or_else(|| anyhow::anyhow!("workspace runner row has no status"))?,
+                network_enabled: row.network_enabled,
+                workspace_root: row.workspace_root,
+                last_active_at: row.last_active_at,
+                last_observed_at: row.last_observed_at,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+                last_error: row.last_error,
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
     Ok(Page {
         items,
         total,
@@ -201,22 +230,35 @@ pub async fn list_workspace_runner_owners_by_binding(
     pool: &PgPool,
     binding_id: i64,
 ) -> anyhow::Result<Vec<RunnerOwner>> {
-    let rows: Vec<(i64, i64, String)> = sqlx::query_as(include_str!(
-        "../sql/list_workspace_runner_owners_by_binding.sql"
-    ))
-    .bind(binding_id)
+    #[derive(sqlx::FromRow)]
+    struct OwnerRow {
+        owner_application_id: Option<i64>,
+        owner_workspace_binding_id: Option<i64>,
+        owner_principal_digest: Option<String>,
+    }
+
+    let rows: Vec<OwnerRow> = sqlx::query_file_as!(
+        OwnerRow,
+        "src/sql/list_workspace_runner_owners_by_binding.sql",
+        binding_id,
+    )
     .fetch_all(pool)
     .await?;
-    Ok(rows
-        .into_iter()
-        .map(|(application_id, workspace_binding_id, principal_digest)| {
-            RunnerOwner::ApplicationPrincipal {
-                application_id,
-                workspace_binding_id,
-                principal_digest,
-            }
+    rows.into_iter()
+        .map(|row| {
+            Ok(RunnerOwner::ApplicationPrincipal {
+                application_id: row.owner_application_id.ok_or_else(|| {
+                    anyhow::anyhow!("workspace runner owner row has no application id")
+                })?,
+                workspace_binding_id: row.owner_workspace_binding_id.ok_or_else(|| {
+                    anyhow::anyhow!("workspace runner owner row has no binding id")
+                })?,
+                principal_digest: row.owner_principal_digest.ok_or_else(|| {
+                    anyhow::anyhow!("workspace runner owner row has no principal digest")
+                })?,
+            })
         })
-        .collect())
+        .collect()
 }
 
 pub async fn save_workspace_runner(
@@ -231,25 +273,28 @@ pub async fn save_workspace_runner(
         owner_principal_digest,
     ) = owner_fields(input.owner)?;
 
-    sqlx::query_as::<_, WorkspaceRunnerRecord>(include_str!("../sql/save_workspace_runner.sql"))
-        .bind(input.runner_manager_id)
-        .bind(owner_kind)
-        .bind(owner_user_id)
-        .bind(owner_workspace_binding_id)
-        .bind(owner_application_id)
-        .bind(owner_principal_digest)
-        .bind(input.container_name)
-        .bind(input.container_id)
-        .bind(input.runtime)
-        .bind(input.runtime_class)
-        .bind(input.image_name)
-        .bind(input.status)
-        .bind(input.network_enabled)
-        .bind(input.workspace_root)
-        .bind(input.last_error)
-        .fetch_one(pool)
-        .await
-        .map_err(Into::into)
+    sqlx::query_file_as!(
+        WorkspaceRunnerRecord,
+        "src/sql/save_workspace_runner.sql",
+        input.runner_manager_id,
+        owner_kind,
+        owner_user_id,
+        owner_workspace_binding_id,
+        owner_application_id,
+        owner_principal_digest,
+        input.container_name,
+        input.container_id,
+        input.runtime,
+        input.runtime_class,
+        input.image_name,
+        input.status,
+        input.network_enabled,
+        input.workspace_root,
+        input.last_error,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(Into::into)
 }
 
 pub async fn report_workspace_runner(
@@ -283,18 +328,20 @@ pub async fn report_workspace_runner(
         return Ok(());
     }
 
-    sqlx::query(include_str!("../sql/report_workspace_runner.sql"))
-        .bind(runner_manager_id)
-        .bind(&event.container_name)
-        .bind(owner_kind)
-        .bind(status)
-        .bind(event.container_id.as_deref())
-        .bind(event.last_error.as_deref())
-        .bind(owner_user_id)
-        .bind(owner_workspace_binding_id)
-        .bind(owner_application_id)
-        .bind(owner_principal_digest)
-        .execute(pool)
-        .await?;
+    sqlx::query_file!(
+        "src/sql/report_workspace_runner.sql",
+        runner_manager_id,
+        &event.container_name,
+        owner_kind,
+        status,
+        event.container_id.as_deref(),
+        event.last_error.as_deref(),
+        owner_user_id,
+        owner_workspace_binding_id,
+        owner_application_id,
+        owner_principal_digest,
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }

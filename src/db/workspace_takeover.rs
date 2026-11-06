@@ -219,6 +219,12 @@ pub async fn acquire_workspace_write_lease_takeover(
     )
     .await?
     .is_some()
+        || crate::db::workspace_bindings::git_job_guard::git_job_holds_binding(
+            &mut tx,
+            workspace_binding_id,
+        )
+        .await?
+        .is_some()
     {
         tx.rollback().await?;
         return Ok(TakeoverOutcome::Conflict {

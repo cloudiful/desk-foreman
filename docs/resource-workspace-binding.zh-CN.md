@@ -37,7 +37,7 @@
 
 ## 主体隔离执行
 
-经过应用认证的资源请求可通过 `X-DF-Runner-Isolation: principal` 选择隔离执行。分别提供一个 `X-DF-External-User-Id`、`X-DF-Workspace-Key` 和 `X-DF-Lease-Owner`；外部用户与租约所有者必须相同，工作区键必须指向资源。现有写租约和权限范围检查仍然有效。执行需要 Docker 后端的运行管理器。主体停止围栏对该身份永久有效；新的生命周期需要新身份。不提供隔离请求头时，运行器归属保持不变。
+经过应用认证的资源请求可通过 `X-DF-Runner-Isolation: principal` 选择隔离执行。分别提供一个 `X-DF-External-User-Id`、`X-DF-Workspace-Key` 和 `X-DF-Lease-Owner`；外部用户与租约所有者必须相同，工作区键必须指向资源。现有写租约和权限范围检查仍然有效。执行需要 Docker 后端的运行管理器。主体停止围栏对该身份永久有效；新的生命周期需要新身份。不带隔离请求头的资源工作区请求返回 `403`（`resource workspace requires an isolated principal`）。个人非资源应用工作区保持其归属行为。工作区重建须显式执行；认证流程不会重置或改写工作区内容。
 
 ## 主体停止和协议发现
 
@@ -47,7 +47,15 @@
 
 ## Git 同步
 
-`POST /api/internal/resource-workspaces/{resource_kind}/{resource_id}/git/sync` 需要资源写租约、shell 权限和网络访问。提供 `remote_url`，可选提供 `branch`。可选的 `preserve_existing` 默认为 `false`：已有检出必须干净，并仅执行快进拉取。为 `true` 时，已有检出不会获取或拉取，工作内容和分支保持不变。空工作区仍正常克隆。成功同步会将受管理的 origin 拉取和推送地址设为提供的地址，并返回当前 HEAD、分支和修改状态。
+`POST /api/internal/resource-workspaces/{resource_kind}/{resource_id}/git/sync` 需要资源写租约、shell 权限和网络访问。请求提供旧的受作用域 broker `remote_url`、与之匹配的 `code_project_id`、非 nil 的 `authorization_generation`，以及可选的 `branch`。服务端在私有路径中拆分受作用域 URL，scoped 密码不会进入模型命令、任务负载、数据库行、结果、错误或仓库配置。
+
+已有检出且 `preserve_existing: true` 时，仅用固定的无凭据沙箱探针检查：不获取、不拉取、不访问网络、不写配置，也不创建新任务。包含 include、不安全配置形态、外部对象目录或带凭据的旧 origin URL 的仓库返回 `409` 和 `legacy_git_cleanup_required`，文件保持不变；该响应保留工作内容，但不代表旧工作区迁移已完成。
+
+默认的 `preserve_existing: false` 对已有检出执行干净快进。请求必须显式给出规范分支，探针必须报告工作区干净且处于该分支，实际 HEAD 会成为任务的期望基线。脏工作区、detached、分支不匹配或其他不安全形态返回 `409` 且保持不变。受信任 manager 持有 binding 写栅栏并拒绝任何存活的绑定 Shell 会话；它只导入已校验的 bundle，通过 compare-and-set 引用更新和 `read-tree` 发布精确后代，并保留其他引用与历史。非快进或基线不匹配会拒绝，引用与工作区均不改变。非空且非仓库目录仍返回 `409`。
+
+持久化的首次克隆不携带 expected base，行为保持不变。任务为 `pending` 或 `claimed` 时，路由只在原始等待预算内轮询同一任务，绝不新建任务、重置凭据期限或重放工作。任务为 `uncertain` 时，协调只读且仅凭证明：manager 读取已完成、已发布且清理确认的 receipt，并独立检查干净的实际 HEAD。只有证明完全匹配时，服务端才用严格的结果 JSON 把该 uncertain 行 compare-and-set 为 succeeded；缺失、损坏、不匹配、过期、忙或脏的证明都返回明确的 `503`，绝不触发外部 Git 写、fetch、pull、push、重放、凭据注册或新任务。
+
+目标为空且没有 `.git` 时，为已经观测到服务该 binding 的 manager 准入一个持久首次克隆任务；`branch` 必填且必须符合共享规范。没有实时观测时，路由执行一次无凭据 bootstrap 探针并重新读取一次观测。零个或多个实时 manager 返回 `503`。首次克隆成功返回 `cloned: true`、`dirty: false`、规范分支和已验证 head。pending、uncertain 或超时工作不会被重放。
 
 ## 归属边界
 

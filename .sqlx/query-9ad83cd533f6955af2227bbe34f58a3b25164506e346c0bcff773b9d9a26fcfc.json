@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Delete exactly the rows owned by one fixture application and manager.\n-- One statement keeps every delete under the same command so the RESTRICT\n-- foreign keys see the whole owned set disappear together.\nWITH\n    deleted_fences AS (\n        DELETE FROM runner_owner_stop_fence\n        WHERE application_id = $1\n        RETURNING owner_key\n    ),\n    deleted_jobs AS (\n        DELETE FROM workspace_git_jobs\n        WHERE application_id = $1\n        RETURNING job_id\n    ),\n    deleted_tasks AS (\n        DELETE FROM execution_environment_tasks\n        WHERE application_id = $1\n        RETURNING task_id\n    ),\n    deleted_environments AS (\n        DELETE FROM execution_environments\n        WHERE application_id = $1\n        RETURNING environment_id\n    ),\n    deleted_bindings AS (\n        DELETE FROM workspace_bindings\n        WHERE application_id = $1\n        RETURNING workspace_binding_id\n    ),\n    deleted_manager AS (\n        DELETE FROM runner_managers\n        WHERE runner_manager_id = $2\n        RETURNING runner_manager_id\n    )\nDELETE FROM applications WHERE application_id = $1;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9ad83cd533f6955af2227bbe34f58a3b25164506e346c0bcff773b9d9a26fcfc"
+}

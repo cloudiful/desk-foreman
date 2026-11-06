@@ -117,7 +117,7 @@ pub fn parse_resource_workspace_key(key: &str) -> Option<(String, String)> {
     Some((kind.to_string(), id.to_string()))
 }
 
-fn resource_workspace_hash(resource_kind: &str, resource_id: &str) -> String {
+pub fn resource_workspace_hash(resource_kind: &str, resource_id: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(resource_kind.as_bytes());
     hasher.update(b":");

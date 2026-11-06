@@ -261,4 +261,44 @@ mod guard_tests {
                 .eq(&super::super::profile::ServiceProfile::Unset)
         );
     }
+
+    #[tokio::test]
+    async fn removal_refuses_a_credential_owned_by_another_uid_and_leaves_it() {
+        let temp = temp();
+        let owner = store(&temp);
+        let path = owner
+            .obtain(ENV, 2, ENV_NAME)
+            .expect("create")
+            .env_file()
+            .to_path_buf();
+        let before = fs::read(&path).expect("read credential");
+        let impostor = ServiceCredentialStore::with_uid_source(
+            temp.path(),
+            UidSource::Fixed(real_uid().wrapping_add(1)),
+        );
+        assert!(
+            impostor.remove(ENV, 2, ENV_NAME).is_err(),
+            "a credential owned by another user must not be removed"
+        );
+        assert_eq!(fs::read(&path).expect("credential remains"), before);
+    }
+
+    #[tokio::test]
+    async fn removal_refuses_a_too_open_directory_and_leaves_the_credential() {
+        let temp = temp();
+        let owner = store(&temp);
+        let path = owner
+            .obtain(ENV, 3, ENV_NAME)
+            .expect("create")
+            .env_file()
+            .to_path_buf();
+        let directory = path.parent().expect("parent").to_path_buf();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).expect("widen");
+        let before = fs::read(&path).expect("read credential");
+        assert!(
+            owner.remove(ENV, 3, ENV_NAME).is_err(),
+            "a permissive directory must block removal"
+        );
+        assert_eq!(fs::read(&path).expect("credential remains"), before);
+    }
 }

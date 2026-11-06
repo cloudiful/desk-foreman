@@ -132,7 +132,7 @@ with no shared fence, so every legacy path refuses while a task is active:
 
 - fenced write admission (`lock_workspace_binding_for_write`);
 - legacy write-lease acquire, release and force-taking;
-- admin archive, restore and reset;
+- admin archive and restore;
 - git/sync through the resource workspace route;
 - the archived-workspace janitor sweep, which skips instead of deleting.
 

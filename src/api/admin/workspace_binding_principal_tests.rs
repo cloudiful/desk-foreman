@@ -7,8 +7,7 @@ use crate::db::{
 use runner_protocol::workspace_principal::application_principal_owner;
 use std::sync::{Arc, atomic::Ordering};
 
-#[path = "lease_test_support.rs"]
-mod support;
+use crate::lease_test_support as support;
 
 #[tokio::test]
 #[ignore = "requires newly initialized disposable P4k3 PostgreSQL"]
@@ -80,7 +79,6 @@ async fn guarded_lifecycle_fails_closed_then_retries() -> anyhow::Result<()> {
     let temp = tempfile::tempdir()?;
     for (id, user) in [
         (817302, "takeover"),
-        (817303, "reset"),
         (817304, "archive"),
         (817305, "janitor"),
         (817306, "other"),
@@ -123,10 +121,6 @@ async fn guarded_lifecycle_fails_closed_then_retries() -> anyhow::Result<()> {
         "00000000-0000-4000-8000-000000000301",
     ));
     assert!(matches!(
-        reset_workspace_binding(State(state.clone()), jar.clone(), Path(817307)).await,
-        Err(AppError::Conflict(_))
-    ));
-    assert!(matches!(
         archive_workspace_binding(State(state.clone()), jar.clone(), Path(817307)).await,
         Err(AppError::Conflict(_))
     ));
@@ -159,11 +153,6 @@ async fn guarded_lifecycle_fails_closed_then_retries() -> anyhow::Result<()> {
         Some("takeover")
     );
     assert!(matches!(
-        reset_workspace_binding(State(state.clone()), jar.clone(), Path(817303)).await,
-        Err(AppError::ServiceUnavailable(_))
-    ));
-    assert!(temp.path().join("reset/keep").exists());
-    assert!(matches!(
         archive_workspace_binding(State(state.clone()), jar.clone(), Path(817304)).await,
         Err(AppError::ServiceUnavailable(_))
     ));
@@ -183,7 +172,6 @@ async fn guarded_lifecycle_fails_closed_then_retries() -> anyhow::Result<()> {
     );
     for (id, user) in [
         (817302, "takeover"),
-        (817303, "reset"),
         (817304, "archive"),
         (817305, "janitor"),
     ] {
@@ -207,18 +195,7 @@ async fn guarded_lifecycle_fails_closed_then_retries() -> anyhow::Result<()> {
         1
     );
     runner.fail_principal.store(false, Ordering::SeqCst);
-    runner.fail_cleanup.store(true, Ordering::SeqCst);
-    assert!(matches!(
-        reset_workspace_binding(State(state.clone()), jar.clone(), Path(817303)).await,
-        Err(AppError::ServiceUnavailable(_))
-    ));
-    assert!(temp.path().join("reset/keep").exists());
-    runner.fail_cleanup.store(false, Ordering::SeqCst);
     assert!(matches!(takeover().await?, TakeoverOutcome::Success { .. }));
-    let _ = reset_workspace_binding(State(state.clone()), jar.clone(), Path(817303))
-        .await
-        .expect("reset succeeds");
-    assert!(!temp.path().join("reset/keep").exists());
     let _ = archive_workspace_binding(State(state.clone()), jar, Path(817304))
         .await
         .expect("archive succeeds");

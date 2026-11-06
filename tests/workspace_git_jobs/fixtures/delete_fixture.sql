@@ -1,0 +1,35 @@
+-- Delete exactly the rows owned by one fixture application and manager.
+-- One statement keeps every delete under the same command so the RESTRICT
+-- foreign keys see the whole owned set disappear together.
+WITH
+    deleted_fences AS (
+        DELETE FROM runner_owner_stop_fence
+        WHERE application_id = $1
+        RETURNING owner_key
+    ),
+    deleted_jobs AS (
+        DELETE FROM workspace_git_jobs
+        WHERE application_id = $1
+        RETURNING job_id
+    ),
+    deleted_tasks AS (
+        DELETE FROM execution_environment_tasks
+        WHERE application_id = $1
+        RETURNING task_id
+    ),
+    deleted_environments AS (
+        DELETE FROM execution_environments
+        WHERE application_id = $1
+        RETURNING environment_id
+    ),
+    deleted_bindings AS (
+        DELETE FROM workspace_bindings
+        WHERE application_id = $1
+        RETURNING workspace_binding_id
+    ),
+    deleted_manager AS (
+        DELETE FROM runner_managers
+        WHERE runner_manager_id = $2
+        RETURNING runner_manager_id
+    )
+DELETE FROM applications WHERE application_id = $1;

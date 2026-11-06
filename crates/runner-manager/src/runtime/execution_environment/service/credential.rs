@@ -133,6 +133,55 @@ impl ServiceCredentialStore {
         Ok(ServiceCredential { path })
     }
 
+    /// Remove the exact validated credential for one `(environment, generation)`.
+    ///
+    /// A confirmed stop calls this to retire the retired generation's host
+    /// credential. Only a file that passes exactly the checks
+    /// [`ServiceCredentialStore::existing`] applies is unlinked, and only the
+    /// one path derived from the manager-owned environment id and generation.
+    /// An absent file is already retired and returns `Ok` without creating or
+    /// inspecting any directory. A file that fails validation, or a directory
+    /// that fails its guard, is left untouched and the error is returned, so a
+    /// hostile or misconfigured path is never deleted. The parent directory is
+    /// fsynced after a successful removal so the retirement is durable.
+    pub(crate) fn remove(
+        &self,
+        environment_id: &str,
+        generation: i64,
+        env_name: &str,
+    ) -> anyhow::Result<()> {
+        let uid = self.uid_source.effective_uid()?;
+        if generation < 0 {
+            anyhow::bail!("service credential generation must not be negative");
+        }
+        let path = self.credential_path(environment_id, generation)?;
+        match path.symlink_metadata() {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "service credential is not available: {error}"
+                ));
+            }
+        }
+        let directory = self.credential_directory(&path)?;
+        // Reuse the read path's guards so a writable or foreign directory, a
+        // symlink, or a permissive/foreign/mismatched file is refused instead
+        // of unlinked.
+        validate_directory_chain(&self.root, &directory)?;
+        assert_private_directory(&directory, uid)?;
+        refuse_link_or_irregular(&path)?;
+        let file = File::open(&path)
+            .map_err(|error| anyhow::anyhow!("service credential is not available: {error}"))?;
+        read_credential_from_handle(&file, env_name, uid)?;
+        // Drop the validated handle before unlinking, and never surface the
+        // token or the file contents.
+        drop(file);
+        fs::remove_file(&path)
+            .map_err(|error| anyhow::anyhow!("failed to remove service credential: {error}"))?;
+        super::fs_guard::sync_directory(&directory)
+    }
+
     /// Read the raw token for the actual relay consumer, failing closed
     /// exactly like [`ServiceCredentialStore::existing`].
     ///

@@ -10,10 +10,8 @@ use runner_protocol::{
     RunnerOwner, RunnerSessionStatus, ShellToolOutput,
 };
 
-use super::{
-    cancel_binding_sessions_with_principal,
-    lease_test_support::{FakeRunnerService, binding_session, fake_state},
-};
+use super::cancel_binding_sessions_with_principal;
+use crate::lease_test_support::{FakeRunnerService, binding_session, fake_state};
 use crate::{
     AppState,
     runner::{RunnerFuture, RunnerService},

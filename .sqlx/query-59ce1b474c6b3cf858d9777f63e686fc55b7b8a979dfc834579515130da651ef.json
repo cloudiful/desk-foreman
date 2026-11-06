@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH deleted_audit AS (\n    DELETE FROM audit_log\n    WHERE actor_user_id = $1\n)\nDELETE FROM users WHERE user_id = $1;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "59ce1b474c6b3cf858d9777f63e686fc55b7b8a979dfc834579515130da651ef"
+}

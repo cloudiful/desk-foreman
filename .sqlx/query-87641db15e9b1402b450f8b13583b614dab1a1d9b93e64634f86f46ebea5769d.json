@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE workspace_runners\nSET status = $4,\n    container_id = COALESCE($5, container_id),\n    last_observed_at = NOW(),\n    updated_at = NOW(),\n    last_error = $6\nWHERE runner_manager_id = $1\n  AND container_name = $2\n  AND owner_kind = $3\n  AND (\n      (owner_kind = 'user' AND owner_user_id = $7)\n      OR\n      (owner_kind = 'workspace_binding' AND owner_workspace_binding_id = $8)\n      OR\n      (owner_kind = 'application_principal' AND owner_workspace_binding_id = $8 AND owner_application_id = $9 AND owner_principal_digest = $10)\n  );\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "87641db15e9b1402b450f8b13583b614dab1a1d9b93e64634f86f46ebea5769d"
+}

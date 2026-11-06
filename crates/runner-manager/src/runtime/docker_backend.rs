@@ -265,11 +265,21 @@ impl DockerRunnerBackend {
             "--user".to_string(),
             user_spec,
             "--label".to_string(),
-            format!("desk-foreman.owner={}", owner.stable_key()),
+            format!(
+                "{}={}",
+                super::execution_environment::LABEL_OWNER,
+                owner.stable_key()
+            ),
             "--label".to_string(),
-            "desk-foreman.managed=true".to_string(),
+            format!("{}=true", super::execution_environment::LABEL_MANAGED),
             "--label".to_string(),
-            format!("desk-foreman.manager={}", self.manager_id),
+            format!(
+                "{}={}",
+                super::execution_environment::LABEL_MANAGER,
+                self.manager_id
+            ),
+        ];
+        args.extend([
             "-e".to_string(),
             format!("WORKSPACE_ROOT={}", config.workdir),
             "-v".to_string(),
@@ -289,7 +299,7 @@ impl DockerRunnerBackend {
             config.memory_limit.clone(),
             "--cpus".to_string(),
             config.cpu_limit.clone(),
-        ];
+        ]);
         if let Some(runtime_class) = &config.runtime_class {
             args.push("--runtime".to_string());
             args.push(runtime_class.clone());

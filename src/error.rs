@@ -19,7 +19,7 @@ pub enum AppError {
     /// endpoint. Carries enough state for callers (e.g. stock) to determine
     /// the current lease owner and last refresh time without parsing
     /// human-readable strings.
-    TakeoverConflict(WorkspaceLeaseTakeoverConflict),
+    TakeoverConflict(Box<WorkspaceLeaseTakeoverConflict>),
     Internal(anyhow::Error),
 }
 
@@ -108,5 +108,37 @@ mod tests {
             AppError::service_unavailable("workspace runner is unavailable").into_response();
 
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn takeover_conflict_response_keeps_status_and_unboxed_body() {
+        let conflict = crate::db::types::WorkspaceLeaseTakeoverConflict {
+            error: "lease is still within the stale window".to_string(),
+            reason: "live_lease".to_string(),
+            stale_threshold_seconds: 180,
+            current: crate::db::types::WorkspaceLeaseStatusResponse {
+                workspace_binding_id: 9,
+                application_id: 1,
+                workspace_key: "code_project:xyz".to_string(),
+                is_active: true,
+                lifecycle_state: "active".to_string(),
+                resource_kind: Some("code_project".to_string()),
+                resource_id: Some("xyz".to_string()),
+                write_lease_owner: Some("conversation:a".to_string()),
+                write_lease_acquired_at: Some(chrono::Utc::now()),
+                write_lease_expires_at: Some(chrono::Utc::now()),
+                stale: true,
+                stale_threshold_seconds: 180,
+            },
+        };
+        let expected = serde_json::to_value(&conflict).expect("serialize fixture");
+        let response = AppError::TakeoverConflict(Box::new(conflict)).into_response();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read response body");
+        let actual: serde_json::Value = serde_json::from_slice(&body).expect("parse body");
+        assert_eq!(actual, expected);
     }
 }

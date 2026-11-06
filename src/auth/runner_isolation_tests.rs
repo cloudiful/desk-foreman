@@ -1,8 +1,56 @@
 use super::*;
-use axum::http::{HeaderMap, HeaderValue};
+use axum::body::to_bytes;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::IntoResponse;
 
-#[path = "../api/admin/lease_test_support.rs"]
-mod support;
+use crate::auth::identity::require_isolated_resource_workspace;
+use crate::error::AppError;
+use crate::lease_test_support as support;
+
+#[tokio::test]
+async fn non_isolated_resource_workspace_is_forbidden_403() {
+    let error = require_isolated_resource_workspace(false, "code_project:one")
+        .expect_err("a non-isolated resource workspace must be rejected");
+    let message = match &error {
+        AppError::Forbidden(message) => message,
+        other => panic!("expected a forbidden error, got {other:?}"),
+    };
+    assert_eq!(message, "resource workspace requires an isolated principal");
+
+    let response = error.into_response();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("error body");
+    let body: serde_json::Value = serde_json::from_slice(&body).expect("error JSON");
+    assert_eq!(
+        body,
+        serde_json::json!({ "error": "resource workspace requires an isolated principal" })
+    );
+}
+
+#[test]
+fn isolated_resource_workspace_is_allowed() {
+    require_isolated_resource_workspace(true, "code_project:one")
+        .expect("an isolated resource workspace is allowed");
+}
+
+#[test]
+fn non_isolated_personal_workspace_is_allowed() {
+    require_isolated_resource_workspace(false, "default")
+        .expect("a non-isolated personal workspace is allowed");
+    require_isolated_resource_workspace(false, "person-a")
+        .expect("a non-isolated personal workspace is allowed");
+}
+
+#[test]
+fn malformed_resource_workspace_keeps_personal_semantics() {
+    for workspace_key in ["code_project", "code_project:", "Code:one"] {
+        require_isolated_resource_workspace(false, workspace_key).unwrap_or_else(|_| {
+            panic!("malformed resource key {workspace_key} must stay personal")
+        });
+    }
+}
 
 #[tokio::test]
 #[ignore = "requires newly initialized disposable P4l PostgreSQL"]
@@ -188,7 +236,7 @@ async fn authentication_carries_checked_principal_without_invalid_binding_creati
     assert_eq!(
         legacy.runner_owner(),
         runner_protocol::RunnerOwner::WorkspaceBinding {
-            workspace_binding_id: actor.workspace_binding_id
+            workspace_binding_id: actor.workspace_binding_id,
         }
     );
     headers.insert(

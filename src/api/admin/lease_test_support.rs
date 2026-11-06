@@ -145,6 +145,7 @@ pub(crate) fn fake_state(runner: Arc<FakeRunnerService>) -> AppState {
                 network_enabled: true,
             },
             workspace_retention: Duration::from_secs(30 * 86_400),
+            git_jobs: None,
             database_url: "postgres://example.invalid/test".to_string(),
             web_session_ttl: Duration::from_secs(3600),
             web_cookie_name: "desk_foreman_session".to_string(),
@@ -162,6 +163,9 @@ pub(crate) fn fake_state(runner: Arc<FakeRunnerService>) -> AppState {
             PgPoolOptions::new()
                 .connect_lazy("postgres://example.invalid/test")
                 .expect("lazy pool"),
+        ),
+        git_job_credentials: Arc::new(
+            crate::runner::git_job_credentials::GitJobCredentialStore::new(),
         ),
         db: PgPoolOptions::new()
             .connect_lazy("postgres://example.invalid/test")

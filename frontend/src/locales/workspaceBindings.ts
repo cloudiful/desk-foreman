@@ -4,7 +4,6 @@ export interface WorkspaceBindingsMessages {
     apply: string
     archive: string
     restore: string
-    reset: string
   }
   filters: {
     applicationId: string
@@ -13,7 +12,6 @@ export interface WorkspaceBindingsMessages {
     allStates: string
     active: string
     archived: string
-    resetting: string
   }
   table: {
     binding: string
@@ -31,19 +29,16 @@ export interface WorkspaceBindingsMessages {
     title: string
     archiveDescription: string
     restoreDescription: string
-    resetDescription: string
   }
   notifications: {
     archiveSuccess: string
     restoreSuccess: string
-    resetSuccess: string
     binding: string
   }
   errors: {
     load: string
     archive: string
     restore: string
-    reset: string
   }
   identity: {
     application: string
@@ -56,7 +51,6 @@ const workspaceBindings: WorkspaceBindingsMessages = {
     apply: 'Apply',
     archive: 'Archive',
     restore: 'Restore',
-    reset: 'Reset',
   },
   filters: {
     applicationId: 'Application ID',
@@ -65,7 +59,6 @@ const workspaceBindings: WorkspaceBindingsMessages = {
     allStates: 'All states',
     active: 'Active',
     archived: 'Archived',
-    resetting: 'Resetting',
   },
   table: {
     binding: 'Binding',
@@ -84,20 +77,16 @@ const workspaceBindings: WorkspaceBindingsMessages = {
     archiveDescription:
       '{id} is archived: the workspace is detached and stops accepting activity.',
     restoreDescription: '{id} is restored and becomes active again.',
-    resetDescription:
-      '{id} is reset: the workspace directory is cleared. This cannot be undone.',
   },
   notifications: {
     archiveSuccess: 'Workspace archived',
     restoreSuccess: 'Workspace restored',
-    resetSuccess: 'Workspace reset',
     binding: 'Binding #{id}',
   },
   errors: {
     load: 'Failed to load workspace bindings',
     archive: 'Failed to archive workspace',
     restore: 'Failed to restore workspace',
-    reset: 'Failed to reset workspace',
   },
   identity: {
     application: 'App',
@@ -110,7 +99,6 @@ export const zhCN: WorkspaceBindingsMessages = {
     apply: '应用',
     archive: '归档',
     restore: '恢复',
-    reset: '重置',
   },
   filters: {
     applicationId: '应用 ID',
@@ -119,7 +107,6 @@ export const zhCN: WorkspaceBindingsMessages = {
     allStates: '所有状态',
     active: '活跃',
     archived: '已归档',
-    resetting: '重置中',
   },
   table: {
     binding: '绑定',
@@ -137,19 +124,16 @@ export const zhCN: WorkspaceBindingsMessages = {
     title: '{action}工作区',
     archiveDescription: '{id} 将被归档：工作区会解除绑定并停止接受活动。',
     restoreDescription: '{id} 将被恢复并重新变为活跃状态。',
-    resetDescription: '{id} 将被重置：工作区目录会被清空，且无法撤销。',
   },
   notifications: {
     archiveSuccess: '工作区已归档',
     restoreSuccess: '工作区已恢复',
-    resetSuccess: '工作区已重置',
     binding: '绑定 #{id}',
   },
   errors: {
     load: '加载工作区绑定失败',
     archive: '归档工作区失败',
     restore: '恢复工作区失败',
-    reset: '重置工作区失败',
   },
   identity: {
     application: '应用',

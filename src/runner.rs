@@ -1,4 +1,5 @@
 mod backend;
+pub mod git_job_credentials;
 pub mod principal_stop;
 mod pull;
 mod pull_cancellation;

@@ -7,6 +7,8 @@ mod docker_lifecycle;
 #[cfg(test)]
 mod docker_tests;
 pub mod execution_environment;
+#[allow(dead_code)]
+pub(crate) mod git_authority;
 mod janitor;
 mod local_service;
 mod native_task;

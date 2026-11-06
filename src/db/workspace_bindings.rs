@@ -8,6 +8,7 @@
 //! can never overlap. The guard is wiring only: each call site re-reads it
 //! after its own binding row lock, inside its own transaction.
 
+pub(crate) mod git_job_guard;
 pub(crate) mod native_task_guard;
 
 use chrono::{DateTime, Utc};
@@ -131,6 +132,9 @@ async fn change_lease<F: Future<Output = anyhow::Result<()>>>(
     if !locked.is_active
         || locked.lifecycle_state != "active"
         || native_task_guard::native_task_holds_binding(&mut tx, binding_id)
+            .await?
+            .is_some()
+        || git_job_guard::git_job_holds_binding(&mut tx, binding_id)
             .await?
             .is_some()
     {
@@ -263,6 +267,9 @@ pub async fn lock_workspace_binding_for_write<'a>(
     if native_task_guard::native_task_holds_binding(&mut tx, workspace_binding_id)
         .await?
         .is_some()
+        || git_job_guard::git_job_holds_binding(&mut tx, workspace_binding_id)
+            .await?
+            .is_some()
     {
         return Ok((tx, None));
     }

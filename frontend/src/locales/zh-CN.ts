@@ -117,7 +117,6 @@ const zhCN = {
       cancelled: '已取消',
       timed_out: '已超时',
       exited: '已退出',
-      resetting: '重置中',
       ready: '就绪',
       unknown: '未知',
     },

@@ -45,3 +45,24 @@ mod tests;
 pub use cancel::ServiceCancelRegistry;
 pub use credential::ServiceCredentialStore;
 pub use profile::{ServiceProfile, ServiceProfileConfig};
+
+/// Retire the exact host credential of one confirmed-stopped generation.
+///
+/// This is the single policy both confirmed stop entry points use. A
+/// configured profile validates and unlinks only the credential for this
+/// `(environment, generation)`, using the profile's current auth variable
+/// name; an unset profile skips retirement and deletes nothing; an invalid
+/// profile fails so a configured cleanup problem stays visible. Any error is
+/// returned without recreating the credential, and the caller keeps it in the
+/// stop outcome so the file lock is still released.
+pub(crate) fn retire_confirmed_generation(
+    profile: &super::ExecutionEnvironmentProfile,
+    state_dir: &std::path::Path,
+    environment_id: &str,
+    generation: i64,
+) -> anyhow::Result<()> {
+    let Some(config) = profile.ensure_service_profile()? else {
+        return Ok(());
+    };
+    ServiceCredentialStore::new(state_dir).remove(environment_id, generation, &config.auth_env_name)
+}
