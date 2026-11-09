@@ -122,12 +122,25 @@ admin browser session:
 
 Reads use the application actor and resolve the binding for the exact
 application and external-user subject; a missing or foreign binding is `404`.
+Resource-owned bindings authenticate with the isolated principal headers
+(`X-DF-Runner-Isolation: principal`, matching `X-DF-External-User-Id` and
+`X-DF-Lease-Owner`, and the `X-DF-Workspace-Key` naming the resource). The
+caller identity is the real external user; the stored `__resource__` marker is
+internal and is never required from or returned to the client. The resolved
+scope must name this exact binding and the caller's lease must be the current
+live one; a different application, binding or principal and a stale, expired or
+other-holder lease are refused on reads as well as writes. The capability
+endpoint applies the same headers and authority. The external-user header is
+required for every caller; the isolation, workspace-key and lease-owner headers
+are optional in the generated contract because personal callers omit them.
+Personal bindings keep the stored-subject check and need no write lease.
 Writes require the same ownership, an existing workspace write scope and the
-current write lease named by `lease_owner` in the JSON body (or the delete query).
-The binding row is locked before that authority is validated and the row is
-changed in the same transaction, so a lease handover racing the request cannot
-pass a snapshot check. A personal binding follows the existing personal write
-policy; a resource binding requires the live unexpired lease.
+current write lease named by `lease_owner` in the JSON body (or the delete query);
+for a resource binding it must also equal the authenticated lease. The binding
+row is locked before that authority is validated and the row is changed in the
+same transaction, so a lease handover racing the request cannot pass a snapshot
+check. A personal binding follows the existing personal write policy; a resource
+binding requires the live unexpired lease.
 
 Create and update use the same validated alias, URL and write-only credential
 DTOs as the admin API. Credentials are encrypted with `DF_UPSTREAM_CREDENTIAL_KEY`

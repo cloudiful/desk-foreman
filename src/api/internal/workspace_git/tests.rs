@@ -6,7 +6,7 @@
 
 use super::types::{
     CreateInternalWorkspaceGitUpstreamRequest, DeleteInternalWorkspaceGitUpstreamQuery,
-    UpdateInternalWorkspaceGitUpstreamRequest,
+    UpdateInternalWorkspaceGitUpstreamRequest, WorkspaceGitCapabilityRequest,
 };
 use crate::api::admin::workspace_git_upstreams::types::{
     CreateWorkspaceGitUpstreamRequest, UpdateWorkspaceGitUpstreamRequest,
@@ -407,6 +407,262 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
     )
     .await?;
     assert_eq!(current_lease.capability_generation, 1);
+
+    // Resource principals keep the stored `__resource__` marker internally but
+    // authenticate as the real external user. The caller presents the isolated
+    // scope headers and the live lease; the resolved authority must name this
+    // exact binding and keep the marker out of the client identity.
+    sqlx::query(
+        "UPDATE workspace_bindings SET external_user_id = '__resource__', \
+         write_lease_owner = 'person-a', \
+         write_lease_expires_at = NOW() + interval '10 minutes' \
+         WHERE workspace_binding_id = $1",
+    )
+    .bind(lease_id)
+    .execute(&pool)
+    .await?;
+
+    let (token, _) = queries::create_application_token(
+        &pool,
+        &crate::db::types::CreateApplicationTokenRequest {
+            application_id: app.application_id,
+            token_name: "p36-resource-authority".to_string(),
+            expires_at: None,
+            scopes: Some(vec![
+                crate::policy::WORKSPACE_PATCH.to_string(),
+                crate::policy::WORKSPACE_SHELL.to_string(),
+            ]),
+            max_timeout_ms: None,
+            max_output_bytes: None,
+            max_file_bytes: None,
+            max_sessions: None,
+            network_enabled: None,
+        },
+    )
+    .await?;
+
+    let mut state =
+        crate::lease_test_support::fake_state(crate::lease_test_support::FakeRunnerService::new());
+    state.db = pool.clone();
+    {
+        let config = std::sync::Arc::make_mut(&mut state.config);
+        config.upstream_credential_key =
+            Some(UpstreamCredentialKey::parse(&"11".repeat(32))?.expect("key"));
+        config.git_gateway = crate::config::GitGatewayConfig {
+            public_base_url: Some("http://gateway.test".to_string()),
+            ..Default::default()
+        };
+    }
+
+    use axum::http::{HeaderMap, header::AUTHORIZATION};
+    let isolated_headers = || -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            format!("Bearer {token}").parse().expect("authorization"),
+        );
+        headers.insert(
+            "X-DF-Runner-Isolation",
+            "principal".parse().expect("isolation"),
+        );
+        headers.insert(
+            "X-DF-External-User-Id",
+            "person-a".parse().expect("external user"),
+        );
+        headers.insert(
+            "X-DF-Workspace-Key",
+            "issue:42".parse().expect("workspace key"),
+        );
+        headers.insert("X-DF-Lease-Owner", "person-a".parse().expect("lease owner"));
+        headers
+    };
+    let headers = isolated_headers();
+
+    let authority = super::resolve_git_binding(&state, &headers, lease_id, true)
+        .await
+        .expect("resource authority");
+    assert_eq!(authority.identity_subject, "person-a");
+    assert_eq!(authority.authority_subject, "__resource__");
+    assert_eq!(authority.lease_owner.as_deref(), Some("person-a"));
+    assert_eq!(authority.binding.workspace_binding_id, lease_id);
+    assert!(matches!(
+        super::effective_lease(&authority, Some("person-b")),
+        Err(crate::error::AppError::Forbidden(_))
+    ));
+
+    let capability = super::issue_git_capability(
+        axum::extract::State(state.clone()),
+        headers.clone(),
+        axum::extract::Path(lease_id),
+        crate::api::validation::ValidatedJson(WorkspaceGitCapabilityRequest {
+            external_user_id: "person-a".to_string(),
+            lease_owner: Some("person-a".to_string()),
+            principal_id: None,
+        }),
+    )
+    .await
+    .expect("resource capability");
+    let signing_key = crate::git_gateway::signing_key(&state.config).expect("signing key");
+    let claims = crate::git_gateway::capability::verify(
+        &signing_key,
+        &capability.0.capability,
+        chrono::Utc::now().timestamp(),
+    )
+    .expect("capability verifies");
+    assert_eq!(claims.external_user_id, "__resource__");
+    assert_eq!(claims.lease_owner, "person-a");
+    assert_eq!(
+        claims.principal_id,
+        crate::git_gateway::capability::principal_id(app.application_id, "person-a", "issue:42")
+    );
+    assert!(claims.write);
+
+    let mismatched_lease = super::issue_git_capability(
+        axum::extract::State(state.clone()),
+        headers.clone(),
+        axum::extract::Path(lease_id),
+        crate::api::validation::ValidatedJson(WorkspaceGitCapabilityRequest {
+            external_user_id: "person-a".to_string(),
+            lease_owner: Some("person-b".to_string()),
+            principal_id: None,
+        }),
+    )
+    .await;
+    assert!(matches!(
+        mismatched_lease,
+        Err(crate::error::AppError::Forbidden(_))
+    ));
+
+    let mut missing_isolation = isolated_headers();
+    missing_isolation.remove("X-DF-Runner-Isolation");
+    assert!(matches!(
+        super::resolve_git_binding(&state, &missing_isolation, lease_id, false).await,
+        Err(crate::error::AppError::Forbidden(_))
+    ));
+
+    assert!(matches!(
+        super::resolve_git_binding(&state, &headers, binding.workspace_binding_id, false).await,
+        Err(crate::error::AppError::Forbidden(_))
+    ));
+
+    let list_params = || crate::db::types::ListWorkspaceGitUpstreamsParams {
+        limit: None,
+        offset: None,
+    };
+    let live_list = super::list_application_git_upstreams(
+        axum::extract::State(state.clone()),
+        headers.clone(),
+        axum::extract::Path(lease_id),
+        crate::api::validation::ValidatedQuery(list_params()),
+    )
+    .await
+    .expect("live resource list");
+    assert!(!live_list.0.items.is_empty());
+
+    // A matching principal/lease header pair that no longer holds the binding
+    // lease must not disclose another owner's upstream metadata.
+    let mut other_holder = isolated_headers();
+    other_holder.insert(
+        "X-DF-External-User-Id",
+        "person-b".parse().expect("external user"),
+    );
+    other_holder.insert("X-DF-Lease-Owner", "person-b".parse().expect("lease owner"));
+    assert!(matches!(
+        super::list_application_git_upstreams(
+            axum::extract::State(state.clone()),
+            other_holder,
+            axum::extract::Path(lease_id),
+            crate::api::validation::ValidatedQuery(list_params()),
+        )
+        .await,
+        Err(crate::error::AppError::Forbidden(_))
+    ));
+
+    // An expired lease held by the named owner is refused too.
+    sqlx::query(
+        "UPDATE workspace_bindings SET write_lease_expires_at = NOW() - interval '1 second' \
+         WHERE workspace_binding_id = $1",
+    )
+    .bind(lease_id)
+    .execute(&pool)
+    .await?;
+    assert!(matches!(
+        super::list_application_git_upstreams(
+            axum::extract::State(state.clone()),
+            headers.clone(),
+            axum::extract::Path(lease_id),
+            crate::api::validation::ValidatedQuery(list_params()),
+        )
+        .await,
+        Err(crate::error::AppError::Forbidden(_))
+    ));
+    sqlx::query(
+        "UPDATE workspace_bindings SET write_lease_expires_at = NOW() + interval '10 minutes' \
+         WHERE workspace_binding_id = $1",
+    )
+    .bind(lease_id)
+    .execute(&pool)
+    .await?;
+
+    // External user and lease owner must agree in the isolated identity.
+    let mut mismatched_principal = isolated_headers();
+    mismatched_principal.insert(
+        "X-DF-External-User-Id",
+        "person-b".parse().expect("external user"),
+    );
+    assert!(matches!(
+        super::list_application_git_upstreams(
+            axum::extract::State(state.clone()),
+            mismatched_principal,
+            axum::extract::Path(lease_id),
+            crate::api::validation::ValidatedQuery(list_params()),
+        )
+        .await,
+        Err(crate::error::AppError::Unauthorized(_))
+    ));
+
+    // The isolated scope must name the exact addressed binding.
+    let other_resource = queries::create_workspace_binding(
+        &pool,
+        app.application_id,
+        "__resource__",
+        "issue:99",
+        root.to_str().unwrap(),
+        Some("issue"),
+        Some("99"),
+    )
+    .await?;
+    assert!(matches!(
+        super::list_application_git_upstreams(
+            axum::extract::State(state.clone()),
+            headers.clone(),
+            axum::extract::Path(other_resource.workspace_binding_id),
+            crate::api::validation::ValidatedQuery(list_params()),
+        )
+        .await,
+        Err(crate::error::AppError::Forbidden(_))
+    ));
+
+    // Personal read semantics are unchanged: no isolation, workspace-key or
+    // lease-owner header is needed.
+    let mut personal_headers = HeaderMap::new();
+    personal_headers.insert(
+        AUTHORIZATION,
+        format!("Bearer {token}").parse().expect("authorization"),
+    );
+    personal_headers.insert(
+        "X-DF-External-User-Id",
+        "subject-one".parse().expect("external user"),
+    );
+    let personal_list = super::list_application_git_upstreams(
+        axum::extract::State(state.clone()),
+        personal_headers,
+        axum::extract::Path(binding.workspace_binding_id),
+        crate::api::validation::ValidatedQuery(list_params()),
+    )
+    .await
+    .expect("personal list");
+    assert!(personal_list.0.items.is_empty());
 
     sqlx::query("DELETE FROM applications WHERE application_id = $1")
         .bind(app.application_id)

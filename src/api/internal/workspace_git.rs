@@ -21,12 +21,17 @@ use crate::{
     AppState,
     actor::check_write_lease,
     api::{
-        internal::shared::resolve_binding_for_application,
+        internal::shared::{
+            application_actor, application_scope_auth, resolve_binding_for_application,
+        },
         validation::{ValidatedJson, ValidatedQuery},
     },
     db::{
         queries,
-        types::{ListWorkspaceGitUpstreamsParams, Page, WorkspaceGitUpstreamResponse},
+        types::{
+            ListWorkspaceGitUpstreamsParams, Page, WorkspaceBindingResponse,
+            WorkspaceGitUpstreamResponse,
+        },
         workspace_git_upstreams::{
             GitUpstreamError, MutationAuthority, NewWorkspaceGitUpstream,
             WorkspaceGitUpstreamUpdate,
@@ -93,7 +98,13 @@ pub(crate) async fn git_gateway_config(
     post,
     path = "/api/internal/workspace-bindings/{binding_id}/git-capability",
     tag = "internal-git",
-    params(("binding_id" = i64, Path, description = "Workspace binding identifier")),
+    params(
+        ("binding_id" = i64, Path, description = "Workspace binding identifier"),
+        ("X-DF-Runner-Isolation" = Option<String>, Header, description = "Optional; set to principal for a resource-owned workspace, omit for a personal workspace"),
+        ("X-DF-External-User-Id" = String, Header, description = "Authenticated external user identity; required for personal and resource callers"),
+        ("X-DF-Workspace-Key" = Option<String>, Header, description = "Optional; resource callers must name the resource workspace, for example issue:42"),
+        ("X-DF-Lease-Owner" = Option<String>, Header, description = "Optional; resource callers must present the current live write lease owner")
+    ),
     request_body = WorkspaceGitCapabilityRequest,
     security(("application_bearer" = [])),
     responses(
@@ -118,19 +129,18 @@ pub(crate) async fn issue_git_capability(
     if !request.is_valid() {
         return Err(AppError::bad_request("invalid Git capability request"));
     }
-    let application_id = resolve_binding_for_application(&state, &headers, binding_id).await?;
-    let binding = active_binding(&state, binding_id).await?;
-    if binding.application_id != application_id {
+    let auth = resolve_git_binding(&state, &headers, binding_id, false).await?;
+    if request.external_user_id != auth.identity_subject {
         return Err(AppError::forbidden(
-            "workspace binding belongs to another application",
+            "Git capability subject does not match the authenticated principal",
         ));
     }
-    if request.external_user_id != binding.external_user_id {
-        return Err(AppError::forbidden(
-            "Git capability subject does not match the binding",
-        ));
+    let lease_owner = effective_lease(&auth, request.lease_owner.as_deref())?;
+    let binding = auth.binding;
+    if !binding.is_active || binding.lifecycle_state != "active" || binding.archived_at.is_some() {
+        return Err(AppError::conflict("workspace binding is not active"));
     }
-    let lease_owner = request.lease_owner.clone().unwrap_or_default();
+    let application_id = binding.application_id;
     let write = check_write_lease(&binding, Some(&lease_owner)).is_ok()
         && application_has_write_scope(&state, &headers).await?;
     if binding.resource_kind.is_some() && !write {
@@ -152,7 +162,7 @@ pub(crate) async fn issue_git_capability(
         principal_id: request.principal_id.clone().unwrap_or_else(|| {
             capability_principal_id(
                 application_id,
-                &binding.external_user_id,
+                &auth.identity_subject,
                 &binding.workspace_key,
             )
         }),
@@ -190,7 +200,11 @@ pub(crate) async fn issue_git_capability(
     tag = "internal-git",
     params(
         ("binding_id" = i64, Path, description = "Workspace binding identifier"),
-        ListWorkspaceGitUpstreamsParams
+        ListWorkspaceGitUpstreamsParams,
+        ("X-DF-Runner-Isolation" = Option<String>, Header, description = "Optional; set to principal for a resource-owned workspace, omit for a personal workspace"),
+        ("X-DF-External-User-Id" = String, Header, description = "Authenticated external user identity; required for personal and resource callers"),
+        ("X-DF-Workspace-Key" = Option<String>, Header, description = "Optional; resource callers must name the resource workspace, for example issue:42"),
+        ("X-DF-Lease-Owner" = Option<String>, Header, description = "Optional; resource callers must present the current live write lease owner")
     ),
     security(("application_bearer" = [])),
     responses(
@@ -206,7 +220,7 @@ pub(crate) async fn list_application_git_upstreams(
     Path(binding_id): Path<i64>,
     ValidatedQuery(params): ValidatedQuery<ListWorkspaceGitUpstreamsParams>,
 ) -> Result<Json<Page<WorkspaceGitUpstreamResponse>>, AppError> {
-    read_application_binding(&state, &headers, binding_id).await?;
+    resolve_git_binding(&state, &headers, binding_id, false).await?;
     let page =
         queries::list_workspace_git_upstreams(&state.db, binding_id, params.limit, params.offset)
             .await
@@ -218,7 +232,13 @@ pub(crate) async fn list_application_git_upstreams(
     post,
     path = "/api/internal/workspace-bindings/{binding_id}/git-upstreams",
     tag = "internal-git",
-    params(("binding_id" = i64, Path, description = "Workspace binding identifier")),
+    params(
+        ("binding_id" = i64, Path, description = "Workspace binding identifier"),
+        ("X-DF-Runner-Isolation" = Option<String>, Header, description = "Optional; set to principal for a resource-owned workspace, omit for a personal workspace"),
+        ("X-DF-External-User-Id" = String, Header, description = "Authenticated external user identity; required for personal and resource callers"),
+        ("X-DF-Workspace-Key" = Option<String>, Header, description = "Optional; resource callers must name the resource workspace, for example issue:42"),
+        ("X-DF-Lease-Owner" = Option<String>, Header, description = "Optional; resource callers must present the current live write lease owner")
+    ),
     request_body = CreateInternalWorkspaceGitUpstreamRequest,
     security(("application_bearer" = [])),
     responses(
@@ -237,11 +257,12 @@ pub(crate) async fn create_application_git_upstream(
     Path(binding_id): Path<i64>,
     ValidatedJson(request): ValidatedJson<CreateInternalWorkspaceGitUpstreamRequest>,
 ) -> Result<(StatusCode, Json<WorkspaceGitUpstreamResponse>), AppError> {
-    let (application_id, subject) = write_authority(&state, &headers, binding_id).await?;
+    let auth = resolve_git_binding(&state, &headers, binding_id, true).await?;
+    let lease_owner = effective_lease(&auth, Some(&request.lease_owner))?;
     let authority = MutationAuthority::ApplicationSubject {
-        application_id,
-        external_user_id: &subject,
-        lease_owner: &request.lease_owner,
+        application_id: auth.binding.application_id,
+        external_user_id: &auth.authority_subject,
+        lease_owner: &lease_owner,
     };
     let upstream = insert_application_upstream(
         &state.db,
@@ -269,7 +290,11 @@ pub(crate) async fn create_application_git_upstream(
     tag = "internal-git",
     params(
         ("binding_id" = i64, Path, description = "Workspace binding identifier"),
-        ("upstream_id" = i64, Path, description = "Git upstream identifier")
+        ("upstream_id" = i64, Path, description = "Git upstream identifier"),
+        ("X-DF-Runner-Isolation" = Option<String>, Header, description = "Optional; set to principal for a resource-owned workspace, omit for a personal workspace"),
+        ("X-DF-External-User-Id" = String, Header, description = "Authenticated external user identity; required for personal and resource callers"),
+        ("X-DF-Workspace-Key" = Option<String>, Header, description = "Optional; resource callers must name the resource workspace, for example issue:42"),
+        ("X-DF-Lease-Owner" = Option<String>, Header, description = "Optional; resource callers must present the current live write lease owner")
     ),
     request_body = UpdateInternalWorkspaceGitUpstreamRequest,
     security(("application_bearer" = [])),
@@ -289,11 +314,12 @@ pub(crate) async fn update_application_git_upstream(
     Path((binding_id, upstream_id)): Path<(i64, i64)>,
     ValidatedJson(request): ValidatedJson<UpdateInternalWorkspaceGitUpstreamRequest>,
 ) -> Result<Json<WorkspaceGitUpstreamResponse>, AppError> {
-    let (application_id, subject) = write_authority(&state, &headers, binding_id).await?;
+    let auth = resolve_git_binding(&state, &headers, binding_id, true).await?;
+    let lease_owner = effective_lease(&auth, Some(&request.lease_owner))?;
     let authority = MutationAuthority::ApplicationSubject {
-        application_id,
-        external_user_id: &subject,
-        lease_owner: &request.lease_owner,
+        application_id: auth.binding.application_id,
+        external_user_id: &auth.authority_subject,
+        lease_owner: &lease_owner,
     };
     let upstream = modify_application_upstream(
         &state.db,
@@ -324,7 +350,11 @@ pub(crate) async fn update_application_git_upstream(
     params(
         ("binding_id" = i64, Path, description = "Workspace binding identifier"),
         ("upstream_id" = i64, Path, description = "Git upstream identifier"),
-        DeleteInternalWorkspaceGitUpstreamQuery
+        DeleteInternalWorkspaceGitUpstreamQuery,
+        ("X-DF-Runner-Isolation" = Option<String>, Header, description = "Optional; set to principal for a resource-owned workspace, omit for a personal workspace"),
+        ("X-DF-External-User-Id" = String, Header, description = "Authenticated external user identity; required for personal and resource callers"),
+        ("X-DF-Workspace-Key" = Option<String>, Header, description = "Optional; resource callers must name the resource workspace, for example issue:42"),
+        ("X-DF-Lease-Owner" = Option<String>, Header, description = "Optional; resource callers must present the current live write lease owner")
     ),
     security(("application_bearer" = [])),
     responses(
@@ -342,11 +372,12 @@ pub(crate) async fn delete_application_git_upstream(
     Path((binding_id, upstream_id)): Path<(i64, i64)>,
     ValidatedQuery(query): ValidatedQuery<DeleteInternalWorkspaceGitUpstreamQuery>,
 ) -> Result<StatusCode, AppError> {
-    let (application_id, subject) = write_authority(&state, &headers, binding_id).await?;
+    let auth = resolve_git_binding(&state, &headers, binding_id, true).await?;
+    let lease_owner = effective_lease(&auth, Some(&query.lease_owner))?;
     let authority = MutationAuthority::ApplicationSubject {
-        application_id,
-        external_user_id: &subject,
-        lease_owner: &query.lease_owner,
+        application_id: auth.binding.application_id,
+        external_user_id: &auth.authority_subject,
+        lease_owner: &lease_owner,
     };
     remove_application_upstream(&state.db, &authority, binding_id, upstream_id)
         .await
@@ -354,42 +385,91 @@ pub(crate) async fn delete_application_git_upstream(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn read_application_binding(
+/// Resolved caller authority for one path binding.
+struct GitBindingAuth {
+    binding: WorkspaceBindingResponse,
+    /// Authenticated principal. Personal bindings carry the stored subject;
+    /// resource bindings carry the isolated external user, never the internal
+    /// `__resource__` marker.
+    identity_subject: String,
+    /// Subject the row-lock authority compares against. This is the stored
+    /// binding subject so resource bindings keep their internal marker while
+    /// the caller identity stays the real principal.
+    authority_subject: String,
+    /// Live write lease from the isolated scope, absent for personal bindings.
+    lease_owner: Option<String>,
+}
+
+/// Resolve the caller against the addressed binding.
+///
+/// Personal bindings keep the existing stored-subject equality. Resource
+/// bindings use the established scoped-identity precedent so the caller must
+/// present the isolated principal headers and a live write lease, and the
+/// resolved scope must name this exact binding. The application must own the
+/// binding in both cases; a foreign binding is not disclosed.
+async fn resolve_git_binding(
     state: &AppState,
     headers: &HeaderMap,
     binding_id: i64,
-) -> Result<crate::db::types::WorkspaceBindingResponse, AppError> {
-    let application_id = match resolve_binding_for_application(state, headers, binding_id).await {
-        Ok(application_id) => application_id,
-        Err(AppError::Forbidden(_)) => {
-            return Err(AppError::not_found("workspace binding not found"));
-        }
-        Err(error) => return Err(error),
-    };
+    require_write_scope: bool,
+) -> Result<GitBindingAuth, AppError> {
+    let application_id = application_actor(state, headers).await?;
     let binding = queries::find_workspace_binding_by_id(&state.db, binding_id)
         .await?
         .ok_or_else(|| AppError::not_found("workspace binding not found"))?;
     if binding.application_id != application_id {
         return Err(AppError::not_found("workspace binding not found"));
     }
-    if binding.external_user_id != request_subject(headers)? {
-        return Err(AppError::forbidden("workspace binding subject mismatch"));
-    }
-    Ok(binding)
-}
 
-async fn write_authority(
-    state: &AppState,
-    headers: &HeaderMap,
-    binding_id: i64,
-) -> Result<(i64, String), AppError> {
-    let application_id = resolve_binding_for_application(state, headers, binding_id).await?;
-    if !application_has_write_scope(state, headers).await? {
+    let identity_subject = request_subject(headers)?;
+    let lease_owner = if binding.resource_kind.is_some() {
+        let auth = application_scope_auth(state, headers).await?;
+        if auth.application_id != application_id
+            || auth.workspace_binding.workspace_binding_id != binding_id
+        {
+            return Err(AppError::forbidden(
+                "workspace scope is not authorized for this binding",
+            ));
+        }
+        check_write_lease(&binding, Some(&auth.lease_owner)).map_err(|_| {
+            AppError::forbidden("workspace write lease is missing, stale or held by another owner")
+        })?;
+        Some(auth.lease_owner)
+    } else {
+        if binding.external_user_id != identity_subject {
+            return Err(AppError::forbidden("workspace binding subject mismatch"));
+        }
+        None
+    };
+
+    if require_write_scope && !application_has_write_scope(state, headers).await? {
         return Err(AppError::forbidden(
             "Git upstream writes require workspace write scope",
         ));
     }
-    Ok((application_id, request_subject(headers)?))
+
+    Ok(GitBindingAuth {
+        authority_subject: binding.external_user_id.clone(),
+        binding,
+        identity_subject,
+        lease_owner,
+    })
+}
+
+/// Reconcile the request's `lease_owner` with the isolated scope lease.
+///
+/// A resource principal must name the same live lease in the body/query as the
+/// authenticated scope; a different value is refused rather than silently
+/// falling back to the scope. Personal bindings keep the existing request value
+/// because they need no write lease.
+fn effective_lease(auth: &GitBindingAuth, requested: Option<&str>) -> Result<String, AppError> {
+    match (auth.lease_owner.as_deref(), requested) {
+        (Some(lease), Some(requested)) if lease != requested => Err(AppError::forbidden(
+            "workspace write lease does not match the authenticated principal",
+        )),
+        (Some(lease), _) => Ok(lease.to_string()),
+        (None, requested) => Ok(requested.unwrap_or("").to_string()),
+    }
 }
 
 fn request_subject(headers: &HeaderMap) -> Result<String, AppError> {
