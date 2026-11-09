@@ -23,6 +23,7 @@ pub(super) mod runner_manager_service_relay;
 pub(super) mod runner_manager_task_exports;
 pub(super) mod runner_principal_admission;
 pub(super) mod shared;
+pub(super) mod workspace_git;
 pub(super) mod workspace_principal;
 
 pub(super) use application::application_capabilities;
@@ -99,6 +100,24 @@ pub(super) fn router() -> axum::Router<crate::AppState> {
             "/api/internal/workspace-bindings/{binding_id}/lease",
             axum::routing::post(acquire_workspace_binding_lease)
                 .delete(release_workspace_binding_lease),
+        )
+        .route(
+            "/api/internal/workspace-bindings/{binding_id}/git-gateway",
+            axum::routing::get(workspace_git::git_gateway_config),
+        )
+        .route(
+            "/api/internal/workspace-bindings/{binding_id}/git-capability",
+            axum::routing::post(workspace_git::issue_git_capability),
+        )
+        .route(
+            "/api/internal/workspace-bindings/{binding_id}/git-upstreams",
+            axum::routing::get(workspace_git::list_application_git_upstreams)
+                .post(workspace_git::create_application_git_upstream),
+        )
+        .route(
+            "/api/internal/workspace-bindings/{binding_id}/git-upstreams/{upstream_id}",
+            axum::routing::patch(workspace_git::update_application_git_upstream)
+                .delete(workspace_git::delete_application_git_upstream),
         )
         .route(
             "/api/internal/resource-workspaces/{resource_kind}/{resource_id}/lease",

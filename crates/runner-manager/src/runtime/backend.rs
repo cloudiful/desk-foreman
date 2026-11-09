@@ -10,6 +10,7 @@ use runner_protocol::{
     StartNativeTaskResult, StopExecutionEnvironmentAck, StopExecutionEnvironmentRequest,
     StopNativeTaskRequest, StopNativeTaskResult, StopWorkspacePrincipalAck,
     StopWorkspacePrincipalRequest,
+    workspace_git::{PrepareWorkspaceGitRequest, PrepareWorkspaceGitResult},
 };
 
 /// Exact identity of the one own service container that quiescence must
@@ -87,6 +88,17 @@ pub trait RunnerBackend: Send + Sync {
     ) -> RunnerFuture<'a, anyhow::Result<StopExecutionEnvironmentAck>> {
         Box::pin(async move {
             anyhow::bail!("execution environments are not supported by this runner backend")
+        })
+    }
+
+    /// Install automatic native Git authorization in the ordinary workspace
+    /// container, or clear it when no capability is supplied.
+    fn prepare_workspace_git<'a>(
+        &'a self,
+        _request: PrepareWorkspaceGitRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<PrepareWorkspaceGitResult>> {
+        Box::pin(async move {
+            anyhow::bail!("workspace Git preparation is not supported by this runner backend")
         })
     }
 

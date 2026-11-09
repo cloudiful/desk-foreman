@@ -8,6 +8,7 @@ use runner_protocol::{
     EnsureExecutionEnvironmentRequest, ExecRequest, InputRequest, RunnerCommandRequest,
     RunnerOwner, RunnerSessionStatus, ShellToolOutput, StopExecutionEnvironmentAck,
     StopExecutionEnvironmentRequest, StopWorkspacePrincipalAck, StopWorkspacePrincipalRequest,
+    workspace_git::{PrepareWorkspaceGitRequest, PrepareWorkspaceGitResult},
 };
 use tokio::sync::OwnedRwLockWriteGuard;
 
@@ -147,6 +148,21 @@ impl RunnerService for LocalRunnerService {
             let fence = self.fences.for_owner(&request.owner);
             let _guard = fence.read().await;
             self.shell.write_stdin(request).await
+        })
+    }
+
+    fn prepare_workspace_git<'a>(
+        &'a self,
+        request: PrepareWorkspaceGitRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<PrepareWorkspaceGitResult>> {
+        Box::pin(async move {
+            if !request.is_valid() {
+                anyhow::bail!("invalid workspace Git preparation request");
+            }
+            let _binding_guard = self.binding_read(&request.owner).await;
+            let fence = self.fences.for_owner(&request.owner);
+            let _guard = fence.read().await;
+            self.backend.prepare_workspace_git(request).await
         })
     }
 

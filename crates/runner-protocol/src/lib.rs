@@ -9,6 +9,7 @@ pub mod task_execution;
 pub mod task_export;
 pub mod task_preparation;
 pub mod task_seed;
+pub mod workspace_git;
 pub mod workspace_principal;
 
 pub use workspace_principal::{

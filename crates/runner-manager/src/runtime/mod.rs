@@ -24,6 +24,9 @@ pub(crate) mod trusted_image;
 pub(crate) mod workspace_binding_quiescence;
 #[cfg(test)]
 mod workspace_binding_quiescence_tests;
+pub(crate) mod workspace_git;
+#[cfg(test)]
+mod workspace_git_tests;
 pub(crate) mod workspace_service;
 
 pub(crate) use backend::RunnerOperationLease;
@@ -45,11 +48,23 @@ use tokio::{
 };
 
 pub async fn bounded_command_output(
+    command: Command,
+    timeout_ms: Option<u64>,
+    max_output_bytes: usize,
+) -> anyhow::Result<CommandOutput> {
+    bounded_command_output_with_stdin(command, None, timeout_ms, max_output_bytes).await
+}
+
+pub async fn bounded_command_output_with_stdin(
     mut command: Command,
+    stdin: Option<Vec<u8>>,
     timeout_ms: Option<u64>,
     max_output_bytes: usize,
 ) -> anyhow::Result<CommandOutput> {
     let started = Instant::now();
+    if stdin.is_some() {
+        command.stdin(std::process::Stdio::piped());
+    }
     let mut child = command.spawn()?;
     let mut stdout = child
         .stdout
@@ -59,10 +74,21 @@ pub async fn bounded_command_output(
         .stderr
         .take()
         .ok_or_else(|| anyhow::anyhow!("stderr not available"))?;
+    let mut child_stdin = child.stdin.take();
     let collect = async {
+        let write = async {
+            if let (Some(mut writer), Some(bytes)) = (child_stdin.take(), stdin) {
+                use tokio::io::AsyncWriteExt;
+                writer.write_all(&bytes).await?;
+                writer.shutdown().await?;
+            }
+            Ok::<_, std::io::Error>(())
+        };
         let stdout_read = read_limited(&mut stdout, max_output_bytes);
         let stderr_read = read_limited(&mut stderr, max_output_bytes);
-        let (stdout, stderr, status) = tokio::join!(stdout_read, stderr_read, child.wait());
+        let (write, stdout, stderr, status) =
+            tokio::join!(write, stdout_read, stderr_read, child.wait());
+        write?;
         Ok::<_, anyhow::Error>((stdout?, stderr?, status?))
     };
     let (stdout, stderr, status, timed_out) = if let Some(ms) = timeout_ms {

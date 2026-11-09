@@ -9,6 +9,7 @@ pub mod sessions;
 pub mod types;
 pub mod users;
 pub mod workspace_bindings;
+pub mod workspace_git_upstreams;
 pub mod workspace_runners;
 pub mod workspace_takeover;
 #[cfg(test)]

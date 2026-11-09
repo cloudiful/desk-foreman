@@ -14,6 +14,7 @@ use anyhow::bail;
 use desk_foreman::runner::{RunnerService, WorkspaceActivityRequest};
 use runner_protocol::{
     CancelSessionRequest, ExecRequest, InputRequest, RunnerCommandRequest, RunnerOwner,
+    workspace_git::PrepareWorkspaceGitRequest,
 };
 use serde_json::Value;
 
@@ -41,6 +42,15 @@ pub(super) async fn execute_job_inner(
             let limits = config.read().await.clone();
             apply_limits(&mut request, &limits)?;
             Ok(serde_json::to_value(runner.write_stdin(request).await?)?)
+        }
+        "prepare_workspace_git" => {
+            let request = serde_json::from_value::<PrepareWorkspaceGitRequest>(payload)?;
+            if !request.is_valid() {
+                bail!("invalid workspace Git preparation request");
+            }
+            Ok(serde_json::to_value(
+                runner.prepare_workspace_git(request).await?,
+            )?)
         }
         "cancel_session" => Ok(serde_json::to_value(
             runner

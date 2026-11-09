@@ -306,6 +306,29 @@ impl DockerRunnerBackend {
             .await
     }
 
+    pub(crate) async fn docker_output_owned_with_stdin(
+        &self,
+        args: Vec<String>,
+        stdin: Vec<u8>,
+        timeout_ms: Option<u64>,
+        max_output_bytes: Option<usize>,
+    ) -> anyhow::Result<CommandOutput> {
+        let config = self.config.read().await.clone();
+        let mut command = Command::new(&config.docker_cli);
+        command.args(args);
+        if let Some(host) = &config.docker_host {
+            command.env("DOCKER_HOST", host);
+        }
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        super::bounded_command_output_with_stdin(
+            command,
+            Some(stdin),
+            timeout_ms,
+            max_output_bytes.unwrap_or(256 * 1024),
+        )
+        .await
+    }
+
     async fn docker_output_vec(&self, args: Vec<String>) -> anyhow::Result<String> {
         let config = self.config.read().await.clone();
         let mut command = Command::new(&config.docker_cli);

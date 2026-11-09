@@ -156,6 +156,8 @@ pub(crate) fn fake_state(runner: Arc<FakeRunnerService>) -> AppState {
             bootstrap_admin_timezone: "UTC".to_string(),
             frontend_dist: PathBuf::from("/tmp/frontend"),
             build_started_at: SystemTime::now(),
+            upstream_credential_key: None,
+            git_gateway: Default::default(),
         }),
         runner,
         runner_broker: RunnerBroker::new(
