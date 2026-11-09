@@ -3,14 +3,19 @@ import {
   createApplicationToken,
   createMcpToken,
   createUser,
+  createWorkspaceGitUpstream,
   deleteApplicationToken,
   deleteMcpToken,
   deleteUser,
+  deleteWorkspaceGitUpstream,
+  disableWorkspaceGitUpstream,
+  enableWorkspaceGitUpstream,
   listApplicationTokens,
   listApplications,
   listMcpTokens,
   listUsers,
   listWorkspaceBindings,
+  listWorkspaceGitUpstreams,
   listAuditLogs,
   listRunnerSessions,
   listWorkspaceRunners,
@@ -25,6 +30,7 @@ import {
   createRunnerManager,
   updateRunnerManager,
   updateUser,
+  updateWorkspaceGitUpstream,
   type ApplicationResponse,
   type ApplicationTokenResponse,
   type CreateApplicationRequest,
@@ -40,6 +46,7 @@ import {
   type ListRunnerManagersData,
   type ListRunnerSessionsData,
   type ListWorkspaceBindingsData,
+  type ListWorkspaceGitUpstreamsData,
   type ListWorkspaceRunnersData,
   type McpTokenResponse,
   type PageApplicationResponse,
@@ -50,6 +57,7 @@ import {
   type PageRunnerSessionResponse,
   type PageUserResponse,
   type PageWorkspaceBindingResponse,
+  type PageWorkspaceGitUpstreamResponse,
   type PageWorkspaceRunnerResponse,
   type ResetPasswordRequest,
   type AuditLogResponse,
@@ -59,6 +67,9 @@ import {
   type UpdateApplicationRequest,
   type UserResponse,
   type WorkspaceBindingResponse,
+  type WorkspaceGitUpstreamResponse,
+  type CreateWorkspaceGitUpstreamRequest,
+  type UpdateWorkspaceGitUpstreamRequest,
   type ListAuditLogsData,
   type OperationsSummary,
   type UpdateApplicationTokenRequest,
@@ -288,6 +299,83 @@ export async function transitionAdminWorkspaceBinding(
     action === 'archive'
       ? i18n.global.t('workspaceBindings.errors.archive')
       : i18n.global.t('workspaceBindings.errors.restore')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
+  return data
+}
+
+export async function listAdminWorkspaceGitUpstreams(
+  binding_id: number,
+  query: ListWorkspaceGitUpstreamsData['query'] = {},
+): Promise<PageWorkspaceGitUpstreamResponse> {
+  const { data, response } = await listWorkspaceGitUpstreams({
+    path: { binding_id },
+    query,
+  })
+  await requireOk(response, i18n.global.t('workspaceBindings.errors.loadUpstreams'))
+  return (
+    data ??
+    emptyPage<WorkspaceGitUpstreamResponse>(
+      query.limit ?? 100,
+      query.offset ?? 0,
+    )
+  )
+}
+
+export async function createAdminWorkspaceGitUpstream(
+  binding_id: number,
+  body: CreateWorkspaceGitUpstreamRequest,
+): Promise<WorkspaceGitUpstreamResponse> {
+  const { data, response } = await createWorkspaceGitUpstream({
+    path: { binding_id },
+    body,
+  })
+  const fallback = i18n.global.t('workspaceBindings.errors.createUpstream')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
+  return data
+}
+
+export async function updateAdminWorkspaceGitUpstream(
+  binding_id: number,
+  upstream_id: number,
+  body: UpdateWorkspaceGitUpstreamRequest,
+): Promise<WorkspaceGitUpstreamResponse> {
+  const { data, response } = await updateWorkspaceGitUpstream({
+    path: { binding_id, upstream_id },
+    body,
+  })
+  const fallback = i18n.global.t('workspaceBindings.errors.updateUpstream')
+  await requireOk(response, fallback)
+  if (!data) throw new Error(fallback)
+  return data
+}
+
+export async function deleteAdminWorkspaceGitUpstream(
+  binding_id: number,
+  upstream_id: number,
+): Promise<void> {
+  const { response } = await deleteWorkspaceGitUpstream({
+    path: { binding_id, upstream_id },
+  })
+  await requireOk(
+    response,
+    i18n.global.t('workspaceBindings.errors.deleteUpstream'),
+  )
+}
+
+export async function setAdminWorkspaceGitUpstreamEnabled(
+  binding_id: number,
+  upstream_id: number,
+  enabled: boolean,
+): Promise<WorkspaceGitUpstreamResponse> {
+  const operation = enabled
+    ? enableWorkspaceGitUpstream
+    : disableWorkspaceGitUpstream
+  const { data, response } = await operation({
+    path: { binding_id, upstream_id },
+  })
+  const fallback = i18n.global.t('workspaceBindings.errors.toggleUpstream')
   await requireOk(response, fallback)
   if (!data) throw new Error(fallback)
   return data

@@ -6,7 +6,87 @@ use std::{
 
 use anyhow::{Context, bail};
 
-use crate::policy::{ALL_SCOPES, ResourceLimits};
+use crate::{
+    credential_cipher::UpstreamCredentialKey,
+    policy::{ALL_SCOPES, ResourceLimits},
+};
+
+/// Public native Git gateway settings (issue 1180 P28). An absent key or base
+/// URL leaves the gateway disabled: Shell still works, while `/git` and
+/// capability minting fail closed with a fixed 503.
+#[derive(Clone, Debug)]
+pub struct GitGatewayConfig {
+    pub public_base_url: Option<String>,
+    pub max_body_bytes: usize,
+    pub connect_timeout: Duration,
+    pub head_timeout: Duration,
+    pub stream_timeout: Duration,
+}
+
+impl Default for GitGatewayConfig {
+    fn default() -> Self {
+        Self {
+            public_base_url: None,
+            max_body_bytes: 256 * 1024 * 1024,
+            connect_timeout: Duration::from_secs(5),
+            head_timeout: Duration::from_secs(30),
+            stream_timeout: Duration::from_secs(300),
+        }
+    }
+}
+
+impl GitGatewayConfig {
+    pub fn enabled(&self) -> bool {
+        self.public_base_url.is_some()
+    }
+
+    fn from_env() -> anyhow::Result<Self> {
+        let public_base_url = env::var("DF_GIT_PUBLIC_BASE_URL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(|value| normalize_git_base_url(&value))
+            .transpose()?;
+        let max_body_bytes = match env::var("DF_GIT_GATEWAY_MAX_BODY_BYTES") {
+            Ok(value) => {
+                let parsed = value
+                    .parse::<usize>()
+                    .context("DF_GIT_GATEWAY_MAX_BODY_BYTES must be a positive integer")?;
+                if parsed == 0 || parsed > 1024 * 1024 * 1024 {
+                    bail!("DF_GIT_GATEWAY_MAX_BODY_BYTES must be between 1 and 1073741824");
+                }
+                parsed
+            }
+            Err(_) => 256 * 1024 * 1024,
+        };
+        Ok(Self {
+            public_base_url,
+            max_body_bytes,
+            ..Self::default()
+        })
+    }
+}
+
+fn normalize_git_base_url(raw: &str) -> anyhow::Result<String> {
+    let url = reqwest::Url::parse(raw).context("DF_GIT_PUBLIC_BASE_URL must be an absolute URL")?;
+    if !matches!(url.scheme(), "http" | "https") {
+        bail!("DF_GIT_PUBLIC_BASE_URL must use http or https");
+    }
+    if url.host_str().is_none() {
+        bail!("DF_GIT_PUBLIC_BASE_URL must include a host");
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        bail!("DF_GIT_PUBLIC_BASE_URL must not include user information");
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        bail!("DF_GIT_PUBLIC_BASE_URL must not include a query or fragment");
+    }
+    let mut normalized = url.to_string();
+    while normalized.ends_with('/') {
+        normalized.pop();
+    }
+    Ok(normalized)
+}
 
 #[derive(Clone)]
 pub struct AppConfig {
@@ -30,6 +110,8 @@ pub struct AppConfig {
     pub bootstrap_admin_timezone: String,
     pub frontend_dist: PathBuf,
     pub build_started_at: SystemTime,
+    pub upstream_credential_key: Option<UpstreamCredentialKey>,
+    pub git_gateway: GitGatewayConfig,
 }
 
 impl AppConfig {
@@ -111,6 +193,8 @@ impl AppConfig {
             env::var("FRONTEND_DIST").unwrap_or_else(|_| "frontend/dist".to_string());
 
         let frontend_dist = workspace_root.join(frontend_dist);
+        let upstream_credential_key = UpstreamCredentialKey::from_env()?;
+        let git_gateway = GitGatewayConfig::from_env()?;
 
         Ok(Self {
             bind_addr,
@@ -137,6 +221,8 @@ impl AppConfig {
             bootstrap_admin_timezone,
             frontend_dist,
             build_started_at: SystemTime::now(),
+            upstream_credential_key,
+            git_gateway,
         })
     }
 }

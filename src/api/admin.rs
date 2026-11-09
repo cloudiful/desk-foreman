@@ -6,6 +6,7 @@ pub(super) mod shared;
 pub(super) mod tokens;
 pub(super) mod users;
 pub(super) mod workspace_bindings;
+pub(crate) mod workspace_git_upstreams;
 
 pub use applications::{
     create_application, create_application_token, delete_application_token,
@@ -20,4 +21,8 @@ pub use users::{create_user, delete_user, list_users, reset_user_password, updat
 pub use workspace_bindings::{
     acquire_workspace_binding_lease, archive_workspace_binding, get_workspace_binding,
     list_workspace_bindings, release_workspace_binding_lease, restore_workspace_binding,
+};
+pub use workspace_git_upstreams::{
+    create_workspace_git_upstream, delete_workspace_git_upstream, disable_workspace_git_upstream,
+    enable_workspace_git_upstream, list_workspace_git_upstreams, update_workspace_git_upstream,
 };

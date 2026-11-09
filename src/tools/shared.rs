@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use chrono::Utc;
 use desk_foreman_workspace_sdk::{
     PatchCode, PatchDiagnostic, PatchOperation, PatchRejected, PatchResult, PatchStage,
     WorkspaceFileTools, WorkspaceSdkError, parse_patch, patch_path_is_protected,
@@ -20,6 +21,10 @@ pub use crate::tools::common::{
 use crate::{
     AppState,
     actor::ActorContext,
+    git_gateway::{
+        capability::{CapabilityAlias, CapabilityClaims, mint},
+        capability_expiry, gateway_enabled, remote_url, signing_key,
+    },
     tools::{
         common::{
             ToolError, ensure_scope, sha256_hex, spawn_tool_audit, tool_internal,
@@ -35,7 +40,10 @@ use crate::{
         },
     },
 };
-use runner_protocol::{CancelSessionRequest, ExecRequest, InputRequest, ShellToolOutput};
+use runner_protocol::{
+    CancelSessionRequest, ExecRequest, InputRequest, ShellToolOutput,
+    workspace_git::{GitCapabilitySecret, PrepareWorkspaceGitRequest, WorkspaceGitRemote},
+};
 
 const DEFAULT_SHELL_TIMEOUT_MS: u64 = 120_000;
 
@@ -48,6 +56,96 @@ pub struct CancelSessionOutput {
     pub exit_code: Option<i32>,
     pub timed_out: bool,
     pub wall_time_seconds: f64,
+}
+
+async fn prepare_workspace_git(state: &AppState, actor: &ActorContext) {
+    let Some(binding) = actor.workspace_binding.as_ref() else {
+        return;
+    };
+    let (capability, upstreams, expires_at) = match build_workspace_git(state, actor, binding).await
+    {
+        Ok(Some(prepared)) => prepared,
+        Ok(None) => (None, Vec::new(), 0),
+        Err(message) => {
+            tracing::warn!("{message}; clearing native Git authorization for this dispatch");
+            (None, Vec::new(), 0)
+        }
+    };
+    let request = PrepareWorkspaceGitRequest {
+        owner: actor.runner_owner(),
+        workspace_root: actor.workspace_root.clone(),
+        network_enabled: actor.policy.limits.network_enabled,
+        binding_id: binding.workspace_binding_id,
+        capability,
+        expires_at,
+        upstreams,
+    };
+    if request.is_valid() && state.runner.prepare_workspace_git(request).await.is_err() {
+        tracing::warn!(
+            "workspace Git preparation failed; native Git stays disabled for this dispatch"
+        );
+    }
+}
+
+type PreparedWorkspaceGit = (Option<GitCapabilitySecret>, Vec<WorkspaceGitRemote>, i64);
+
+async fn build_workspace_git(
+    state: &AppState,
+    actor: &ActorContext,
+    binding: &crate::db::types::WorkspaceBindingResponse,
+) -> Result<Option<PreparedWorkspaceGit>, &'static str> {
+    if !gateway_enabled(&state.config) {
+        return Ok(None);
+    }
+    let Some(key) = signing_key(&state.config) else {
+        return Ok(None);
+    };
+    let aliases = crate::db::queries::list_gateway_aliases(&state.db, binding.workspace_binding_id)
+        .await
+        .map_err(|_| "workspace Git alias lookup failed")?;
+    let now = Utc::now();
+    let expiry = capability_expiry(binding, now);
+    let claims = CapabilityClaims {
+        v: 1,
+        app_id: binding.application_id,
+        binding_id: binding.workspace_binding_id,
+        external_user_id: actor.external_user_id.clone().unwrap_or_default(),
+        principal_id: actor.principal_id.clone(),
+        lease_owner: actor.lease_owner.clone().unwrap_or_default(),
+        read: true,
+        write: actor.ensure_write_access().is_ok(),
+        aliases: aliases
+            .iter()
+            .map(|alias| CapabilityAlias {
+                remote_alias: alias.remote_alias.clone(),
+                upstream_id: alias.upstream_id,
+                generation: alias.capability_generation,
+            })
+            .collect(),
+        iat: now.timestamp(),
+        exp: expiry.timestamp(),
+    };
+    let token = mint(&key, &claims).map_err(|_| "workspace Git capability mint failed")?;
+    let urls = aliases
+        .iter()
+        .map(|alias| {
+            remote_url(
+                &state.config,
+                binding.workspace_binding_id,
+                &alias.remote_alias,
+            )
+            .map(|url| WorkspaceGitRemote {
+                remote_alias: alias.remote_alias.clone(),
+                url,
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or("workspace Git gateway base URL is unavailable")?;
+    Ok(Some((
+        Some(GitCapabilitySecret::new(token)),
+        urls,
+        expiry.timestamp(),
+    )))
 }
 
 fn workspace_tools(actor: &ActorContext) -> Result<WorkspaceFileTools, ToolError> {
@@ -88,6 +186,7 @@ pub async fn shell(
     // Admit under the row lock immediately before dispatch and hold the
     // fence across it, so a concurrent takeover cannot commit in between.
     let fence = admit_workspace_write(state, actor).await?;
+    prepare_workspace_git(state, actor).await;
     let output = state
         .runner
         .exec_shell(ExecRequest {
@@ -148,6 +247,9 @@ pub async fn write_stdin(
     } else {
         FencedWrite { tx: None }
     };
+    if needs_fence {
+        prepare_workspace_git(state, actor).await;
+    }
     let output = state
         .runner
         .write_stdin(InputRequest {

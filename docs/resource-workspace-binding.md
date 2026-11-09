@@ -46,7 +46,7 @@ Authenticated application resource requests can select isolated execution with `
 
 ## Workspace reads
 
-Direct file reads stay available without a write lease. A read that runs inside a runner container (`glob`, `grep`) locks the binding row before dispatch: the locked row must still match the binding and application, keep the same workspace root, and remain active and unarchived. A missing, archived, resetting, or otherwise guarded binding — including an active native task or scoped session — refuses the search with `workspace is not available for reads`. Read-only search never acquires a write lease, and the lock is held through the runner dispatch, including the first Running acknowledgement.
+Direct file reads stay available without a write lease. A read that runs inside a runner container (`glob`, `grep`) locks the binding row before dispatch: the locked row must still match the binding and application, keep the same workspace root, and remain active and unarchived. A missing, archived, resetting, or otherwise guarded binding — including an active native task, scoped session — refuses the search with `workspace is not available for reads`. Read-only search never acquires a write lease, and the lock is held through the runner dispatch, including the first Running acknowledgement.
 
 ## Runner container workspace mount
 
@@ -59,6 +59,84 @@ Reuse and start of an existing ordinary-owner container require its inspected mo
 `GET /api/internal/principal-workspace-capabilities` requires an application bearer and returns `protocol_version: 1`; it describes the server protocol, not runner availability.
 
 `POST /api/internal/resource-workspaces/{resource_kind}/{resource_id}/workspace-sessions/stop` requires the application bearer, `workspace.shell` scope, `X-DF-Runner-Isolation: principal`, and matching external-user, workspace-key and lease-owner headers. Its JSON body is `{ "expected_lease_owner": "..." }`, matching the external-user and lease-owner headers. A successful response confirms that principal stopped and reports whether its lease was released. A different or absent current lease is not changed. An unconfirmed stop returns a retryable error; the permanent principal fence may persist even when the lease is retained. Start a new lifecycle with a fresh identity.
+
+## Workspace Git upstreams
+
+Admins manage authoritative upstream metadata per workspace binding through
+`GET|POST /api/admin/workspace-bindings/{binding_id}/git-upstreams`,
+`PATCH|DELETE …/{upstream_id}`, and `POST …/{upstream_id}/enable|disable`.
+`remote_alias` is a strict ASCII identifier (up to 64 characters, starting with
+a letter or digit). `target_url` is an absolute `http` or `https` Smart HTTP URL
+with a host and no user information, query string, fragment or control
+characters. Listing works for archived bindings; every mutation requires an
+active binding and returns `409` otherwise. Unknown or cross-binding upstream
+ids return `404`, and a duplicate alias for the same binding returns `409`.
+
+Credentials are write-only: responses expose only `has_credential`, never the
+username, plaintext secret or ciphertext. Set `DF_UPSTREAM_CREDENTIAL_KEY` to 64
+hex characters to enable encrypted credential writes. When it is unset or empty,
+public upstream metadata still works but credential writes fail with `503`.
+Losing or rotating the key makes existing credentials undecryptable, so re-enter
+them after rotation. `enabled` is metadata only: it does not assert network
+reachability and does not make a Git push succeed by itself.
+
+## Native Git gateway
+
+When both `DF_UPSTREAM_CREDENTIAL_KEY` and `DF_GIT_PUBLIC_BASE_URL` are set, the
+stored upstream aliases become normal native Git remotes inside the ordinary
+workspace container. `GET /git/{binding_id}/{remote_alias}/info/refs` accepts
+exactly one `service=git-upload-pack|git-receive-pack` query, and
+`POST /git/{binding_id}/{remote_alias}/git-upload-pack|git-receive-pack` proxies
+the pack stream. The target comes only from the stored admin URL; callers cannot
+choose a host, path prefix, query beyond the service discriminator, or upstream
+URL.
+
+The runner authenticates with Basic username `df-git` and a short-lived signed
+capability scoped to the workspace binding and alias generation. Upstream
+credentials are decrypted only inside the gateway request and are never placed
+in the runner, its argv, `.git/config`, or the workspace. Client cookies,
+authorization, proxy and forwarding headers are stripped; redirects, upstream
+error bodies, `Location`, `Set-Cookie` and `WWW-Authenticate` are never
+forwarded. Request and response packs are streamed with a configurable 256 MiB
+default cap (`DF_GIT_GATEWAY_MAX_BODY_BYTES`, maximum 1 GiB) and connect,
+response-header and total-stream deadlines.
+
+Each shell or `write_stdin` dispatch mints a fresh capability and writes it to a
+small `noexec` tmpfs credential file. The manager configures only the enabled
+DF aliases as remotes and never removes unrelated user remotes. Disable, delete,
+alias/target change, credential replacement or a generation change invalidates
+older capabilities on their next request. When the key or base URL is absent the
+gateway returns a fixed `503`, native Git stays unavailable, and normal Shell
+tools continue to work. `enabled` remains metadata; a successful request still
+depends on the stored target being reachable by the runner.
+
+## Internal application upstream management
+
+An application bearer can manage its own binding's upstream metadata without an
+admin browser session:
+
+- `GET /api/internal/workspace-bindings/{binding_id}/git-upstreams`
+- `POST /api/internal/workspace-bindings/{binding_id}/git-upstreams`
+- `PATCH /api/internal/workspace-bindings/{binding_id}/git-upstreams/{upstream_id}`
+- `DELETE /api/internal/workspace-bindings/{binding_id}/git-upstreams/{upstream_id}?lease_owner=...`
+
+Reads use the application actor and resolve the binding for the exact
+application and external-user subject; a missing or foreign binding is `404`.
+Writes require the same ownership, an existing workspace write scope and the
+current write lease named by `lease_owner` in the JSON body (or the delete query).
+The binding row is locked before that authority is validated and the row is
+changed in the same transaction, so a lease handover racing the request cannot
+pass a snapshot check. A personal binding follows the existing personal write
+policy; a resource binding requires the live unexpired lease.
+
+Create and update use the same validated alias, URL and write-only credential
+DTOs as the admin API. Credentials are encrypted with `DF_UPSTREAM_CREDENTIAL_KEY`
+and are never returned; responses expose `has_credential`, the alias, target
+URL, `enabled` and `capability_generation`. Every successful mutation bumps the
+generation, so older capabilities for that alias stop working. Duplicate alias,
+inactive binding and stale lease return `409`; a missing credential key returns
+`503`; a foreign application or subject returns `403`; a cross-binding upstream
+id returns `404`.
 
 ## Ownership boundary
 

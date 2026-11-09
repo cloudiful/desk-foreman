@@ -9,6 +9,7 @@ use runner_protocol::{
     StopExecutionEnvironmentRequest, StopNativeTaskRequest, StopNativeTaskResult,
     StopWorkspacePrincipalAck, StopWorkspacePrincipalRequest, StopWorkspacePrincipalState,
     execution_environment as protocol,
+    workspace_git::{PrepareWorkspaceGitRequest, PrepareWorkspaceGitResult},
 };
 use std::path::Path;
 
@@ -90,6 +91,13 @@ impl RunnerBackend for DockerRunnerBackend {
                 cwd: None,
             })
         })
+    }
+
+    fn prepare_workspace_git<'a>(
+        &'a self,
+        request: PrepareWorkspaceGitRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<PrepareWorkspaceGitResult>> {
+        Box::pin(async move { self.install_workspace_git(request).await })
     }
 
     fn prepare_native_task<'a>(
@@ -302,6 +310,11 @@ impl DockerRunnerBackend {
                     workspace_root.display()
                 )
             })?;
+        let (workspace_uid, workspace_gid) = user_spec
+            .split_once(':')
+            .ok_or_else(|| anyhow::anyhow!("workspace owner spec is invalid"))?;
+        let workspace_uid = workspace_uid.to_string();
+        let workspace_gid = workspace_gid.to_string();
         let mut args = vec![
             "run".to_string(),
             "-d".to_string(),
@@ -327,6 +340,10 @@ impl DockerRunnerBackend {
         args.extend([
             "-e".to_string(),
             format!("WORKSPACE_ROOT={}", config.workdir),
+            "-e".to_string(),
+            format!("GIT_ASKPASS={}", super::workspace_git::GIT_ASKPASS),
+            "-e".to_string(),
+            "GIT_TERMINAL_PROMPT=0".to_string(),
             "-v".to_string(),
             format!("{}:{}", host_workspace_root.display(), config.workdir),
             "-w".to_string(),
@@ -334,6 +351,10 @@ impl DockerRunnerBackend {
             "--read-only".to_string(),
             "--tmpfs".to_string(),
             "/tmp:rw,nosuid,size=256m".to_string(),
+            "--tmpfs".to_string(),
+            format!(
+                "/run/df-git:rw,nosuid,nodev,noexec,size=64k,mode=0700,uid={workspace_uid},gid={workspace_gid}"
+            ),
             "--cap-drop".to_string(),
             "ALL".to_string(),
             "--security-opt".to_string(),
@@ -358,6 +379,184 @@ impl DockerRunnerBackend {
         args.push("infinity".to_string());
         let output = self.docker_output_owned(args, None, None).await?;
         super::docker_command::ensure_docker_command_succeeded("create runner container", &output)
+    }
+
+    pub(super) async fn install_workspace_git(
+        &self,
+        request: PrepareWorkspaceGitRequest,
+    ) -> anyhow::Result<PrepareWorkspaceGitResult> {
+        if !request.is_valid() {
+            anyhow::bail!("invalid workspace Git preparation request");
+        }
+        let container_name = self
+            .ensure_runner(
+                &request.owner,
+                &request.workspace_root,
+                request.network_enabled,
+            )
+            .await?;
+        let config = self.config.read().await.clone();
+        let workdir =
+            Self::container_workdir(&config, &request.workspace_root, &request.workspace_root)?;
+        self.clear_workspace_git_files(&container_name).await?;
+        let Some(capability) = request.capability else {
+            return Ok(PrepareWorkspaceGitResult {
+                prepared: false,
+                remotes: 0,
+            });
+        };
+
+        self.write_workspace_git_file(
+            &container_name,
+            super::workspace_git::CAPABILITY_PATH,
+            capability.expose().as_bytes(),
+        )
+        .await?;
+        self.write_workspace_git_file(
+            &container_name,
+            super::workspace_git::ASKPASS_PATH,
+            super::workspace_git::askpass_script().as_bytes(),
+        )
+        .await?;
+        self.write_workspace_git_file(
+            &container_name,
+            super::workspace_git::CREDENTIAL_HELPER_PATH,
+            super::workspace_git::credential_helper_script().as_bytes(),
+        )
+        .await?;
+
+        if !self.is_git_repository(&container_name, &workdir).await? {
+            return Ok(PrepareWorkspaceGitResult {
+                prepared: true,
+                remotes: 0,
+            });
+        }
+
+        self.git_config(
+            &container_name,
+            &workdir,
+            "credential.helper",
+            super::workspace_git::CREDENTIAL_HELPER,
+        )
+        .await?;
+        self.git_config(&container_name, &workdir, "credential.interactive", "false")
+            .await?;
+
+        let mut remotes = 0u32;
+        for upstream in &request.upstreams {
+            if !super::workspace_git::valid_alias(&upstream.remote_alias)
+                || !super::workspace_git::valid_remote_url(&upstream.url)
+            {
+                anyhow::bail!("invalid workspace Git upstream metadata");
+            }
+            let args = super::workspace_git::remote_config_args(
+                &workdir,
+                &upstream.remote_alias,
+                &upstream.url,
+            );
+            self.run_container_git(&container_name, &args).await?;
+            remotes = remotes.saturating_add(1);
+        }
+        Ok(PrepareWorkspaceGitResult {
+            prepared: true,
+            remotes,
+        })
+    }
+
+    async fn clear_workspace_git_files(&self, container_name: &str) -> anyhow::Result<()> {
+        let args = vec![
+            "exec".to_string(),
+            container_name.to_string(),
+            "sh".to_string(),
+            "-c".to_string(),
+            "rm -f -- \"$@\"".to_string(),
+            "sh".to_string(),
+            super::workspace_git::CAPABILITY_PATH.to_string(),
+            super::workspace_git::ASKPASS_PATH.to_string(),
+            super::workspace_git::CREDENTIAL_HELPER_PATH.to_string(),
+        ];
+        let output = self
+            .docker_output_owned(args, Some(15_000), Some(64 * 1024))
+            .await?;
+        if output.exit_code != Some(0) {
+            anyhow::bail!("failed to clear workspace Git credential files");
+        }
+        Ok(())
+    }
+
+    async fn write_workspace_git_file(
+        &self,
+        container_name: &str,
+        path: &str,
+        content: &[u8],
+    ) -> anyhow::Result<()> {
+        let args = vec![
+            "exec".to_string(),
+            "-i".to_string(),
+            container_name.to_string(),
+            "sh".to_string(),
+            "-c".to_string(),
+            "umask 077; cat > \"$1\"".to_string(),
+            "sh".to_string(),
+            path.to_string(),
+        ];
+        let output = self
+            .docker_output_owned_with_stdin(args, content.to_vec(), Some(15_000), Some(64 * 1024))
+            .await?;
+        if output.exit_code != Some(0) {
+            anyhow::bail!("failed to install workspace Git credential file");
+        }
+        Ok(())
+    }
+
+    async fn is_git_repository(&self, container_name: &str, workdir: &str) -> anyhow::Result<bool> {
+        let args = vec![
+            "exec".to_string(),
+            "-w".to_string(),
+            workdir.to_string(),
+            container_name.to_string(),
+            "git".to_string(),
+            "rev-parse".to_string(),
+            "--git-dir".to_string(),
+        ];
+        let output = self
+            .docker_output_owned(args, Some(15_000), Some(64 * 1024))
+            .await?;
+        Ok(output.exit_code == Some(0))
+    }
+
+    async fn git_config(
+        &self,
+        container_name: &str,
+        workdir: &str,
+        key: &str,
+        value: &str,
+    ) -> anyhow::Result<()> {
+        let args = vec![
+            "-C".to_string(),
+            workdir.to_string(),
+            "config".to_string(),
+            "--local".to_string(),
+            key.to_string(),
+            value.to_string(),
+        ];
+        self.run_container_git(container_name, &args).await
+    }
+
+    async fn run_container_git(&self, container_name: &str, args: &[String]) -> anyhow::Result<()> {
+        let mut docker_args = vec![
+            "exec".to_string(),
+            container_name.to_string(),
+            "git".to_string(),
+        ];
+        docker_args.extend(args.iter().cloned());
+        let output = self
+            .docker_output_owned(docker_args, Some(15_000), Some(64 * 1024))
+            .await?;
+        if output.exit_code != Some(0) {
+            anyhow::bail!("workspace Git configuration command failed");
+        }
+        Ok(())
     }
 
     /// Run one filesystem-only preparation under the shared environment fence.

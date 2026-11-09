@@ -6,6 +6,7 @@ import {
   transitionAdminWorkspaceBinding,
 } from '../api/users'
 import { useNotify } from '../composables/useNotify'
+import WorkspaceGitUpstreamsDrawer from '../components/WorkspaceGitUpstreamsDrawer.vue'
 import { formatDateTime } from '../utils/format'
 import { pageCount, pageOffset } from '../utils/pagination'
 import type {
@@ -42,6 +43,8 @@ const actionTarget = ref<{
   action: BindingAction
 } | null>(null)
 const acting = ref(false)
+const upstreamsOpen = ref(false)
+const upstreamsBinding = ref<WorkspaceBindingResponse | null>(null)
 let loadSequence = 0
 
 const totalPages = computed(() => pageCount(total.value, BINDING_PAGE_SIZE))
@@ -93,6 +96,11 @@ function confirmAction(
   action: BindingAction,
 ): void {
   actionTarget.value = { binding, action }
+}
+
+function openUpstreams(binding: WorkspaceBindingResponse): void {
+  upstreamsBinding.value = binding
+  upstreamsOpen.value = true
 }
 
 function actionLabel(action: BindingAction): string {
@@ -302,6 +310,16 @@ onMounted(() => void load())
         <template #cell-actions="{ row }">
           <div class="flex justify-end gap-1">
             <UButton
+              icon="i-lucide-git-branch"
+              variant="ghost"
+              color="neutral"
+              size="sm"
+              :aria-label="t('workspaceBindings.upstreams.actions.open')"
+              @click="
+                openUpstreams(row as unknown as WorkspaceBindingResponse)
+              "
+            />
+            <UButton
               v-if="row.lifecycle_state === 'active'"
               icon="i-lucide-archive"
               variant="ghost"
@@ -348,6 +366,11 @@ onMounted(() => void load())
         />
       </div>
     </section>
+
+    <WorkspaceGitUpstreamsDrawer
+      v-model:open="upstreamsOpen"
+      :binding="upstreamsBinding"
+    />
 
     <ConfirmModal
       v-model:open="actionModalOpen"

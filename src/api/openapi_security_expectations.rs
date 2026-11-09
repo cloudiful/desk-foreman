@@ -4,7 +4,7 @@
 //! Split from `openapi_security_tests.rs` so no file exceeds the size budget:
 //! the flat `(path, method, operation id)` table is data, not logic.
 
-pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 32] = [
+pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 38] = [
     (
         "/api/internal/principal-workspace-capabilities",
         "get",
@@ -172,5 +172,35 @@ pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 32] = [
         "/api/internal/application/capabilities",
         "get",
         "application_capabilities",
+    ),
+    (
+        "/api/internal/workspace-bindings/{binding_id}/git-gateway",
+        "get",
+        "git_gateway_config",
+    ),
+    (
+        "/api/internal/workspace-bindings/{binding_id}/git-capability",
+        "post",
+        "issue_git_capability",
+    ),
+    (
+        "/api/internal/workspace-bindings/{binding_id}/git-upstreams",
+        "get",
+        "list_application_git_upstreams",
+    ),
+    (
+        "/api/internal/workspace-bindings/{binding_id}/git-upstreams",
+        "post",
+        "create_application_git_upstream",
+    ),
+    (
+        "/api/internal/workspace-bindings/{binding_id}/git-upstreams/{upstream_id}",
+        "patch",
+        "update_application_git_upstream",
+    ),
+    (
+        "/api/internal/workspace-bindings/{binding_id}/git-upstreams/{upstream_id}",
+        "delete",
+        "delete_application_git_upstream",
     ),
 ];

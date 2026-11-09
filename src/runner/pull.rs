@@ -13,6 +13,7 @@ use runner_protocol::{
     RUNNER_JOB_TIMEOUT_SECS, RUNNER_MANAGER_HEARTBEAT_TTL_SECS, RunnerCommandRequest, RunnerJob,
     RunnerJobResult, RunnerOwner, RunnerSessionStatus, ShellToolOutput, StopWorkspacePrincipalAck,
     StopWorkspacePrincipalRequest,
+    workspace_git::{PrepareWorkspaceGitRequest, PrepareWorkspaceGitResult},
 };
 
 use crate::{
@@ -327,6 +328,13 @@ impl RunnerService for PullRunnerService {
         request: InputRequest,
     ) -> RunnerFuture<'a, anyhow::Result<ShellToolOutput>> {
         Box::pin(async move { self.broker.submit("write_stdin", &request).await })
+    }
+
+    fn prepare_workspace_git<'a>(
+        &'a self,
+        request: PrepareWorkspaceGitRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<PrepareWorkspaceGitResult>> {
+        Box::pin(async move { self.broker.submit("prepare_workspace_git", &request).await })
     }
 
     fn cancel_session<'a>(

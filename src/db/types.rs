@@ -320,6 +320,33 @@ pub struct WorkspaceBindingResponse {
     pub write_lease_expires_at: Option<DateTime<Utc>>,
 }
 
+/// Safe, non-secret view of one workspace Git upstream. Credential material is
+/// reduced to `has_credential`; the username, ciphertext and target secret are
+/// never part of an API response.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, FromRow)]
+pub struct WorkspaceGitUpstreamResponse {
+    pub upstream_id: i64,
+    pub workspace_binding_id: i64,
+    pub remote_alias: String,
+    pub target_url: String,
+    pub enabled: bool,
+    pub has_credential: bool,
+    pub capability_generation: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, IntoParams, Validate)]
+#[into_params(parameter_in = Query)]
+pub struct ListWorkspaceGitUpstreamsParams {
+    #[param(minimum = 1, maximum = 200)]
+    #[validate(range(min = 1, max = 200))]
+    pub limit: Option<i64>,
+    #[param(minimum = 0)]
+    #[validate(range(min = 0))]
+    pub offset: Option<i64>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, Validate)]
 pub struct WorkspaceLeaseRequest {
     #[validate(custom(function = "validate_non_blank"))]

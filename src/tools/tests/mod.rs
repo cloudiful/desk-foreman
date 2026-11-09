@@ -253,6 +253,8 @@ fn app_state_with_runner(root: PathBuf, runner: Arc<dyn RunnerService>) -> AppSt
             bootstrap_admin_timezone: "UTC".to_string(),
             frontend_dist: root.join("frontend/dist"),
             build_started_at: SystemTime::now(),
+            upstream_credential_key: None,
+            git_gateway: Default::default(),
         }),
         runner,
         runner_broker: crate::runner::RunnerBroker::new(

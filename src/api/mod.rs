@@ -1,5 +1,6 @@
 mod admin;
 mod authn;
+mod git_gateway;
 mod internal;
 mod openapi;
 mod tools;
@@ -14,6 +15,7 @@ use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .merge(git_gateway::router())
         .route("/api/auth/login", post(authn::login))
         .route("/api/auth/logout", post(authn::logout))
         .route("/api/auth/me", get(authn::me))
@@ -71,6 +73,23 @@ pub fn router() -> Router<AppState> {
             "/api/admin/workspace-bindings/{binding_id}/lease",
             post(admin::acquire_workspace_binding_lease)
                 .delete(admin::release_workspace_binding_lease),
+        )
+        .route(
+            "/api/admin/workspace-bindings/{binding_id}/git-upstreams",
+            get(admin::list_workspace_git_upstreams).post(admin::create_workspace_git_upstream),
+        )
+        .route(
+            "/api/admin/workspace-bindings/{binding_id}/git-upstreams/{upstream_id}",
+            patch(admin::update_workspace_git_upstream)
+                .delete(admin::delete_workspace_git_upstream),
+        )
+        .route(
+            "/api/admin/workspace-bindings/{binding_id}/git-upstreams/{upstream_id}/enable",
+            post(admin::enable_workspace_git_upstream),
+        )
+        .route(
+            "/api/admin/workspace-bindings/{binding_id}/git-upstreams/{upstream_id}/disable",
+            post(admin::disable_workspace_git_upstream),
         )
         .route(
             "/api/admin/users/{user_id}/reset-password",

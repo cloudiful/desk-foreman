@@ -41,7 +41,7 @@
 
 ## 工作区读取
 
-直接文件读取无需写租约即可使用。在运行器容器内执行的读取（`glob`、`grep`）会在派发前锁定绑定行：锁定行必须仍匹配该绑定与应用、保持相同的工作区根目录，并且处于活跃且未归档状态。绑定缺失、已归档、重置中或受到其他保护（包括活跃的原生任务或作用域会话）时，搜索会以 `workspace is not available for reads` 拒绝。只读搜索从不获取写租约，锁会一直持有到运行器派发完成，包括首次 Running 确认。
+直接文件读取无需写租约即可使用。在运行器容器内执行的读取（`glob`、`grep`）会在派发前锁定绑定行：锁定行必须仍匹配该绑定与应用、保持相同的工作区根目录，并且处于活跃且未归档状态。绑定缺失、已归档、重置中或受到其他保护（包括活跃的原生任务、作用域会话）时，搜索会以 `workspace is not available for reads` 拒绝。只读搜索从不获取写租约，锁会一直持有到运行器派发完成，包括首次 Running 确认。
 
 ## 运行器容器工作区挂载
 
@@ -54,6 +54,66 @@
 `GET /api/internal/principal-workspace-capabilities` 需要应用 Bearer 凭据，返回 `protocol_version: 1`；该版本描述服务器协议，不代表运行器可用。
 
 `POST /api/internal/resource-workspaces/{resource_kind}/{resource_id}/workspace-sessions/stop` 需要应用 Bearer 凭据、`workspace.shell` 权限、`X-DF-Runner-Isolation: principal` 和匹配的外部用户、工作区键及租约所有者请求头。JSON 请求体为 `{ "expected_lease_owner": "..." }`，其值须与外部用户及租约所有者相同。成功响应确认该主体已停止，并指明是否释放了租约；其他所有者或空租约不会被修改。停止未确认时返回可重试错误，租约保留但永久主体围栏可能已生效。新的生命周期需要新身份。
+
+## 工作区 Git 上游
+
+管理员通过
+`GET|POST /api/admin/workspace-bindings/{binding_id}/git-upstreams`、
+`PATCH|DELETE …/{upstream_id}` 以及 `POST …/{upstream_id}/enable|disable`
+按工作区绑定管理权威上游元数据。`remote_alias` 是严格的 ASCII 标识符（最多
+64 个字符，以字母或数字开头）。`target_url` 是带主机、不含用户信息、查询串、
+片段或控制字符的绝对 `http` 或 `https` Smart HTTP URL。已归档绑定仍可列出；
+所有变更都要求绑定处于活跃状态，否则返回 `409`。未知或属于其他绑定的上游 id
+返回 `404`，同一绑定内重复别名返回 `409`。
+
+凭据只写：响应仅暴露 `has_credential`，绝不返回用户名、明文密钥或密文。将
+`DF_UPSTREAM_CREDENTIAL_KEY` 设置为 64 个十六进制字符即可启用加密凭据写入。
+未设置或为空时，公开上游元数据仍可使用，但凭据写入返回 `503`。丢失或轮换密钥
+会使已有凭据无法解密，轮换后需重新录入。`enabled` 只是元数据：它不代表网络
+可达，也不保证 Git 推送本身能够成功。
+
+## 原生 Git 网关
+
+同时设置 `DF_UPSTREAM_CREDENTIAL_KEY` 与 `DF_GIT_PUBLIC_BASE_URL` 后，已保存的
+上游别名会成为普通工作区容器中的原生 Git 远端。
+`GET /git/{binding_id}/{remote_alias}/info/refs` 只接受一个
+`service=git-upload-pack|git-receive-pack` 查询；
+`POST /git/{binding_id}/{remote_alias}/git-upload-pack|git-receive-pack` 负责代理
+pack 流。目标只来自管理员保存的 URL，调用方不能选择主机、路径前缀、额外查询或
+上游 URL。
+
+Runner 使用 Basic 用户名 `df-git` 和短期签名能力令牌，令牌限定到工作区绑定及
+别名代次。上游凭据只在网关请求内解密，绝不进入 runner、argv、`.git/config` 或
+工作区。客户端 Cookie、Authorization、代理和转发头都会被清除；重定向、上游错误
+体、`Location`、`Set-Cookie` 与 `WWW-Authenticate` 也不会转发。请求与响应 pack
+均流式处理，默认上限 256 MiB（`DF_GIT_GATEWAY_MAX_BODY_BYTES`，最大 1 GiB），并
+带有连接、响应头和总流时限。
+
+每次 shell 或 `write_stdin` 派发都会重新签发能力令牌，并写入 `noexec` 的小型
+tmpfs 凭据文件。Manager 只配置已启用的 DF 别名，绝不会删除用户无关的远端。禁用、
+删除、别名/目标变更、凭据替换或代次变化都会使旧令牌在下一次请求时失效。密钥或
+基础 URL 缺失时网关固定返回 `503`，原生 Git 不可用，但普通 Shell 工具仍可工作。
+`enabled` 仍然只是元数据；请求成功仍取决于 runner 是否可达已保存的目标。
+
+## 应用内部的上游管理
+
+应用 Bearer 凭据无需管理员浏览器会话即可管理自身绑定的上游元数据：
+
+- `GET /api/internal/workspace-bindings/{binding_id}/git-upstreams`
+- `POST /api/internal/workspace-bindings/{binding_id}/git-upstreams`
+- `PATCH /api/internal/workspace-bindings/{binding_id}/git-upstreams/{upstream_id}`
+- `DELETE /api/internal/workspace-bindings/{binding_id}/git-upstreams/{upstream_id}?lease_owner=...`
+
+读取使用应用主体并解析精确应用与外部用户主体的绑定；绑定不存在或属于其他应用时返回 `404`。
+写入还要求现有工作区写权限，以及 JSON 请求体（删除时为查询参数）`lease_owner` 指定的当前写租约。
+绑定行会在校验该权限之前加锁，并在同一事务内完成修改，因此与请求竞争的租约交接无法通过快照校验。
+个人绑定沿用现有个人写策略；资源绑定必须持有未过期的当前租约。
+
+创建与更新复用管理员 API 相同的别名、URL 与只写凭据校验类型。凭据使用
+`DF_UPSTREAM_CREDENTIAL_KEY` 加密且绝不返回；响应只包含 `has_credential`、别名、目标 URL、
+`enabled` 与 `capability_generation`。每次成功修改都会递增代次，旧能力令牌随即失效。
+重复别名、非活动绑定与过期租约返回 `409`；缺少凭据密钥返回 `503`；其他应用或主体返回 `403`；
+跨绑定上游 id 返回 `404`。
 
 ## 归属边界
 

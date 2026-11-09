@@ -4,6 +4,7 @@ use runner_protocol::{
     EnsureExecutionEnvironmentRequest, ExecRequest, InputRequest, RunnerCommandRequest,
     RunnerOwner, RunnerSessionStatus, ShellToolOutput, StopExecutionEnvironmentAck,
     StopExecutionEnvironmentRequest, StopWorkspacePrincipalAck, StopWorkspacePrincipalRequest,
+    workspace_git::{PrepareWorkspaceGitRequest, PrepareWorkspaceGitResult},
 };
 
 use crate::runner::RunnerFuture;
@@ -104,6 +105,18 @@ pub trait RunnerService: Send + Sync {
     ) -> RunnerFuture<'a, anyhow::Result<StopWorkspacePrincipalAck>> {
         Box::pin(async move {
             anyhow::bail!("workspace principal stop is not supported by this runner service")
+        })
+    }
+
+    /// Install or clear automatic native Git authorization inside the ordinary
+    /// workspace container. Default fails closed; the manager-backed service
+    /// overrides it.
+    fn prepare_workspace_git<'a>(
+        &'a self,
+        _request: PrepareWorkspaceGitRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<PrepareWorkspaceGitResult>> {
+        Box::pin(async move {
+            anyhow::bail!("workspace Git preparation is not supported by this runner service")
         })
     }
 
