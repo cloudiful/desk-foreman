@@ -45,9 +45,7 @@ impl GatewayRoute {
 pub(crate) struct UpstreamTarget {
     pub url: Url,
     pub username: Option<String>,
-    pub ciphertext: Option<Vec<u8>>,
-    pub workspace_binding_id: i64,
-    pub upstream_id: i64,
+    pub secret: Option<String>,
 }
 
 pub(crate) fn parse_target(target_url: &str, route: GatewayRoute) -> anyhow::Result<Url> {
@@ -108,22 +106,12 @@ pub(crate) async fn forward(
     if let Some(body) = body {
         request = request.body(counted_request_body(body, config.max_body_bytes));
     }
-    if let Some(username) = target.username.as_deref() {
-        let Some(ciphertext) = target.ciphertext.as_deref() else {
-            return error_response(StatusCode::SERVICE_UNAVAILABLE, "git gateway unavailable");
-        };
-        let Some(root_key) = state.config.upstream_credential_key.as_ref() else {
-            return error_response(StatusCode::SERVICE_UNAVAILABLE, "git gateway unavailable");
-        };
-        let Ok(secret) =
-            root_key.decrypt(target.workspace_binding_id, target.upstream_id, ciphertext)
-        else {
-            return error_response(StatusCode::SERVICE_UNAVAILABLE, "git gateway unavailable");
-        };
-        let Ok(secret) = String::from_utf8(secret) else {
-            return error_response(StatusCode::SERVICE_UNAVAILABLE, "git gateway unavailable");
-        };
-        request = request.basic_auth(username.to_string(), Some(secret));
+    match credential_pair(target.username.as_deref(), target.secret.as_deref()) {
+        Ok(Some((username, secret))) => {
+            request = request.basic_auth(username.to_string(), Some(secret.to_string()));
+        }
+        Ok(None) => {}
+        Err(message) => return error_response(StatusCode::FORBIDDEN, message),
     }
 
     let response = match tokio::time::timeout(config.head_timeout, request.send()).await {
@@ -258,6 +246,24 @@ where
     )
 }
 
+/// Select the Basic credential for an upstream request.
+///
+/// An upstream with no username needs no authentication. A username with a
+/// plaintext secret is forwarded. A legacy row that still carries only an
+/// encrypted ciphertext has no usable plaintext, so the gateway fails closed
+/// with an actionable resupply requirement instead of decrypting or bypassing
+/// authentication.
+fn credential_pair<'a>(
+    username: Option<&'a str>,
+    secret: Option<&'a str>,
+) -> Result<Option<(&'a str, &'a str)>, &'static str> {
+    match (username, secret) {
+        (None, _) => Ok(None),
+        (Some(username), Some(secret)) => Ok(Some((username, secret))),
+        (Some(_), None) => Err("credential_resupply_required"),
+    }
+}
+
 pub(crate) fn error_response(status: StatusCode, message: &'static str) -> Response {
     let mut response = (status, message).into_response();
     if status == StatusCode::UNAUTHORIZED {
@@ -267,4 +273,22 @@ pub(crate) fn error_response(status: StatusCode, message: &'static str) -> Respo
         );
     }
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::credential_pair;
+
+    #[test]
+    fn credentials_select_plaintext_or_fail_closed() {
+        assert_eq!(credential_pair(None, None), Ok(None));
+        assert_eq!(
+            credential_pair(Some("user"), Some("secret")),
+            Ok(Some(("user", "secret")))
+        );
+        assert_eq!(
+            credential_pair(Some("user"), None),
+            Err("credential_resupply_required")
+        );
+    }
 }

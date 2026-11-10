@@ -2,7 +2,6 @@ pub mod actor;
 pub mod api;
 pub mod auth;
 pub mod config;
-pub mod credential_cipher;
 pub mod db;
 pub mod error;
 pub mod git_gateway;
@@ -43,12 +42,14 @@ pub struct AppState {
     pub runner: Arc<dyn RunnerService>,
     pub runner_broker: Arc<RunnerBroker>,
     pub db: sqlx::PgPool,
+    pub git_capability_signing_key: ring::hmac::Key,
 }
 
 pub async fn run() -> anyhow::Result<()> {
     let config = Arc::new(AppConfig::from_env()?);
     let db = db::connect(&config).await?;
     db::migrate(&db).await?;
+    let git_capability_signing_key = git_gateway::signing_key::load_or_create(&db).await?;
     db::bootstrap_admin(&db, &config).await?;
     let runner_broker = RunnerBroker::new(db.clone());
     runner_broker.spawn_liveness_monitor();
@@ -59,6 +60,7 @@ pub async fn run() -> anyhow::Result<()> {
         runner,
         runner_broker,
         db,
+        git_capability_signing_key,
     };
     lifecycle::spawn_janitor(state.clone());
 

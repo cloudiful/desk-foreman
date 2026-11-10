@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Identity proof for the issue-owned signing-key test database (issue 1180 P39).\n-- Read before any cleanup DELETE so the signing-key test can never mutate a\n-- shared or production singleton.\nSELECT\n    current_database() AS database_name,\n    shobj_description(\n        (SELECT oid FROM pg_database WHERE datname = current_database()),\n        'pg_database'\n    ) AS ownership_comment;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "database_name",
+        "type_info": "Name",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "ownership_comment",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "ae19595edc49114391d02476abb8cade4051baabbfefbd352d342e9264a124d6"
+}

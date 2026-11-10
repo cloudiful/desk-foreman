@@ -20,7 +20,6 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use desk_foreman::{
     AppState,
     config::{AppConfig, GitGatewayConfig},
-    credential_cipher::UpstreamCredentialKey,
     db::types::{CreateApplicationRequest, CreateApplicationTokenRequest},
     policy::{ALL_SCOPES, ResourceLimits},
     runner::{RunnerBroker, RunnerFuture, RunnerService},
@@ -44,12 +43,6 @@ pub fn database_url() -> String {
         "DF_GIT_NATIVE_TEST_DATABASE_URL is required for the native Git gateway test; \
          point it at the dedicated nonproduction issue database",
     )
-}
-
-pub fn credential_key() -> UpstreamCredentialKey {
-    UpstreamCredentialKey::parse(&"11".repeat(32))
-        .expect("valid key")
-        .expect("key present")
 }
 
 /// Fake runner: gateway requests never touch it.
@@ -184,7 +177,6 @@ impl Fixture {
         .await
         .expect("create binding");
 
-        let key = credential_key();
         for (alias, url) in [
             ("origin", &upstream_url),
             ("denied", &denied_url),
@@ -192,7 +184,6 @@ impl Fixture {
         ] {
             desk_foreman::db::queries::create_workspace_git_upstream(
                 &pool,
-                Some(&key),
                 binding.workspace_binding_id,
                 desk_foreman::db::workspace_git_upstreams::NewWorkspaceGitUpstream {
                     remote_alias: alias,
@@ -283,12 +274,13 @@ fn test_state(pool: PgPool, gateway_url: String) -> AppState {
             bootstrap_admin_timezone: "UTC".to_string(),
             frontend_dist: PathBuf::from("/tmp/frontend"),
             build_started_at: SystemTime::now(),
-            upstream_credential_key: Some(credential_key()),
             git_gateway: GitGatewayConfig {
                 public_base_url: Some(gateway_url),
                 ..GitGatewayConfig::default()
             },
         }),
+        git_capability_signing_key: desk_foreman::git_gateway::signing_key::from_bytes(&[7u8; 32])
+            .expect("test signing key"),
         runner,
         runner_broker: RunnerBroker::new(broker_pool),
         db: pool,

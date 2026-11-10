@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT signing_key\nFROM git_gateway_signing_key\nWHERE singleton = TRUE\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "signing_key",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "git_gateway_signing_key",
+            "name": "signing_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bb9f9a0c8aa24e5efdadfa8a43be9ce76ffa38965b62b667f19886c5cd7ac885"
+}

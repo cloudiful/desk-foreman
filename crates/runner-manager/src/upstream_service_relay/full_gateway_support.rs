@@ -104,9 +104,12 @@ pub(crate) mod support {
                 bootstrap_admin_timezone: "UTC".to_string(),
                 frontend_dist: PathBuf::from("/tmp/frontend"),
                 build_started_at: SystemTime::now(),
-                upstream_credential_key: None,
                 git_gateway: Default::default(),
             }),
+            git_capability_signing_key: desk_foreman::git_gateway::signing_key::from_bytes(
+                &[7u8; 32],
+            )
+            .expect("test signing key"),
             runner,
             runner_broker: RunnerBroker::new(broker_pool),
             db: pool,

@@ -73,27 +73,30 @@ active binding and returns `409` otherwise. Unknown or cross-binding upstream
 ids return `404`, and a duplicate alias for the same binding returns `409`.
 
 Credentials are write-only: responses expose only `has_credential`, never the
-username, plaintext secret or ciphertext. Set `DF_UPSTREAM_CREDENTIAL_KEY` to 64
-hex characters to enable encrypted credential writes. When it is unset or empty,
-public upstream metadata still works but credential writes fail with `503`.
-Losing or rotating the key makes existing credentials undecryptable, so re-enter
-them after rotation. `enabled` is metadata only: it does not assert network
-reachability and does not make a Git push succeed by itself.
+username or secret. Upstream credentials are stored as plaintext in the
+database by explicit product decision; no operator key or extra configuration is
+required to create or update them. Rows written by the previous encrypted
+format remain detectable but are never decrypted: their upstream requests fail
+closed with `credential_resupply_required` until an administrator supplies a new
+credential, which replaces the legacy row. `enabled` is metadata only: it does
+not assert network reachability and does not make a Git push succeed by itself.
 
 ## Native Git gateway
 
-When both `DF_UPSTREAM_CREDENTIAL_KEY` and `DF_GIT_PUBLIC_BASE_URL` are set, the
-stored upstream aliases become normal native Git remotes inside the ordinary
-workspace container. `GET /git/{binding_id}/{remote_alias}/info/refs` accepts
+When `DF_GIT_PUBLIC_BASE_URL` is set, the stored upstream aliases become normal
+native Git remotes inside the ordinary workspace container. `GET /git/{binding_id}/{remote_alias}/info/refs` accepts
 exactly one `service=git-upload-pack|git-receive-pack` query, and
 `POST /git/{binding_id}/{remote_alias}/git-upload-pack|git-receive-pack` proxies
 the pack stream. The target comes only from the stored admin URL; callers cannot
 choose a host, path prefix, query beyond the service discriminator, or upstream
 URL.
 
-The runner authenticates with Basic username `df-git` and a short-lived signed
-capability scoped to the workspace binding and alias generation. Upstream
-credentials are decrypted only inside the gateway request and are never placed
+The capability signing key is generated once and persisted in the database, so
+concurrent instances share one key and a restart preserves it without operator
+configuration. The runner authenticates with Basic username `df-git` and a
+short-lived signed capability scoped to the workspace binding and alias
+generation. Upstream
+credentials are read only inside the gateway request and are never placed
 in the runner, its argv, `.git/config`, or the workspace. Client cookies,
 authorization, proxy and forwarding headers are stripped; redirects, upstream
 error bodies, `Location`, `Set-Cookie` and `WWW-Authenticate` are never
@@ -105,9 +108,10 @@ Each shell or `write_stdin` dispatch mints a fresh capability and writes it to a
 small `noexec` tmpfs credential file. The manager configures only the enabled
 DF aliases as remotes and never removes unrelated user remotes. Disable, delete,
 alias/target change, credential replacement or a generation change invalidates
-older capabilities on their next request. When the key or base URL is absent the
-gateway returns a fixed `503`, native Git stays unavailable, and normal Shell
-tools continue to work. `enabled` remains metadata; a successful request still
+older capabilities on their next request. When the public base URL is absent
+the gateway returns a fixed `503`, native Git stays unavailable, and normal
+Shell tools continue to work. A signing-key initialization failure stops
+startup instead of falling back to an unsigned gateway. `enabled` remains metadata; a successful request still
 depends on the stored target being reachable by the runner.
 
 ## Internal application upstream management
@@ -143,13 +147,12 @@ check. A personal binding follows the existing personal write policy; a resource
 binding requires the live unexpired lease.
 
 Create and update use the same validated alias, URL and write-only credential
-DTOs as the admin API. Credentials are encrypted with `DF_UPSTREAM_CREDENTIAL_KEY`
-and are never returned; responses expose `has_credential`, the alias, target
-URL, `enabled` and `capability_generation`. Every successful mutation bumps the
-generation, so older capabilities for that alias stop working. Duplicate alias,
-inactive binding and stale lease return `409`; a missing credential key returns
-`503`; a foreign application or subject returns `403`; a cross-binding upstream
-id returns `404`.
+DTOs as the admin API. Credentials are stored as plaintext and are never
+returned; responses expose `has_credential`, the alias, target URL, `enabled`
+and `capability_generation`. Every successful mutation bumps the generation, so
+older capabilities for that alias stop working. Duplicate alias, inactive
+binding and stale lease return `409`; a foreign application or subject returns
+`403`; a cross-binding upstream id returns `404`.
 
 ## Ownership boundary
 

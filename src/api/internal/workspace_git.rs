@@ -45,7 +45,7 @@ use crate::{
         capability::{
             CapabilityAlias, CapabilityClaims, mint, principal_id as capability_principal_id,
         },
-        capability_expiry, gateway_enabled, public_base_url, remote_url, signing_key,
+        capability_expiry, gateway_enabled, public_base_url, remote_url,
     },
     policy::{WORKSPACE_PATCH, WORKSPACE_SHELL},
 };
@@ -180,10 +180,8 @@ pub(crate) async fn issue_git_capability(
         iat: now.timestamp(),
         exp: expires_at.timestamp(),
     };
-    let Some(key) = signing_key(&state.config) else {
-        return Err(AppError::service_unavailable("git gateway is disabled"));
-    };
-    let capability = mint(&key, &claims).map_err(AppError::internal)?;
+    let capability =
+        mint(&state.git_capability_signing_key, &claims).map_err(AppError::internal)?;
     let base = public_base_url(&state.config)
         .ok_or_else(|| AppError::service_unavailable("git gateway is disabled"))?;
     Ok(Json(WorkspaceGitCapabilityResponse {
@@ -266,7 +264,6 @@ pub(crate) async fn create_application_git_upstream(
     };
     let upstream = insert_application_upstream(
         &state.db,
-        state.config.upstream_credential_key.as_ref(),
         &authority,
         binding_id,
         NewWorkspaceGitUpstream {
@@ -323,7 +320,6 @@ pub(crate) async fn update_application_git_upstream(
     };
     let upstream = modify_application_upstream(
         &state.db,
-        state.config.upstream_credential_key.as_ref(),
         &authority,
         binding_id,
         upstream_id,
@@ -501,9 +497,6 @@ fn map_upstream_error(error: GitUpstreamError) -> AppError {
         }
         GitUpstreamError::DuplicateAlias => {
             AppError::conflict("remote alias already exists for this workspace binding")
-        }
-        GitUpstreamError::CredentialKeyMissing => {
-            AppError::service_unavailable("upstream credential key is not configured")
         }
         GitUpstreamError::Internal(error) => AppError::internal(error),
     }

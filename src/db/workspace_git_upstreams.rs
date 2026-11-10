@@ -1,16 +1,17 @@
-//! Metadata-first workspace Git upstream management (issue 1180 P27).
+//! Metadata-first workspace Git upstream management (issue 1180 P27/P39).
 //!
 //! Every mutation locks the owning binding first so archived or resetting
-//! bindings can never gain a new upstream. Credentials are encrypted inside the
-//! same transaction that inserts or updates the row: the upstream id is part of
-//! the AAD, so the insert and the ciphertext write cannot be split.
+//! bindings can never gain a new upstream. Credentials are stored as plaintext
+//! by explicit product choice; the credential is written inside the same
+//! transaction that inserts or updates the row. A legacy ciphertext row remains
+//! detectable but is never decrypted or converted here: using it fails closed
+//! until an admin replaces the credential.
 
 use ring::constant_time::verify_slices_are_equal;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::{
     actor::check_write_lease,
-    credential_cipher::UpstreamCredentialKey,
     db::types::{Page, WorkspaceBindingResponse, WorkspaceGitUpstreamResponse},
 };
 
@@ -27,8 +28,6 @@ pub enum GitUpstreamError {
     BindingInactive,
     #[error("remote alias already exists for this workspace binding")]
     DuplicateAlias,
-    #[error("upstream credential key is not configured")]
-    CredentialKeyMissing,
     #[error("application authority does not own this workspace binding")]
     Forbidden,
     #[error("workspace write lease is missing, stale or held by another owner")]
@@ -106,13 +105,12 @@ pub async fn list_workspace_git_upstreams(
 
 pub async fn create_workspace_git_upstream(
     pool: &PgPool,
-    credential_key: Option<&UpstreamCredentialKey>,
     workspace_binding_id: i64,
     input: NewWorkspaceGitUpstream<'_>,
 ) -> Result<WorkspaceGitUpstreamResponse, GitUpstreamError> {
     let mut tx = pool.begin().await?;
     lock_active_binding(&mut tx, workspace_binding_id).await?;
-    let upstream = create_in_tx(&mut tx, credential_key, workspace_binding_id, input).await?;
+    let upstream = create_in_tx(&mut tx, workspace_binding_id, input).await?;
     tx.commit().await?;
     Ok(upstream)
 }
@@ -122,27 +120,22 @@ pub async fn create_workspace_git_upstream(
 /// mutation.
 pub async fn create_workspace_git_upstream_for_application(
     pool: &PgPool,
-    credential_key: Option<&UpstreamCredentialKey>,
     authority: &MutationAuthority<'_>,
     workspace_binding_id: i64,
     input: NewWorkspaceGitUpstream<'_>,
 ) -> Result<WorkspaceGitUpstreamResponse, GitUpstreamError> {
     let mut tx = pool.begin().await?;
     lock_authority_binding(&mut tx, workspace_binding_id, authority).await?;
-    let upstream = create_in_tx(&mut tx, credential_key, workspace_binding_id, input).await?;
+    let upstream = create_in_tx(&mut tx, workspace_binding_id, input).await?;
     tx.commit().await?;
     Ok(upstream)
 }
 
 async fn create_in_tx(
     tx: &mut Transaction<'_, Postgres>,
-    credential_key: Option<&UpstreamCredentialKey>,
     workspace_binding_id: i64,
     input: NewWorkspaceGitUpstream<'_>,
 ) -> Result<WorkspaceGitUpstreamResponse, GitUpstreamError> {
-    if input.credential.is_some() && credential_key.is_none() {
-        return Err(GitUpstreamError::CredentialKeyMissing);
-    }
     let upstream_id =
         sqlx::query_scalar::<_, i64>(include_str!("../sql/workspace_git_upstreams/insert.sql"))
             .bind(workspace_binding_id)
@@ -151,11 +144,8 @@ async fn create_in_tx(
             .fetch_one(&mut **tx)
             .await?;
 
-    if let (Some((username, secret)), Some(key)) = (input.credential, credential_key) {
-        let ciphertext = key
-            .encrypt(workspace_binding_id, upstream_id, secret.as_bytes())
-            .map_err(GitUpstreamError::Internal)?;
-        write_credential(tx, workspace_binding_id, upstream_id, username, &ciphertext).await?;
+    if let Some((username, secret)) = input.credential {
+        write_credential(tx, workspace_binding_id, upstream_id, username, secret).await?;
     }
 
     read_upstream(tx, workspace_binding_id, upstream_id).await
@@ -163,28 +153,19 @@ async fn create_in_tx(
 
 pub async fn update_workspace_git_upstream(
     pool: &PgPool,
-    credential_key: Option<&UpstreamCredentialKey>,
     workspace_binding_id: i64,
     upstream_id: i64,
     input: WorkspaceGitUpstreamUpdate<'_>,
 ) -> Result<WorkspaceGitUpstreamResponse, GitUpstreamError> {
     let mut tx = pool.begin().await?;
     lock_active_binding(&mut tx, workspace_binding_id).await?;
-    let upstream = update_in_tx(
-        &mut tx,
-        credential_key,
-        workspace_binding_id,
-        upstream_id,
-        input,
-    )
-    .await?;
+    let upstream = update_in_tx(&mut tx, workspace_binding_id, upstream_id, input).await?;
     tx.commit().await?;
     Ok(upstream)
 }
 
 pub async fn update_workspace_git_upstream_for_application(
     pool: &PgPool,
-    credential_key: Option<&UpstreamCredentialKey>,
     authority: &MutationAuthority<'_>,
     workspace_binding_id: i64,
     upstream_id: i64,
@@ -192,14 +173,7 @@ pub async fn update_workspace_git_upstream_for_application(
 ) -> Result<WorkspaceGitUpstreamResponse, GitUpstreamError> {
     let mut tx = pool.begin().await?;
     lock_authority_binding(&mut tx, workspace_binding_id, authority).await?;
-    let upstream = update_in_tx(
-        &mut tx,
-        credential_key,
-        workspace_binding_id,
-        upstream_id,
-        input,
-    )
-    .await?;
+    let upstream = update_in_tx(&mut tx, workspace_binding_id, upstream_id, input).await?;
     tx.commit().await?;
     Ok(upstream)
 }
@@ -209,70 +183,60 @@ struct CurrentUpstream {
     remote_alias: String,
     target_url: String,
     credential_username: Option<String>,
+    credential_secret: Option<String>,
     credential_ciphertext: Option<Vec<u8>>,
 }
 
 enum CredentialAction<'a> {
     /// Leave the stored credential untouched.
     Keep,
-    /// Store a fresh ciphertext for the supplied username.
-    Replace(&'a str, Vec<u8>),
+    /// Store a fresh plaintext credential for the supplied username.
+    Replace(&'a str, &'a str),
     /// Explicitly clear the stored credential.
     Clear,
 }
 
 /// Resolve the credential mutation for an update.
 ///
-/// A replacement is a no-op only when the stored username matches and the
-/// decrypted secret compares equal in constant time. A missing configured key
-/// still fails closed before any comparison, and an undecryptable or corrupt
-/// envelope fails the whole update without replacing or bumping generation.
+/// A replacement is a no-op only when the stored plaintext username matches and
+/// the stored secret compares equal in constant time. A legacy ciphertext row is
+/// never decrypted: a supplied credential always replaces it, while an update
+/// that supplies none keeps it untouched and leaves that upstream failing closed
+/// at the gateway until it is resupplied.
 fn resolve_credential_action<'a>(
-    credential_key: Option<&UpstreamCredentialKey>,
-    workspace_binding_id: i64,
-    upstream_id: i64,
     current: &CurrentUpstream,
     input: &WorkspaceGitUpstreamUpdate<'a>,
-) -> Result<CredentialAction<'a>, GitUpstreamError> {
+) -> CredentialAction<'a> {
     if input.clear_credential {
-        if current.credential_ciphertext.is_none() && current.credential_username.is_none() {
-            return Ok(CredentialAction::Keep);
+        if current.credential_username.is_none() {
+            return CredentialAction::Keep;
         }
-        return Ok(CredentialAction::Clear);
+        return CredentialAction::Clear;
     }
 
     let Some((username, secret)) = input.credential else {
-        return Ok(CredentialAction::Keep);
+        return CredentialAction::Keep;
     };
-    let key = credential_key.ok_or(GitUpstreamError::CredentialKeyMissing)?;
 
-    if let Some(ciphertext) = current.credential_ciphertext.as_deref() {
-        let existing = key
-            .decrypt(workspace_binding_id, upstream_id, ciphertext)
-            .map_err(GitUpstreamError::Internal)?;
+    if let Some(existing) = current.credential_secret.as_deref() {
         let username_matches = current.credential_username.as_deref() == Some(username);
-        if username_matches && verify_slices_are_equal(&existing, secret.as_bytes()).is_ok() {
-            return Ok(CredentialAction::Keep);
+        if username_matches
+            && verify_slices_are_equal(existing.as_bytes(), secret.as_bytes()).is_ok()
+        {
+            return CredentialAction::Keep;
         }
     }
 
-    let ciphertext = key
-        .encrypt(workspace_binding_id, upstream_id, secret.as_bytes())
-        .map_err(GitUpstreamError::Internal)?;
-    Ok(CredentialAction::Replace(username, ciphertext))
+    CredentialAction::Replace(username, secret)
 }
 
 async fn update_in_tx(
     tx: &mut Transaction<'_, Postgres>,
-    credential_key: Option<&UpstreamCredentialKey>,
     workspace_binding_id: i64,
     upstream_id: i64,
     input: WorkspaceGitUpstreamUpdate<'_>,
 ) -> Result<WorkspaceGitUpstreamResponse, GitUpstreamError> {
     lock_upstream(tx, workspace_binding_id, upstream_id).await?;
-    if input.credential.is_some() && credential_key.is_none() {
-        return Err(GitUpstreamError::CredentialKeyMissing);
-    }
     let current = sqlx::query_as::<_, CurrentUpstream>(include_str!(
         "../sql/workspace_git_upstreams/current_for_update.sql"
     ))
@@ -288,24 +252,16 @@ async fn update_in_tx(
     let target_changed = input
         .target_url
         .is_some_and(|value| value != current.target_url.as_str());
-    let credential_action = resolve_credential_action(
-        credential_key,
-        workspace_binding_id,
-        upstream_id,
-        &current,
-        &input,
-    )?;
+    let credential_action = resolve_credential_action(&current, &input);
 
     if !alias_changed && !target_changed && matches!(credential_action, CredentialAction::Keep) {
         return read_upstream(tx, workspace_binding_id, upstream_id).await;
     }
 
-    let (clear_credential, credential_username, credential_ciphertext) = match credential_action {
+    let (clear_credential, credential_username, credential_secret) = match credential_action {
         CredentialAction::Keep => (false, None, None),
         CredentialAction::Clear => (true, None, None),
-        CredentialAction::Replace(username, ciphertext) => {
-            (false, Some(username), Some(ciphertext))
-        }
+        CredentialAction::Replace(username, secret) => (false, Some(username), Some(secret)),
     };
 
     sqlx::query_as::<_, WorkspaceGitUpstreamResponse>(include_str!(
@@ -317,7 +273,7 @@ async fn update_in_tx(
     .bind(input.target_url)
     .bind(clear_credential)
     .bind(credential_username)
-    .bind(credential_ciphertext.as_deref())
+    .bind(credential_secret)
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(GitUpstreamError::NotFound)
@@ -479,7 +435,7 @@ async fn write_credential(
     workspace_binding_id: i64,
     upstream_id: i64,
     username: &str,
-    ciphertext: &[u8],
+    secret: &str,
 ) -> Result<(), GitUpstreamError> {
     sqlx::query(include_str!(
         "../sql/workspace_git_upstreams/set_credential.sql"
@@ -487,7 +443,7 @@ async fn write_credential(
     .bind(workspace_binding_id)
     .bind(upstream_id)
     .bind(username)
-    .bind(ciphertext)
+    .bind(secret)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -517,11 +473,23 @@ pub struct GatewayUpstreamRow {
     pub remote_alias: String,
     pub target_url: String,
     pub credential_username: Option<String>,
+    pub credential_secret: Option<String>,
     pub credential_ciphertext: Option<Vec<u8>>,
     pub enabled: bool,
     pub capability_generation: i64,
     pub application_id: i64,
     pub application_active: bool,
+}
+
+impl GatewayUpstreamRow {
+    /// True when a legacy encrypted credential exists without a plaintext
+    /// replacement. The gateway must refuse such a row and ask for resupply
+    /// instead of attempting to decrypt it.
+    pub fn requires_credential_resupply(&self) -> bool {
+        self.credential_username.is_some()
+            && self.credential_secret.is_none()
+            && self.credential_ciphertext.is_some()
+    }
 }
 
 impl std::fmt::Debug for GatewayUpstreamRow {
@@ -535,7 +503,10 @@ impl std::fmt::Debug for GatewayUpstreamRow {
             .field("capability_generation", &self.capability_generation)
             .field("application_id", &self.application_id)
             .field("application_active", &self.application_active)
-            .field("has_credential", &self.credential_ciphertext.is_some())
+            .field(
+                "has_credential",
+                &(self.credential_secret.is_some() || self.credential_ciphertext.is_some()),
+            )
             .finish()
     }
 }

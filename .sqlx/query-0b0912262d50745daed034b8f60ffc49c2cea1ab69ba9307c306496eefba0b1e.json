@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM git_gateway_signing_key\nWHERE singleton = TRUE\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "0b0912262d50745daed034b8f60ffc49c2cea1ab69ba9307c306496eefba0b1e"
+}

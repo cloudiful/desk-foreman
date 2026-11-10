@@ -10,7 +10,7 @@ RETURNING
     remote_alias,
     target_url,
     enabled,
-    (credential_ciphertext IS NOT NULL) AS has_credential,
+    (credential_secret IS NOT NULL OR credential_ciphertext IS NOT NULL) AS has_credential,
     capability_generation,
     created_at,
     updated_at

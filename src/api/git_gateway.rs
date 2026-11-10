@@ -22,7 +22,6 @@ use crate::{
         capability::{CapabilityError, alias_claim, decode_basic_password, verify},
         gateway_enabled,
         proxy::{GatewayRoute, UpstreamTarget, error_response, forward, parse_target},
-        signing_key,
     },
 };
 
@@ -124,10 +123,11 @@ async fn handle(
     if username != GIT_USERNAME {
         return error_response(StatusCode::UNAUTHORIZED, "authentication required");
     }
-    let Some(key) = signing_key(&state.config) else {
-        return error_response(StatusCode::SERVICE_UNAVAILABLE, "git gateway disabled");
-    };
-    let claims = match verify(&key, &token, Utc::now().timestamp()) {
+    let claims = match verify(
+        &state.git_capability_signing_key,
+        &token,
+        Utc::now().timestamp(),
+    ) {
         Ok(claims) => claims,
         Err(CapabilityError::Expired) => {
             return error_response(StatusCode::UNAUTHORIZED, "git capability expired");
@@ -187,13 +187,15 @@ async fn handle(
         return error_response(StatusCode::FORBIDDEN, "git read access denied");
     }
 
+    if upstream.requires_credential_resupply() {
+        return error_response(StatusCode::FORBIDDEN, "credential_resupply_required");
+    }
+
     let target = match parse_target(&upstream.target_url, route) {
         Ok(url) => UpstreamTarget {
             url,
             username: upstream.credential_username,
-            ciphertext: upstream.credential_ciphertext,
-            workspace_binding_id: upstream.workspace_binding_id,
-            upstream_id: upstream.upstream_id,
+            secret: upstream.credential_secret,
         },
         Err(_) => return error_response(StatusCode::BAD_GATEWAY, "upstream target invalid"),
     };
