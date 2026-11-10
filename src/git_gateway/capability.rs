@@ -1,8 +1,8 @@
 //! Short-lived, workspace-scoped native Git capability (issue 1180 P28).
 //!
 //! The token is a signed claims envelope, not a stored random secret. It is
-//! derived from the upstream credential key through a domain-separated HKDF
-//! key and is never the upstream credential, application bearer or admin token.
+//! signed with the database-persisted gateway signing key and is never the
+//! upstream credential, application bearer or admin token.
 
 use base64::{
     Engine,

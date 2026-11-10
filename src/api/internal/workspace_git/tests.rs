@@ -89,17 +89,14 @@ fn delete_query_declares_lease_owner_as_a_query_parameter() {
 #[tokio::test]
 #[ignore = "requires the dedicated issue PostgreSQL (P29A_TEST_DATABASE_URL)"]
 async fn application_authority_is_validated_under_the_binding_row_lock() -> anyhow::Result<()> {
-    use crate::{
-        credential_cipher::UpstreamCredentialKey,
-        db::{
-            queries,
-            types::CreateApplicationRequest,
-            workspace_git_upstreams::{
-                MutationAuthority, NewWorkspaceGitUpstream, WorkspaceGitUpstreamUpdate,
-                create_workspace_git_upstream_for_application,
-                delete_workspace_git_upstream_for_application, list_workspace_git_upstreams,
-                update_workspace_git_upstream_for_application,
-            },
+    use crate::db::{
+        queries,
+        types::CreateApplicationRequest,
+        workspace_git_upstreams::{
+            MutationAuthority, NewWorkspaceGitUpstream, WorkspaceGitUpstreamUpdate,
+            create_workspace_git_upstream_for_application,
+            delete_workspace_git_upstream_for_application, list_workspace_git_upstreams,
+            update_workspace_git_upstream_for_application,
         },
     };
     use sqlx::postgres::PgPoolOptions;
@@ -149,11 +146,8 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
     )
     .await?;
 
-    let key = UpstreamCredentialKey::parse(&"11".repeat(32))?.expect("key");
-
     let created = create_workspace_git_upstream_for_application(
         &pool,
-        Some(&key),
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id,
             external_user_id: "subject-one",
@@ -177,7 +171,6 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let wrong_app = create_workspace_git_upstream_for_application(
         &pool,
-        Some(&key),
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id + 1,
             external_user_id: "subject-one",
@@ -198,7 +191,6 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let wrong_subject = create_workspace_git_upstream_for_application(
         &pool,
-        Some(&key),
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id,
             external_user_id: "subject-two",
@@ -219,7 +211,6 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let updated = update_workspace_git_upstream_for_application(
         &pool,
-        Some(&key),
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id,
             external_user_id: "subject-one",
@@ -239,7 +230,6 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let identical = update_workspace_git_upstream_for_application(
         &pool,
-        Some(&key),
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id,
             external_user_id: "subject-one",
@@ -260,7 +250,6 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let cross_binding = update_workspace_git_upstream_for_application(
         &pool,
-        Some(&key),
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id,
             external_user_id: "subject-two",
@@ -279,27 +268,6 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
     assert!(matches!(
         cross_binding,
         Err(crate::db::workspace_git_upstreams::GitUpstreamError::NotFound)
-    ));
-
-    let missing_key = create_workspace_git_upstream_for_application(
-        &pool,
-        None,
-        &MutationAuthority::ApplicationSubject {
-            application_id: app.application_id,
-            external_user_id: "subject-one",
-            lease_owner: "",
-        },
-        binding.workspace_binding_id,
-        NewWorkspaceGitUpstream {
-            remote_alias: "needs-key",
-            target_url: "https://git.example.com/key.git",
-            credential: Some(("user", "secret")),
-        },
-    )
-    .await;
-    assert!(matches!(
-        missing_key,
-        Err(crate::db::workspace_git_upstreams::GitUpstreamError::CredentialKeyMissing)
     ));
 
     delete_workspace_git_upstream_for_application(
@@ -360,7 +328,6 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
     let blocked = tokio::spawn(async move {
         create_workspace_git_upstream_for_application(
             &pool_for_task,
-            None,
             &MutationAuthority::ApplicationSubject {
                 application_id: app_id,
                 external_user_id: "subject-one",
@@ -392,7 +359,6 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let current_lease = create_workspace_git_upstream_for_application(
         &pool,
-        None,
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id,
             external_user_id: "subject-one",
@@ -446,8 +412,6 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
     state.db = pool.clone();
     {
         let config = std::sync::Arc::make_mut(&mut state.config);
-        config.upstream_credential_key =
-            Some(UpstreamCredentialKey::parse(&"11".repeat(32))?.expect("key"));
         config.git_gateway = crate::config::GitGatewayConfig {
             public_base_url: Some("http://gateway.test".to_string()),
             ..Default::default()
@@ -502,9 +466,8 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
     )
     .await
     .expect("resource capability");
-    let signing_key = crate::git_gateway::signing_key(&state.config).expect("signing key");
     let claims = crate::git_gateway::capability::verify(
-        &signing_key,
+        &state.git_capability_signing_key,
         &capability.0.capability,
         chrono::Utc::now().timestamp(),
     )

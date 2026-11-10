@@ -66,33 +66,35 @@
 所有变更都要求绑定处于活跃状态，否则返回 `409`。未知或属于其他绑定的上游 id
 返回 `404`，同一绑定内重复别名返回 `409`。
 
-凭据只写：响应仅暴露 `has_credential`，绝不返回用户名、明文密钥或密文。将
-`DF_UPSTREAM_CREDENTIAL_KEY` 设置为 64 个十六进制字符即可启用加密凭据写入。
-未设置或为空时，公开上游元数据仍可使用，但凭据写入返回 `503`。丢失或轮换密钥
-会使已有凭据无法解密，轮换后需重新录入。`enabled` 只是元数据：它不代表网络
-可达，也不保证 Git 推送本身能够成功。
+凭据只写：响应仅暴露 `has_credential`，绝不返回用户名或密钥。上游凭据按明确的
+产品决定以明文存储在数据库中；创建或更新凭据无需任何运维密钥或额外配置。旧加密
+格式写入的行仍可被识别，但绝不会被解密：在管理员重新提供凭据之前，其上游请求会
+以 `credential_resupply_required` 失败关闭，重新提供的凭据会替换旧行。`enabled`
+只是元数据：它不代表网络可达，也不保证 Git 推送本身能够成功。
 
 ## 原生 Git 网关
 
-同时设置 `DF_UPSTREAM_CREDENTIAL_KEY` 与 `DF_GIT_PUBLIC_BASE_URL` 后，已保存的
-上游别名会成为普通工作区容器中的原生 Git 远端。
+设置 `DF_GIT_PUBLIC_BASE_URL` 后，已保存的上游别名会成为普通工作区容器中的原生
+Git 远端。
 `GET /git/{binding_id}/{remote_alias}/info/refs` 只接受一个
 `service=git-upload-pack|git-receive-pack` 查询；
 `POST /git/{binding_id}/{remote_alias}/git-upload-pack|git-receive-pack` 负责代理
 pack 流。目标只来自管理员保存的 URL，调用方不能选择主机、路径前缀、额外查询或
 上游 URL。
 
-Runner 使用 Basic 用户名 `df-git` 和短期签名能力令牌，令牌限定到工作区绑定及
-别名代次。上游凭据只在网关请求内解密，绝不进入 runner、argv、`.git/config` 或
-工作区。客户端 Cookie、Authorization、代理和转发头都会被清除；重定向、上游错误
+能力签名密钥只生成一次并持久化在数据库中，因此并发实例共享同一密钥，重启后仍
+保留，无需运维配置。Runner 使用 Basic 用户名 `df-git` 和短期签名能力令牌，令牌
+限定到工作区绑定及别名代次。上游凭据只在网关请求内读取，绝不进入 runner、argv、
+`.git/config` 或工作区。客户端 Cookie、Authorization、代理和转发头都会被清除；重定向、上游错误
 体、`Location`、`Set-Cookie` 与 `WWW-Authenticate` 也不会转发。请求与响应 pack
 均流式处理，默认上限 256 MiB（`DF_GIT_GATEWAY_MAX_BODY_BYTES`，最大 1 GiB），并
 带有连接、响应头和总流时限。
 
 每次 shell 或 `write_stdin` 派发都会重新签发能力令牌，并写入 `noexec` 的小型
 tmpfs 凭据文件。Manager 只配置已启用的 DF 别名，绝不会删除用户无关的远端。禁用、
-删除、别名/目标变更、凭据替换或代次变化都会使旧令牌在下一次请求时失效。密钥或
-基础 URL 缺失时网关固定返回 `503`，原生 Git 不可用，但普通 Shell 工具仍可工作。
+删除、别名/目标变更、凭据替换或代次变化都会使旧令牌在下一次请求时失效。基础 URL
+缺失时网关固定返回 `503`，原生 Git 不可用，但普通 Shell 工具仍可工作。签名密钥初始化
+失败会终止启动，而不会退回到未签名的网关。
 `enabled` 仍然只是元数据；请求成功仍取决于 runner 是否可达已保存的目标。
 
 ## 应用内部的上游管理
@@ -117,11 +119,10 @@ tmpfs 凭据文件。Manager 只配置已启用的 DF 别名，绝不会删除�
 绑定行会在校验该权限之前加锁，并在同一事务内完成修改，因此与请求竞争的租约交接无法通过快照校验。
 个人绑定沿用现有个人写策略；资源绑定必须持有未过期的当前租约。
 
-创建与更新复用管理员 API 相同的别名、URL 与只写凭据校验类型。凭据使用
-`DF_UPSTREAM_CREDENTIAL_KEY` 加密且绝不返回；响应只包含 `has_credential`、别名、目标 URL、
-`enabled` 与 `capability_generation`。每次成功修改都会递增代次，旧能力令牌随即失效。
-重复别名、非活动绑定与过期租约返回 `409`；缺少凭据密钥返回 `503`；其他应用或主体返回 `403`；
-跨绑定上游 id 返回 `404`。
+创建与更新复用管理员 API 相同的别名、URL 与只写凭据校验类型。凭据以明文存储且绝不返回；
+响应只包含 `has_credential`、别名、目标 URL、`enabled` 与 `capability_generation`。
+每次成功修改都会递增代次，旧能力令牌随即失效。重复别名、非活动绑定与过期租约返回 `409`；
+其他应用或主体返回 `403`；跨绑定上游 id 返回 `404`。
 
 ## 归属边界
 

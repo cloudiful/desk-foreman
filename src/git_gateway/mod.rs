@@ -1,12 +1,13 @@
 //! Native Git Smart HTTP gateway (issue 1180 P28).
 //!
 //! Public routes proxy only four fixed Smart HTTP shapes to the admin-configured
-//! upstream. Upstream credentials are decrypted inside the request path; callers
+//! upstream. Upstream credentials are read inside the request path; callers
 //! authenticate with a short-lived workspace-scoped capability instead.
 
 pub(crate) mod capability;
 mod limits;
 pub(crate) mod proxy;
+pub mod signing_key;
 
 #[cfg(test)]
 mod tests;
@@ -16,14 +17,7 @@ use chrono::{DateTime, Duration, Utc};
 use crate::{config::AppConfig, db::types::WorkspaceBindingResponse};
 
 pub(crate) fn gateway_enabled(config: &AppConfig) -> bool {
-    config.upstream_credential_key.is_some() && config.git_gateway.enabled()
-}
-
-pub(crate) fn signing_key(config: &AppConfig) -> Option<ring::hmac::Key> {
-    config
-        .upstream_credential_key
-        .as_ref()
-        .and_then(|key| key.derive_git_capability_key().ok())
+    config.git_gateway.enabled()
 }
 
 pub(crate) fn public_base_url(config: &AppConfig) -> Option<&str> {

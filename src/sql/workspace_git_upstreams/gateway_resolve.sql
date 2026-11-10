@@ -4,6 +4,7 @@ SELECT
     u.remote_alias,
     u.target_url,
     u.credential_username,
+    u.credential_secret,
     u.credential_ciphertext,
     u.enabled,
     u.capability_generation,

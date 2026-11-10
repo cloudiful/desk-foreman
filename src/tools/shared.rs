@@ -23,7 +23,7 @@ use crate::{
     actor::ActorContext,
     git_gateway::{
         capability::{CapabilityAlias, CapabilityClaims, mint},
-        capability_expiry, gateway_enabled, remote_url, signing_key,
+        capability_expiry, gateway_enabled, remote_url,
     },
     tools::{
         common::{
@@ -97,9 +97,6 @@ async fn build_workspace_git(
     if !gateway_enabled(&state.config) {
         return Ok(None);
     }
-    let Some(key) = signing_key(&state.config) else {
-        return Ok(None);
-    };
     let aliases = crate::db::queries::list_gateway_aliases(&state.db, binding.workspace_binding_id)
         .await
         .map_err(|_| "workspace Git alias lookup failed")?;
@@ -125,7 +122,8 @@ async fn build_workspace_git(
         iat: now.timestamp(),
         exp: expiry.timestamp(),
     };
-    let token = mint(&key, &claims).map_err(|_| "workspace Git capability mint failed")?;
+    let token = mint(&state.git_capability_signing_key, &claims)
+        .map_err(|_| "workspace Git capability mint failed")?;
     let urls = aliases
         .iter()
         .map(|alias| {

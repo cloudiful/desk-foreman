@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO git_gateway_signing_key (singleton, signing_key)\nVALUES (TRUE, $1)\nON CONFLICT (singleton) DO NOTHING\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "59e4010b21eefb428cb955fe13c000cce2a5958b600bb40c7521fb292d6cd868"
+}

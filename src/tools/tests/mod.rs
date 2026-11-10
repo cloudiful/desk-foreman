@@ -253,9 +253,10 @@ fn app_state_with_runner(root: PathBuf, runner: Arc<dyn RunnerService>) -> AppSt
             bootstrap_admin_timezone: "UTC".to_string(),
             frontend_dist: root.join("frontend/dist"),
             build_started_at: SystemTime::now(),
-            upstream_credential_key: None,
             git_gateway: Default::default(),
         }),
+        git_capability_signing_key: crate::git_gateway::signing_key::from_bytes(&[7u8; 32])
+            .expect("test signing key"),
         runner,
         runner_broker: crate::runner::RunnerBroker::new(
             PgPoolOptions::new()

@@ -10,7 +10,7 @@ fn bounded_page_clamps_limit_and_offset() {
 
 #[tokio::test]
 #[ignore = "requires disposable P27 PostgreSQL (P27_TEST_DATABASE_URL)"]
-async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()> {
+async fn upstream_lifecycle_stores_plaintext_and_bumps_generation() -> anyhow::Result<()> {
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(4)
         .connect(&std::env::var("P27_TEST_DATABASE_URL")?)
@@ -26,10 +26,8 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
     .execute(&pool)
     .await?;
 
-    let key = UpstreamCredentialKey::parse(&"11".repeat(32))?.expect("key");
     let created = create_workspace_git_upstream(
         &pool,
-        Some(&key),
         918001,
         NewWorkspaceGitUpstream {
             remote_alias: "origin",
@@ -48,7 +46,6 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
 
     let duplicate = create_workspace_git_upstream(
         &pool,
-        Some(&key),
         918001,
         NewWorkspaceGitUpstream {
             remote_alias: "origin",
@@ -61,7 +58,6 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
 
     let identical = update_workspace_git_upstream(
         &pool,
-        Some(&key),
         918001,
         created.upstream_id,
         WorkspaceGitUpstreamUpdate {
@@ -78,7 +74,6 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
 
     let rotated_secret = update_workspace_git_upstream(
         &pool,
-        Some(&key),
         918001,
         created.upstream_id,
         WorkspaceGitUpstreamUpdate {
@@ -94,7 +89,6 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
 
     let rotated_secret_repeat = update_workspace_git_upstream(
         &pool,
-        Some(&key),
         918001,
         created.upstream_id,
         WorkspaceGitUpstreamUpdate {
@@ -110,7 +104,6 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
 
     let rotated_user = update_workspace_git_upstream(
         &pool,
-        Some(&key),
         918001,
         created.upstream_id,
         WorkspaceGitUpstreamUpdate {
@@ -125,7 +118,6 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
 
     let retargeted = update_workspace_git_upstream(
         &pool,
-        Some(&key),
         918001,
         created.upstream_id,
         WorkspaceGitUpstreamUpdate {
@@ -144,7 +136,6 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
 
     let realiased = update_workspace_git_upstream(
         &pool,
-        Some(&key),
         918001,
         created.upstream_id,
         WorkspaceGitUpstreamUpdate {
@@ -158,18 +149,37 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
     assert_eq!(realiased.capability_generation, 5);
     assert_eq!(realiased.remote_alias, "origin-2");
 
+    // Simulate an upgrade from the old encrypted format: only the legacy
+    // ciphertext remains and its bytes are opaque, so any decrypt attempt would
+    // fail. Metadata-only edits keep it and still report a credential.
     sqlx::query(
-        "UPDATE workspace_git_upstreams SET credential_ciphertext = $1 \
+        "UPDATE workspace_git_upstreams SET credential_secret = NULL, credential_ciphertext = $1 \
          WHERE workspace_binding_id = $2 AND upstream_id = $3",
     )
-    .bind(vec![1u8, 2, 3, 4])
+    .bind(vec![9u8, 9, 9, 9])
     .bind(918001i64)
     .bind(created.upstream_id)
     .execute(&pool)
     .await?;
-    let corrupt = update_workspace_git_upstream(
+
+    let legacy_kept = update_workspace_git_upstream(
         &pool,
-        Some(&key),
+        918001,
+        created.upstream_id,
+        WorkspaceGitUpstreamUpdate {
+            remote_alias: None,
+            target_url: Some("https://git.example.com/team/legacy.git"),
+            credential: None,
+            clear_credential: false,
+        },
+    )
+    .await?;
+    assert!(legacy_kept.has_credential);
+    assert_eq!(legacy_kept.capability_generation, 6);
+
+    // A supplied credential replaces the legacy row without decrypting it.
+    let legacy_replaced = update_workspace_git_upstream(
+        &pool,
         918001,
         created.upstream_id,
         WorkspaceGitUpstreamUpdate {
@@ -179,14 +189,22 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
             clear_credential: false,
         },
     )
-    .await;
-    assert!(matches!(corrupt, Err(GitUpstreamError::Internal(_))));
-    let after_corrupt = list_workspace_git_upstreams(&pool, 918001, Some(10), Some(0)).await?;
-    assert_eq!(after_corrupt.items[0].capability_generation, 5);
+    .await?;
+    assert!(legacy_replaced.has_credential);
+    assert_eq!(legacy_replaced.capability_generation, 7);
+    let stored = sqlx::query_as::<_, (Option<String>, Option<Vec<u8>>)>(
+        "SELECT credential_secret, credential_ciphertext FROM workspace_git_upstreams \
+         WHERE workspace_binding_id = $1 AND upstream_id = $2",
+    )
+    .bind(918001i64)
+    .bind(created.upstream_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(stored.0.as_deref(), Some("new-secret"));
+    assert!(stored.1.is_none());
 
     let cleared = update_workspace_git_upstream(
         &pool,
-        None,
         918001,
         created.upstream_id,
         WorkspaceGitUpstreamUpdate {
@@ -198,11 +216,10 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
     )
     .await?;
     assert!(!cleared.has_credential);
-    assert_eq!(cleared.capability_generation, 6);
+    assert_eq!(cleared.capability_generation, 8);
 
     let cleared_repeat = update_workspace_git_upstream(
         &pool,
-        None,
         918001,
         created.upstream_id,
         WorkspaceGitUpstreamUpdate {
@@ -214,35 +231,16 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
     )
     .await?;
     assert!(!cleared_repeat.has_credential);
-    assert_eq!(cleared_repeat.capability_generation, 6);
+    assert_eq!(cleared_repeat.capability_generation, 8);
     assert_eq!(cleared_repeat.updated_at, cleared.updated_at);
 
     let disabled =
         set_workspace_git_upstream_enabled(&pool, 918001, created.upstream_id, false).await?;
     assert!(!disabled.enabled);
-    assert_eq!(disabled.capability_generation, 7);
-
-    let missing_key = update_workspace_git_upstream(
-        &pool,
-        None,
-        918001,
-        created.upstream_id,
-        WorkspaceGitUpstreamUpdate {
-            remote_alias: None,
-            target_url: None,
-            credential: Some(("user", "secret")),
-            clear_credential: false,
-        },
-    )
-    .await;
-    assert!(matches!(
-        missing_key,
-        Err(GitUpstreamError::CredentialKeyMissing)
-    ));
+    assert_eq!(disabled.capability_generation, 9);
 
     let cross_binding = update_workspace_git_upstream(
         &pool,
-        None,
         918002,
         created.upstream_id,
         WorkspaceGitUpstreamUpdate {
@@ -257,7 +255,6 @@ async fn upstream_lifecycle_encrypts_and_bumps_generation() -> anyhow::Result<()
 
     let archived = create_workspace_git_upstream(
         &pool,
-        None,
         918003,
         NewWorkspaceGitUpstream {
             remote_alias: "origin",
