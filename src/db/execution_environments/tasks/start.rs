@@ -1,3 +1,4 @@
+use crate::db::task_runtime::TaskRuntime;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -11,6 +12,7 @@ const JOB_DEADLINE_SECS: i64 = 300;
 
 pub(super) async fn start(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
     task_id: Uuid,
@@ -21,9 +23,14 @@ pub(super) async fn start(
     }
 
     let mut tx = pool.begin().await.map_err(types::internal)?;
-    super::native_execution::expire_overdue_native_jobs(&mut tx, application_id, environment_id)
-        .await
-        .map_err(types::internal)?;
+    super::native_execution::expire_overdue_native_jobs(
+        &mut tx,
+        runtime,
+        application_id,
+        environment_id,
+    )
+    .await
+    .map_err(types::internal)?;
     let (environment, task, binding) =
         queries::lock_context(&mut tx, application_id, environment_id, task_id).await?;
 

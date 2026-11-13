@@ -18,7 +18,12 @@ async fn wrong_tenant_cannot_read_or_mutate() {
     let (_, owner_token) = create_app_with_token(&db.pool, "tenant-owner").await;
     let (_, other_token) = create_app_with_token(&db.pool, "tenant-other").await;
     let (_, mgr_token) = create_manager(&db.pool, "tenant-mgr").await;
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
     bring_manager_online(&base, &mgr_token).await;
     let env = create_environment(&base, &owner_token, "tenant-user").await;
 
@@ -48,7 +53,12 @@ async fn stale_generation_and_proof_are_refused() {
     let db = LifecycleDb::setup().await;
     let (_, app_token) = create_app_with_token(&db.pool, "stale-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "stale-mgr").await;
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
     bring_manager_online(&base, &mgr_token).await;
     let env = create_environment(&base, &app_token, "stale-user").await;
 
@@ -116,7 +126,12 @@ async fn conflicting_token_and_wrong_ack_are_refused() {
     let db = LifecycleDb::setup().await;
     let (_, app_token) = create_app_with_token(&db.pool, "token-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "token-mgr").await;
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
     bring_manager_online(&base, &mgr_token).await;
     let env = create_environment(&base, &app_token, "token-user").await;
 
@@ -160,7 +175,12 @@ async fn conflicting_token_and_wrong_ack_are_refused() {
 async fn unknown_fields_and_missing_auth_are_denied() {
     let db = LifecycleDb::setup().await;
     let (_, app_token) = create_app_with_token(&db.pool, "fields-app").await;
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
     let env = create_environment(&base, &app_token, "fields-user").await;
 
     // Unknown field rejected before any mutation.

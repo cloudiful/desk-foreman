@@ -13,6 +13,7 @@ use super::{
     types::{NativeTaskExportError, TaskExportHeader, internal},
 };
 use crate::db::execution_environment_jobs::find_execution_environment_job_by_id;
+use crate::db::task_runtime::{JobDisposition, TaskRuntime};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeTaskExportUploadOutcome {
@@ -22,6 +23,7 @@ pub enum NativeTaskExportUploadOutcome {
 
 pub async fn upload_native_task_export(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     manager_id: i64,
     job_id: Uuid,
     upload: ExportNativeTaskUpload,
@@ -171,6 +173,15 @@ pub async fn upload_native_task_export(
     {
         return Err(NativeTaskExportError::Internal);
     }
+    runtime
+        .settle(
+            &mut tx,
+            job_id,
+            Some("export_native_task"),
+            JobDisposition::Succeeded,
+        )
+        .await
+        .map_err(internal)?;
     tx.commit().await.map_err(internal)?;
     Ok(NativeTaskExportUploadOutcome::Uploaded)
 }

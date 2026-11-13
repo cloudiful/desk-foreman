@@ -292,7 +292,8 @@ fn test_state(pool: PgPool, gateway_url: String) -> AppState {
             .expect("test signing key"),
         runner,
         runner_broker: RunnerBroker::new(broker_pool),
-        db: pool,
+        db: pool.clone(),
+        task_runtime: std::sync::Arc::new(desk_foreman::db::task_runtime::TaskRuntime::new(pool)),
     }
 }
 

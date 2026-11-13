@@ -13,6 +13,7 @@ use std::{
 use desk_foreman::{
     AppState,
     config::AppConfig,
+    db::task_runtime::TaskRuntime,
     db::types::{CreateApplicationRequest, CreateApplicationTokenRequest},
     policy::{ALL_SCOPES, ResourceLimits},
     runner::{RunnerBroker, RunnerFuture, RunnerService},
@@ -188,7 +189,8 @@ pub fn test_state(pool: PgPool) -> AppState {
             .expect("test signing key"),
         runner,
         runner_broker: RunnerBroker::new(broker_pool),
-        db: pool,
+        db: pool.clone(),
+        task_runtime: Arc::new(TaskRuntime::new(pool)),
     }
 }
 

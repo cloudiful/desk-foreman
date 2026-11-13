@@ -7,6 +7,7 @@ pub mod principal_admission;
 pub mod queries;
 pub mod runner_managers;
 pub mod sessions;
+pub mod task_runtime;
 pub mod types;
 pub mod users;
 pub mod workspace_bindings;

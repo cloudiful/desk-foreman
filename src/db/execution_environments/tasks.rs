@@ -36,6 +36,7 @@ pub use types::{
 pub use seeds::preparation_seed_for_manager;
 
 use crate::db::execution_environments::lifecycle::select_manager;
+use crate::db::task_runtime::TaskRuntime;
 
 /// Admit (or idempotently replay) one durable task intent.
 ///
@@ -44,11 +45,12 @@ use crate::db::execution_environments::lifecycle::select_manager;
 /// the native-active state, so it can never step through a stale snapshot.
 pub async fn admit_native_task(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
     request: NativeTaskRequest,
 ) -> Result<NativeTask, NativeTaskError> {
-    admit::admit(pool, application_id, environment_id, request).await
+    admit::admit(pool, runtime, application_id, environment_id, request).await
 }
 
 /// Read one owned task intent.
@@ -120,23 +122,41 @@ pub async fn release_native_task(
 /// Schedule or replay the original-manager start for a prepared native task.
 pub async fn start_native_task(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
     task_id: Uuid,
     request: TaskExecutionRequest,
 ) -> Result<NativeTaskOperationDescriptor, TaskExecutionError> {
-    start::start(pool, application_id, environment_id, task_id, request).await
+    start::start(
+        pool,
+        runtime,
+        application_id,
+        environment_id,
+        task_id,
+        request,
+    )
+    .await
 }
 
 /// Schedule or replay the original-manager stop for a native task.
 pub async fn stop_native_task(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
     task_id: Uuid,
     request: TaskExecutionRequest,
 ) -> Result<NativeTaskOperationDescriptor, TaskExecutionError> {
-    stop::stop(pool, application_id, environment_id, task_id, request).await
+    stop::stop(
+        pool,
+        runtime,
+        application_id,
+        environment_id,
+        task_id,
+        request,
+    )
+    .await
 }
 
 /// Wrap a query failure as an internal error without leaking its text.

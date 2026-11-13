@@ -10,6 +10,7 @@ use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::db::execution_environment_jobs::ExecutionEnvironmentJob;
+use crate::db::task_runtime::{JobDisposition, TaskRuntime};
 
 use super::LifecycleError;
 use super::types::LifecycleEnvironment;
@@ -53,6 +54,7 @@ pub(crate) async fn lock_environment(
 /// `uncertain` before any state decision.
 pub(crate) async fn expire_overdue_jobs(
     tx: &mut Transaction<'_, Postgres>,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
 ) -> anyhow::Result<Vec<ExecutionEnvironmentJob>> {
@@ -71,6 +73,7 @@ pub(crate) async fn expire_overdue_jobs(
     }
     crate::db::execution_environments::tasks::native_execution::expire_overdue_native_jobs(
         tx,
+        runtime,
         application_id,
         environment_id,
     )
@@ -84,6 +87,12 @@ pub(crate) async fn expire_overdue_jobs(
     )
     .fetch_all(&mut **tx)
     .await?;
+
+    for job in &expired {
+        runtime
+            .settle(tx, job.job_id, Some(&job.job_kind), JobDisposition::Failed)
+            .await?;
+    }
 
     Ok(expired)
 }

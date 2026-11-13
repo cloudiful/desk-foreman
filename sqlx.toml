@@ -1,0 +1,9 @@
+# SQLx configuration for the desk-foreman crates.
+#
+# The durable task library enables the `time` feature of SQLx through its
+# SeaORM dependency, so both date-time crates are compiled into every build of
+# this workspace. SQLx prefers `time` when both are enabled, which would change
+# the inferred type of every timestamp column. The application stores its
+# timestamps as `chrono` values, so the inference is pinned here.
+[macros.preferred-crates]
+date-time = "chrono"

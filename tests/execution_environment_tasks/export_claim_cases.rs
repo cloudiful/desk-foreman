@@ -129,6 +129,7 @@ async fn pending_or_expired_upload_cannot_commit_and_expiry_leaves_successor_rea
     );
     let expired = desk_foreman::db::execution_environment_jobs::expire_execution_environment_jobs(
         &fixture.database.pool,
+        &fixture.task_runtime,
         fixture.application_id,
         fixture.environment_id,
     )

@@ -108,6 +108,38 @@ compare-and-set keeps that boundary, including its unexpired `claimed`
 predicate, so an expired transport timeout stays unreclaimed rather than being
 silently cleared.
 
+## Durable task tracking
+
+Every claimed operation owns exactly one durable task in the `cloudiful_tasks`
+schema of the same database. The identity is stable: the key
+`environment-job:<job UUID>` in the namespace `desk-foreman`, in one queue per
+job kind (`ensure`, `stop`, `prepare_native_task`, `start_native_task`,
+`export_native_task`). The task payload carries the job UUID only.
+
+The claim and the task commit together: the domain compare-and-set, the task
+enqueue and the addressed task claim share one transaction, so a claimed
+operation always owns a claimed task and a refused task rolls the claim back.
+The terminal outcome seals the task in the same transaction: a successful
+domain outcome seals the task as succeeded. Every other terminal outcome
+(failed, uncertain, superseded, expired) seals it as failed or accepts an already
+cancelled task, without a retry.
+
+The application owns no task schema and writes no task SQL. The task library
+migrates its own schema on the existing pool before the server accepts a
+request, and the desk application reaches the tasks only through that library.
+An operation that was claimed before this integration existed has no task: its
+completion stays a no-op for the task and never invents one. That no-op requires
+that no queue of the namespace holds a task for the operation: a task found in
+another queue, or more than one task for the same operation, is an error that
+rolls the domain write back. The claim checks the same queues before it
+enqueues, so a key that already belongs to another queue can never create a
+second task.
+
+The deadline of the domain record stays authoritative: an overdue operation
+becomes `uncertain` and its task is sealed as failed. Nothing retries an
+expired operation. A manager that never polls leaves the overdue export
+operations of its own environments unexpired, exactly as before.
+
 ## Tenancy and legacy exclusion
 
 Ownership is enforced in SQL, not trusted from the caller: every operation

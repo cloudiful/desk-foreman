@@ -90,6 +90,30 @@ owner。上报的 ack 必须能反序列化为既有 `EnsureExecutionEnvironment
 `uncertain`。既有完成 CAS 维持该边界（含未超期 `claimed` 谓词），因此超期的
 传输超时保持未回收，而非被静默清除。
 
+## 持久任务跟踪
+
+每个被认领的操作在同一数据库的 `cloudiful_tasks` schema 中恰好拥有一个持久
+任务。身份是稳定的：命名空间 `desk-foreman` 下的 key
+`environment-job:<job UUID>`，按操作类型分队列（`ensure`、`stop`、
+`prepare_native_task`、`start_native_task`、`export_native_task`）。任务 payload
+只携带 job UUID。
+
+认领与任务同事务提交：领域 compare-and-set、任务入队与定向任务认领共享同一
+事务，因此被认领的操作必定拥有被认领的任务，任务被拒绝时认领一并回滚。终态
+结果在同一事务中封存任务：领域成功封存为 succeeded，其他一切终态（failed、
+uncertain、superseded、expired）封存为 failed，或接受任务已为 cancelled，且不重试。
+
+应用不拥有任务 schema，也不写任务 SQL。任务库在服务接收请求前于既有连接池上
+迁移自己的 schema，desk 应用只通过该库访问任务。在本集成之前被认领的操作没有
+任务：其完成对任务是空操作，绝不凭空创建任务。该空操作的前提是该操作在命名空间
+的任何队列中都没有任务：任务若出现在其他队列，或同一操作存在多个任务，都视为错误
+并回滚领域写入。认领在入队前检查同样的队列，因此已属于其他队列的键不会产生第二
+个任务。
+
+领域记录的截止时间仍是权威：超期操作变为 `uncertain`，其任务封存为 failed。
+任何超期操作都不会被重试。从不轮询的 manager，其自身环境中超期的导出操作仍
+然不会过期，与此前一致。
+
 ## 租户隔离与旧路径排除
 
 属主关系在 SQL 中强制，而非信任调用方：每个操作同时限定

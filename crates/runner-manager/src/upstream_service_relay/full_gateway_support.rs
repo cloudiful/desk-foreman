@@ -113,7 +113,8 @@ pub(crate) mod support {
             .expect("test signing key"),
             runner,
             runner_broker: RunnerBroker::new(broker_pool),
-            db: pool,
+            db: pool.clone(),
+            task_runtime: Arc::new(desk_foreman::db::task_runtime::TaskRuntime::new(pool)),
         }
     }
 

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Select the environment of one overdue export job of the authenticated\n-- runner manager. The bounded poll preflight expires at most\n-- one overdue export job per poll; the deadline and job order make the\n-- choice deterministic. Only pending or claimed export jobs of this manager\n-- are considered.\nSELECT application_id, environment_id\nFROM execution_environment_jobs\nWHERE assigned_manager_id = $1\n  AND job_kind = 'export_native_task'\n  AND state IN ('pending', 'claimed')\n  AND deadline_at <= clock_timestamp()\nORDER BY deadline_at ASC, job_id ASC\nLIMIT 1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "application_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "application_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "environment_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "execution_environment_jobs",
+            "name": "environment_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "839743302a4ea0fa5be04836793b7f10abc196e44eb2706b6fe88fbd5f2217e0"
+}

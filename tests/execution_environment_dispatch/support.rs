@@ -9,6 +9,7 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use desk_foreman::db::task_runtime::TaskRuntime;
 use desk_foreman::db::{
     queries::{EnqueueOutcome, EnsureOutcome, ensure_execution_environment},
     types::CreateRunnerManagerRequest,
@@ -34,6 +35,8 @@ fn replace_database_name(base_url: &str, db_name: &str) -> String {
 /// Isolated per-test database with async cleanup.
 pub struct DispatchDb {
     pub pool: PgPool,
+    /// The initialized durable task runtime of this database.
+    pub task_runtime: std::sync::Arc<TaskRuntime>,
     admin_pool: PgPool,
     db_name: String,
 }
@@ -64,8 +67,14 @@ impl DispatchDb {
             .run(&pool)
             .await
             .expect("run migrations on isolated dispatch test database");
+        let task_runtime = std::sync::Arc::new(TaskRuntime::new(pool.clone()));
+        task_runtime
+            .initialize()
+            .await
+            .expect("initialize the durable task runtime");
         Self {
             pool,
+            task_runtime,
             admin_pool,
             db_name,
         }

@@ -1,3 +1,4 @@
+use crate::db::task_runtime::TaskRuntime;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -15,6 +16,7 @@ const SUPERSEDED_RESULT: &str = "superseded_for_native_task_stop";
 
 pub(super) async fn stop(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
     task_id: Uuid,
@@ -24,9 +26,14 @@ pub(super) async fn stop(
         return Err(TaskExecutionError::InvalidToken);
     }
     let mut tx = pool.begin().await.map_err(types::internal)?;
-    super::native_execution::expire_overdue_native_jobs(&mut tx, application_id, environment_id)
-        .await
-        .map_err(types::internal)?;
+    super::native_execution::expire_overdue_native_jobs(
+        &mut tx,
+        runtime,
+        application_id,
+        environment_id,
+    )
+    .await
+    .map_err(types::internal)?;
     let (environment, task, _binding) =
         queries::lock_context(&mut tx, application_id, environment_id, task_id).await?;
 

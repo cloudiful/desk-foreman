@@ -39,6 +39,7 @@ impl AdminFixture {
         std::fs::create_dir_all(&workspace_root).expect("workspace root");
         let admin_state = test_state_with_admin(
             fixture.database.pool.clone(),
+            fixture.task_runtime.clone(),
             &workspace_root.to_string_lossy(),
             ADMIN_LOGIN,
             ADMIN_PASSWORD,

@@ -8,6 +8,7 @@
 //! `uncertain` stop re-admits without another increment, candidate change, or
 //! manager reassignment.
 
+use crate::db::task_runtime::TaskRuntime;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -29,6 +30,7 @@ use super::types::{
 /// new stop, and `None` for read-only replays.
 pub async fn stop_execution_environment(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
     expected_generation: i64,
@@ -39,7 +41,7 @@ pub async fn stop_execution_environment(
     }
 
     let mut tx = pool.begin().await?;
-    expire_overdue_jobs(&mut tx, application_id, environment_id).await?;
+    expire_overdue_jobs(&mut tx, runtime, application_id, environment_id).await?;
     let Some(environment) = lock_environment(&mut tx, application_id, environment_id).await? else {
         return Err(LifecycleError::NotFound);
     };

@@ -8,6 +8,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::db::execution_environments::NativeTask;
+use crate::db::task_runtime::TaskRuntime;
 
 /// One preparation completion request from the authenticated manager.
 pub(crate) struct PreparationCompletion {
@@ -37,9 +38,10 @@ pub(crate) enum PreparationCompletionOutcome {
 /// Complete one successful preparation reported by the authenticated manager.
 pub(crate) async fn complete_native_task_preparation(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     completion: PreparationCompletion,
 ) -> anyhow::Result<PreparationCompletionOutcome> {
-    transaction::complete(pool, completion).await
+    transaction::complete(pool, runtime, completion).await
 }
 
 /// Mark the task linked to a preparation job `uncertain` (expiry/failure).

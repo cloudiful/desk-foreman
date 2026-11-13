@@ -270,6 +270,11 @@ fn app_state_with_runner(root: PathBuf, runner: Arc<dyn RunnerService>) -> AppSt
         db: PgPoolOptions::new()
             .connect_lazy("postgres://example.invalid/test")
             .expect("lazy pool"),
+        task_runtime: Arc::new(crate::db::task_runtime::TaskRuntime::new(
+            PgPoolOptions::new()
+                .connect_lazy("postgres://example.invalid/test")
+                .expect("lazy pool"),
+        )),
     }
 }
 

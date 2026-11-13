@@ -29,7 +29,12 @@ async fn inconsistent_acks_are_rejected_and_leave_the_row_claimable() {
     )
     .await;
 
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
     let pulled = pull(&base, &token).await;
     assert_eq!(pulled, format!("envjob:{job_id}"));
     assert_eq!(job_state(&db.pool, job_id).await, "claimed");
@@ -149,7 +154,12 @@ async fn unconfirmed_and_failed_outcomes_become_uncertain_blockers() {
     )
     .await;
 
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
 
     // A valid but unconfirmed stop is an uncertain blocker, not a failure.
     let pulled = pull(&base, &token).await;
@@ -239,7 +249,12 @@ async fn completion_after_the_deadline_never_mutates_the_row() {
     )
     .await;
 
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
     let pulled = pull(&base, &token).await;
     assert_eq!(pulled, format!("envjob:{job_id}"));
 

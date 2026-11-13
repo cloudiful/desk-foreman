@@ -43,4 +43,5 @@ pub(crate) use dispatch::{
     find_execution_environment_job_by_id, is_environment_job_wire_id,
     parse_environment_job_wire_id,
 };
+pub(crate) use lifecycle::find_overdue_export_environment_for_manager;
 pub(crate) use resolution::{environment_job_owner, environment_job_wire_kind};

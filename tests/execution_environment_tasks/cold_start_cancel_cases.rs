@@ -203,9 +203,11 @@ async fn a_cancelled_cold_start_rolls_back_the_job_task_and_binding() {
     let start_pool = identifiable_pool(&fixture.database.pool).await;
     let application_id = fixture.application_id;
     let environment_id = fixture.environment_id;
+    let task_runtime = fixture.task_runtime.clone();
     let start = tokio::spawn(async move {
         start_native_task(
             &start_pool,
+            &task_runtime,
             application_id,
             environment_id,
             task_id,

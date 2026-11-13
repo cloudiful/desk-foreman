@@ -37,8 +37,8 @@ pub use types::{
     ACCEPTED_CONFIRMED_STOP_STATES, EnvironmentOperationDescriptor, LIFECYCLE_ENVIRONMENT_STATES,
     LIFECYCLE_STATE_READY, LIFECYCLE_STATE_REPLACED, LIFECYCLE_STATE_STARTING,
     LIFECYCLE_STATE_STOPPING, LIFECYCLE_STATE_UNCERTAIN, LifecycleEnvironment, OperationDescriptor,
-    SUPERSEDED_BY_STOP_PROOF_OUTCOME, ScopeAuthority, confirmed_stop_state, ensure_running_result,
-    environment_descriptor, lifecycle_state_is_valid,
+    ReplaceRequest, SUPERSEDED_BY_STOP_PROOF_OUTCOME, ScopeAuthority, ScopedCall,
+    confirmed_stop_state, ensure_running_result, environment_descriptor, lifecycle_state_is_valid,
 };
 
 /// Typed refusal for a lifecycle operation. The handler maps each variant to a
