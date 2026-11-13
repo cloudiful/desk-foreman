@@ -1,4 +1,5 @@
 mod behavior;
+mod capability;
 mod patch;
 mod schema;
 
@@ -29,6 +30,8 @@ use runner_protocol::{
     RunnerOwner, RunnerSessionStatus, ShellToolOutput,
 };
 use sqlx::postgres::PgPoolOptions;
+
+const RESOURCE_ACTOR_SUBJECT: &str = "user-42";
 
 #[derive(Default)]
 struct FakeRunnerService {
@@ -378,7 +381,8 @@ fn resource_workspace_actor(root: &Path, lease_owner: Option<&str>) -> ActorCont
     let mut actor = test_actor(root, 10);
     actor.mode = ActorMode::ApplicationSubject;
     actor.user = None;
-    actor.external_user_id = Some("__resource__".to_string());
+    actor.external_user_id = Some(RESOURCE_ACTOR_SUBJECT.to_string());
+    actor.principal_id = format!("application:1:{RESOURCE_ACTOR_SUBJECT}:artifact:abc");
     actor.workspace_binding = Some(WorkspaceBindingResponse {
         workspace_binding_id: 1,
         application_id: 1,

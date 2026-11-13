@@ -102,26 +102,15 @@ async fn build_workspace_git(
         .map_err(|_| "workspace Git alias lookup failed")?;
     let now = Utc::now();
     let expiry = capability_expiry(binding, now);
-    let claims = CapabilityClaims {
-        v: 1,
-        app_id: binding.application_id,
-        binding_id: binding.workspace_binding_id,
-        external_user_id: actor.external_user_id.clone().unwrap_or_default(),
-        principal_id: actor.principal_id.clone(),
-        lease_owner: actor.lease_owner.clone().unwrap_or_default(),
-        read: true,
-        write: actor.ensure_write_access().is_ok(),
-        aliases: aliases
-            .iter()
-            .map(|alias| CapabilityAlias {
-                remote_alias: alias.remote_alias.clone(),
-                upstream_id: alias.upstream_id,
-                generation: alias.capability_generation,
-            })
-            .collect(),
-        iat: now.timestamp(),
-        exp: expiry.timestamp(),
-    };
+    let alias_claims = aliases
+        .iter()
+        .map(|alias| CapabilityAlias {
+            remote_alias: alias.remote_alias.clone(),
+            upstream_id: alias.upstream_id,
+            generation: alias.capability_generation,
+        })
+        .collect::<Vec<_>>();
+    let claims = capability_claims(actor, binding, &alias_claims, now, expiry);
     let token = mint(&state.git_capability_signing_key, &claims)
         .map_err(|_| "workspace Git capability mint failed")?;
     let urls = aliases
@@ -144,6 +133,30 @@ async fn build_workspace_git(
         urls,
         expiry.timestamp(),
     )))
+}
+
+/// Builds the native Git capability claims for a shell dispatch. The subject
+/// is the binding's stored subject, which can differ from the real caller.
+pub(crate) fn capability_claims(
+    actor: &ActorContext,
+    binding: &crate::db::types::WorkspaceBindingResponse,
+    aliases: &[CapabilityAlias],
+    now: chrono::DateTime<Utc>,
+    expiry: chrono::DateTime<Utc>,
+) -> CapabilityClaims {
+    CapabilityClaims {
+        v: 1,
+        app_id: binding.application_id,
+        binding_id: binding.workspace_binding_id,
+        external_user_id: binding.external_user_id.clone(),
+        principal_id: actor.principal_id.clone(),
+        lease_owner: actor.lease_owner.clone().unwrap_or_default(),
+        read: true,
+        write: actor.ensure_write_access().is_ok(),
+        aliases: aliases.to_vec(),
+        iat: now.timestamp(),
+        exp: expiry.timestamp(),
+    }
 }
 
 fn workspace_tools(actor: &ActorContext) -> Result<WorkspaceFileTools, ToolError> {
