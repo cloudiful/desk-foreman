@@ -15,6 +15,72 @@ use tokio::{
 
 pub const DEFAULT_YIELD_TIME_MS: u64 = 1000;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum InputFailureStage {
+    Write,
+    Flush,
+}
+
+/// Input write or flush failure; retains the I/O cause and never the input.
+#[derive(Debug)]
+pub(super) struct InputFailure {
+    session_id: u64,
+    stage: InputFailureStage,
+    source: std::io::Error,
+}
+
+impl InputFailure {
+    fn action(&self) -> &'static str {
+        match self.stage {
+            InputFailureStage::Write => "write to",
+            InputFailureStage::Flush => "flush",
+        }
+    }
+}
+
+impl std::fmt::Display for InputFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "failed to {} session input (session_id {})",
+            self.action(),
+            self.session_id
+        )
+    }
+}
+
+impl std::error::Error for InputFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+pub(super) fn is_input_failure(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<InputFailure>().is_some())
+}
+
+async fn write_input(
+    session_id: u64,
+    writer: &mut (dyn AsyncWrite + Send + Unpin),
+    chars: &str,
+) -> Result<(), InputFailure> {
+    writer
+        .write_all(chars.as_bytes())
+        .await
+        .map_err(|source| InputFailure {
+            session_id,
+            stage: InputFailureStage::Write,
+            source,
+        })?;
+    writer.flush().await.map_err(|source| InputFailure {
+        session_id,
+        stage: InputFailureStage::Flush,
+        source,
+    })
+}
+
 pub(super) struct SessionState {
     pub(super) started_at: Instant,
     pub(super) last_activity: Instant,
@@ -135,14 +201,7 @@ impl ShellSession {
         }
         if !chars.is_empty() {
             let mut writer = self.writer.lock().await;
-            writer
-                .write_all(chars.as_bytes())
-                .await
-                .context("failed to write to session")?;
-            writer
-                .flush()
-                .await
-                .context("failed to flush session input")?;
+            write_input(self.id, &mut **writer, chars).await?;
         }
 
         let wait_ms = yield_time_ms.unwrap_or(DEFAULT_YIELD_TIME_MS);
@@ -393,4 +452,113 @@ fn utf8_prefix_len(bytes: &[u8], limit: usize) -> usize {
         end -= 1;
     }
     end
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
+    use tokio::io::{AsyncWrite, AsyncWriteExt};
+
+    use super::{InputFailureStage, is_input_failure, write_input};
+
+    struct FailingWriter {
+        fail_write: bool,
+        fail_flush: bool,
+    }
+
+    impl AsyncWrite for FailingWriter {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buffer: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            if self.fail_write {
+                Poll::Ready(Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "write side closed",
+                )))
+            } else {
+                Poll::Ready(Ok(buffer.len()))
+            }
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            if self.fail_flush {
+                Poll::Ready(Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "flush side closed",
+                )))
+            } else {
+                Poll::Ready(Ok(()))
+            }
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    fn rendered(error: anyhow::Error) -> String {
+        assert!(is_input_failure(&error));
+        format!("{error:#}")
+    }
+
+    #[tokio::test]
+    async fn write_failure_identifies_session_and_stage_without_input() {
+        let mut writer = FailingWriter {
+            fail_write: true,
+            fail_flush: false,
+        };
+        let error = write_input(7, &mut writer, "top-secret-input")
+            .await
+            .expect_err("write must fail");
+        assert_eq!(error.session_id, 7);
+        assert_eq!(error.stage, InputFailureStage::Write);
+
+        let text = rendered(anyhow::Error::new(error));
+        assert!(text.contains("session_id 7"), "{text}");
+        assert!(text.contains("write to"), "{text}");
+        assert!(text.contains("write side closed"), "{text}");
+        assert!(!text.contains("top-secret-input"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn flush_failure_identifies_session_and_stage() {
+        let mut writer = FailingWriter {
+            fail_write: false,
+            fail_flush: true,
+        };
+        let error = write_input(11, &mut writer, "input")
+            .await
+            .expect_err("flush must fail");
+        assert_eq!(error.session_id, 11);
+        assert_eq!(error.stage, InputFailureStage::Flush);
+
+        let text = rendered(anyhow::Error::new(error));
+        assert!(text.contains("session_id 11"), "{text}");
+        assert!(text.contains("flush"), "{text}");
+        assert!(text.contains("flush side closed"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn successful_write_and_flush_report_no_failure() {
+        let mut writer = FailingWriter {
+            fail_write: false,
+            fail_flush: false,
+        };
+        write_input(3, &mut writer, "input")
+            .await
+            .expect("write must succeed");
+        writer.flush().await.expect("flush must succeed");
+    }
+
+    #[test]
+    fn non_input_failures_are_not_classified_as_input_failures() {
+        assert!(!is_input_failure(&anyhow::anyhow!("unknown session_id 9")));
+    }
 }
