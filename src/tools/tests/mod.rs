@@ -254,6 +254,7 @@ fn app_state_with_runner(root: PathBuf, runner: Arc<dyn RunnerService>) -> AppSt
             frontend_dist: root.join("frontend/dist"),
             build_started_at: SystemTime::now(),
             git_gateway: Default::default(),
+            credential_protector: None,
         }),
         git_capability_signing_key: crate::git_gateway::signing_key::from_bytes(&[7u8; 32])
             .expect("test signing key"),

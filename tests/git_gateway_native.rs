@@ -268,6 +268,7 @@ async fn gateway_rejects_disabled_generation_cross_binding_and_read_only() {
     );
     let updated = desk_foreman::db::queries::update_workspace_git_upstream(
         &fixture.pool,
+        None,
         fixture.binding_id,
         origin.upstream_id,
         desk_foreman::db::workspace_git_upstreams::WorkspaceGitUpstreamUpdate {
@@ -307,6 +308,7 @@ async fn gateway_rejects_disabled_generation_cross_binding_and_read_only() {
     .unwrap();
     desk_foreman::db::queries::create_workspace_git_upstream(
         &fixture.pool,
+        None,
         other.workspace_binding_id,
         desk_foreman::db::workspace_git_upstreams::NewWorkspaceGitUpstream {
             remote_alias: "origin",

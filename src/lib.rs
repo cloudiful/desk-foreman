@@ -2,6 +2,7 @@ pub mod actor;
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod credential_cipher;
 pub mod db;
 pub mod error;
 pub mod git_gateway;

@@ -92,6 +92,7 @@ pub async fn create_workspace_git_upstream(
     let admin = require_admin(&state, &jar).await?;
     let upstream = insert_upstream(
         &state.db,
+        state.config.credential_protector.as_ref(),
         binding_id,
         NewWorkspaceGitUpstream {
             remote_alias: &request.remote_alias,
@@ -137,6 +138,7 @@ pub async fn update_workspace_git_upstream(
     let admin = require_admin(&state, &jar).await?;
     let upstream = modify_upstream(
         &state.db,
+        state.config.credential_protector.as_ref(),
         binding_id,
         upstream_id,
         WorkspaceGitUpstreamUpdate {
@@ -286,6 +288,12 @@ fn map_error(error: GitUpstreamError) -> AppError {
         }
         GitUpstreamError::DuplicateAlias => {
             AppError::conflict("remote alias already exists for this workspace binding")
+        }
+        GitUpstreamError::CredentialKeyUnavailable => {
+            AppError::service_unavailable("credential encryption key is not configured")
+        }
+        GitUpstreamError::CredentialUnreadable => {
+            AppError::service_unavailable("stored credential could not be decrypted")
         }
         GitUpstreamError::Internal(error) => AppError::internal(error),
     }

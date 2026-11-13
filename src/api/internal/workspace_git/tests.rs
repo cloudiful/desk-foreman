@@ -89,6 +89,7 @@ fn delete_query_declares_lease_owner_as_a_query_parameter() {
 #[tokio::test]
 #[ignore = "requires the dedicated issue PostgreSQL (P29A_TEST_DATABASE_URL)"]
 async fn application_authority_is_validated_under_the_binding_row_lock() -> anyhow::Result<()> {
+    use crate::credential_cipher::{CredentialProtector, MasterKey};
     use crate::db::{
         queries,
         types::CreateApplicationRequest,
@@ -100,6 +101,8 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
         },
     };
     use sqlx::postgres::PgPoolOptions;
+
+    let protector = CredentialProtector::new(MasterKey::from_bytes(&[7u8; 32])?);
 
     let url = std::env::var("P29A_TEST_DATABASE_URL")
         .expect("P29A_TEST_DATABASE_URL must point at the dedicated issue database");
@@ -148,6 +151,7 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let created = create_workspace_git_upstream_for_application(
         &pool,
+        Some(&protector),
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id,
             external_user_id: "subject-one",
@@ -171,6 +175,7 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let wrong_app = create_workspace_git_upstream_for_application(
         &pool,
+        Some(&protector),
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id + 1,
             external_user_id: "subject-one",
@@ -191,6 +196,7 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let wrong_subject = create_workspace_git_upstream_for_application(
         &pool,
+        Some(&protector),
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id,
             external_user_id: "subject-two",
@@ -211,6 +217,7 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let updated = update_workspace_git_upstream_for_application(
         &pool,
+        Some(&protector),
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id,
             external_user_id: "subject-one",
@@ -230,6 +237,7 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let identical = update_workspace_git_upstream_for_application(
         &pool,
+        Some(&protector),
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id,
             external_user_id: "subject-one",
@@ -250,6 +258,7 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let cross_binding = update_workspace_git_upstream_for_application(
         &pool,
+        Some(&protector),
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id,
             external_user_id: "subject-two",
@@ -328,6 +337,7 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
     let blocked = tokio::spawn(async move {
         create_workspace_git_upstream_for_application(
             &pool_for_task,
+            Some(&protector),
             &MutationAuthority::ApplicationSubject {
                 application_id: app_id,
                 external_user_id: "subject-one",
@@ -359,6 +369,7 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
 
     let current_lease = create_workspace_git_upstream_for_application(
         &pool,
+        None,
         &MutationAuthority::ApplicationSubject {
             application_id: app.application_id,
             external_user_id: "subject-one",

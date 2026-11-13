@@ -72,14 +72,17 @@ characters. Listing works for archived bindings; every mutation requires an
 active binding and returns `409` otherwise. Unknown or cross-binding upstream
 ids return `404`, and a duplicate alias for the same binding returns `409`.
 
-Credentials are write-only: responses expose only `has_credential`, never the
-username or secret. Upstream credentials are stored as plaintext in the
-database by explicit product decision; no operator key or extra configuration is
-required to create or update them. Rows written by the previous encrypted
-format remain detectable but are never decrypted: their upstream requests fail
-closed with `credential_resupply_required` until an administrator supplies a new
-credential, which replaces the legacy row. `enabled` is metadata only: it does
-not assert network reachability and does not make a Git push succeed by itself.
+Credentials are write-only: responses expose only `has_credential`. They are
+encrypted at rest with `DF_CREDENTIAL_MASTER_KEY` (base64 for exactly 32 bytes,
+identical across restarts and control-plane replicas). Without it, saving or
+using a credential fails closed with `503`; clear, anonymous, and
+credential-preserving metadata updates are unaffected.
+
+A repeated update with the same credential is a no-op and does not change the
+capability generation. An upstream retaining a username without a stored secret
+fails Git access with `403` (`credential_resupply_required`) until the client
+re-supplies it on its next bind or registration step; retries and pushes never
+re-supply it. `enabled` is metadata only: it promises no network reachability.
 
 ## Native Git gateway
 
@@ -97,7 +100,9 @@ configuration. The runner authenticates with Basic username `df-git` and a
 short-lived signed capability scoped to the workspace binding and alias
 generation. Upstream
 credentials are read only inside the gateway request and are never placed
-in the runner, its argv, `.git/config`, or the workspace. Client cookies,
+in the runner, its argv, `.git/config`, or the workspace. A stored credential
+that cannot be decrypted also fails closed with `503`, never as an anonymous
+upstream. Client cookies,
 authorization, proxy and forwarding headers are stripped; redirects, upstream
 error bodies, `Location`, `Set-Cookie` and `WWW-Authenticate` are never
 forwarded. Request and response packs are streamed with a configurable 256 MiB
@@ -147,10 +152,11 @@ check. A personal binding follows the existing personal write policy; a resource
 binding requires the live unexpired lease.
 
 Create and update use the same validated alias, URL and write-only credential
-DTOs as the admin API. Credentials are stored as plaintext and are never
-returned; responses expose `has_credential`, the alias, target URL, `enabled`
-and `capability_generation`. Every successful mutation bumps the generation, so
-older capabilities for that alias stop working. Duplicate alias, inactive
+DTOs as the admin API. Credentials are stored encrypted and are never returned;
+responses expose `has_credential`, the alias, target URL, `enabled` and
+`capability_generation`. Every effective mutation bumps the generation, so
+older capabilities for that alias stop working; an update that changes nothing
+is a no-op. Duplicate alias, inactive
 binding and stale lease return `409`; a foreign application or subject returns
 `403`; a cross-binding upstream id returns `404`.
 

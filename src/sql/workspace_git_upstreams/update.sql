@@ -6,14 +6,9 @@ SET remote_alias = COALESCE($3::text, remote_alias),
         WHEN $6::text IS NOT NULL THEN $6::text
         ELSE credential_username
     END,
-    credential_secret = CASE
-        WHEN $5::boolean THEN NULL
-        WHEN $7::text IS NOT NULL THEN $7::text
-        ELSE credential_secret
-    END,
     credential_ciphertext = CASE
         WHEN $5::boolean THEN NULL
-        WHEN $7::text IS NOT NULL THEN NULL
+        WHEN $7::bytea IS NOT NULL THEN $7::bytea
         ELSE credential_ciphertext
     END,
     credential_updated_at = CASE
@@ -31,7 +26,7 @@ RETURNING
     remote_alias,
     target_url,
     enabled,
-    (credential_secret IS NOT NULL OR credential_ciphertext IS NOT NULL) AS has_credential,
+    (credential_ciphertext IS NOT NULL) AS has_credential,
     capability_generation,
     created_at,
     updated_at

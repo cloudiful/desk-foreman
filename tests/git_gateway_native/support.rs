@@ -184,6 +184,7 @@ impl Fixture {
         ] {
             desk_foreman::db::queries::create_workspace_git_upstream(
                 &pool,
+                Some(&protector()),
                 binding.workspace_binding_id,
                 desk_foreman::db::workspace_git_upstreams::NewWorkspaceGitUpstream {
                     remote_alias: alias,
@@ -243,6 +244,13 @@ impl Fixture {
     }
 }
 
+fn protector() -> desk_foreman::credential_cipher::CredentialProtector {
+    desk_foreman::credential_cipher::CredentialProtector::new(
+        desk_foreman::credential_cipher::MasterKey::from_bytes(&[3u8; 32])
+            .expect("test master key"),
+    )
+}
+
 fn test_state(pool: PgPool, gateway_url: String) -> AppState {
     let runner: Arc<dyn RunnerService> = Arc::new(NoopRunner);
     let broker_pool = pool.clone();
@@ -278,6 +286,7 @@ fn test_state(pool: PgPool, gateway_url: String) -> AppState {
                 public_base_url: Some(gateway_url),
                 ..GitGatewayConfig::default()
             },
+            credential_protector: Some(protector()),
         }),
         git_capability_signing_key: desk_foreman::git_gateway::signing_key::from_bytes(&[7u8; 32])
             .expect("test signing key"),
