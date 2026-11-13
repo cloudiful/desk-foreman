@@ -41,6 +41,8 @@ export interface UsersMessages {
   drawer: {
     createTitle: string
     editTitle: string
+    createDescription: string
+    editDescription: string
   }
   fields: {
     loginName: string
@@ -72,6 +74,7 @@ export interface UsersMessages {
     emailRequired: string
     passwordRequired: string
     passwordLength: string
+    tokenNameRequired: string
   }
   notifications: {
     userCreated: string
@@ -148,6 +151,8 @@ const users: UsersMessages = {
   drawer: {
     createTitle: 'Create user',
     editTitle: 'Edit user',
+    createDescription: 'Add a new control plane user.',
+    editDescription: 'Update profile, role and access state.',
   },
   fields: {
     loginName: 'Login name',
@@ -179,6 +184,7 @@ const users: UsersMessages = {
     emailRequired: 'Email is required',
     passwordRequired: 'Password is required',
     passwordLength: 'Password must be at least 8 characters',
+    tokenNameRequired: 'Token name is required',
   },
   notifications: {
     userCreated: 'User created',
@@ -257,6 +263,8 @@ export const zhCN: UsersMessages = {
   drawer: {
     createTitle: '创建用户',
     editTitle: '编辑用户',
+    createDescription: '添加新的控制平面用户。',
+    editDescription: '更新个人资料、角色和访问状态。',
   },
   fields: {
     loginName: '登录名',
@@ -288,6 +296,7 @@ export const zhCN: UsersMessages = {
     emailRequired: '邮箱为必填项',
     passwordRequired: '密码为必填项',
     passwordLength: '密码至少需要 8 个字符',
+    tokenNameRequired: '令牌名称为必填项',
   },
   notifications: {
     userCreated: '用户已创建',

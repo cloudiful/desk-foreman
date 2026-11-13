@@ -32,7 +32,7 @@ export function formatRelative(value: string | null | undefined): string {
       }
     }
   }
-  return new Intl.RelativeTimeFormat(i18n.global.locale.value, {
+  return new Intl.RelativeTimeFormat(i18n.language, {
     numeric: 'always',
   }).format(-amount, unit)
 }
@@ -53,14 +53,13 @@ export function formatBytes(bytes: number | null | undefined): string {
 
 export function formatDuration(seconds: number | null | undefined): string {
   if (seconds === null || seconds === undefined) return '—'
-  if (seconds < 60)
-    return i18n.global.t('shared.duration.seconds', { value: seconds })
+  if (seconds < 60) return i18n.t('shared.duration.seconds', { value: seconds })
   const minutes = Math.floor(seconds / 60)
   const rest = seconds % 60
   if (minutes < 60)
-    return `${i18n.global.t('shared.duration.minutes', { value: minutes })} ${i18n.global.t('shared.duration.seconds', { value: rest })}`
+    return `${i18n.t('shared.duration.minutes', { value: minutes })} ${i18n.t('shared.duration.seconds', { value: rest })}`
   const hours = Math.floor(minutes / 60)
-  return `${i18n.global.t('shared.duration.hours', { value: hours })} ${i18n.global.t('shared.duration.minutes', { value: minutes % 60 })}`
+  return `${i18n.t('shared.duration.hours', { value: hours })} ${i18n.t('shared.duration.minutes', { value: minutes % 60 })}`
 }
 
 export function formatMilliseconds(ms: number | null | undefined): string {

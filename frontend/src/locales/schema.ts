@@ -27,6 +27,8 @@ export interface MessageSchema {
       bindings: string
       audit: string
     }
+    settings: string
+    darkMode: string
     changePassword: string
     signOut: string
     openNavigation: string
@@ -39,6 +41,10 @@ export interface MessageSchema {
       zhCN: string
     }
     user: string
+    notFound: {
+      title: string
+      description: string
+    }
   }
   auth: AuthMessages
   dashboard: DashboardMessages
@@ -67,6 +73,10 @@ export interface MessageSchema {
     empty: {
       noData: string
     }
+    pagination: string
+    paginationPrev: string
+    paginationNext: string
+    sortBy: string
     errorAlert: {
       description: string
       retry: string
@@ -111,6 +121,7 @@ export interface MessageSchema {
       idle: string
       stale: string
       archived: string
+      expired: string
       cleanup_failed: string
       removed: string
       cancelled: string

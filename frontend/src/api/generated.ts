@@ -1,3 +1,4 @@
 export * from '../generated/openapi/types.gen'
 export * from '../generated/openapi/sdk.gen'
+export * from '../generated/openapi/@tanstack/react-query.gen'
 export { client } from '../generated/openapi/client.gen'

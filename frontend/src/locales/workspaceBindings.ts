@@ -94,6 +94,7 @@ export interface WorkspaceBindingsMessages {
       disabled: string
     }
     errors: { clearConflict: string; pairRequired: string }
+    validation: { aliasRequired: string; targetUrlRequired: string }
   }
 }
 
@@ -219,6 +220,10 @@ const workspaceBindings: WorkspaceBindingsMessages = {
         'Remove the credential cannot be combined with a replacement username or secret',
       pairRequired: 'Credential username and secret must be provided together',
     },
+    validation: {
+      aliasRequired: 'Remote alias is required',
+      targetUrlRequired: 'Target URL is required',
+    },
   },
 }
 
@@ -338,6 +343,10 @@ export const zhCN: WorkspaceBindingsMessages = {
     errors: {
       clearConflict: '移除凭据不能与替换用户名或密钥同时进行',
       pairRequired: '凭据用户名和密钥必须同时提供',
+    },
+    validation: {
+      aliasRequired: '远端别名为必填项',
+      targetUrlRequired: '目标 URL 为必填项',
     },
   },
 }

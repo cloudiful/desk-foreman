@@ -1,9 +1,9 @@
 import js from '@eslint/js'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import prettier from 'eslint-config-prettier'
 import globals from 'globals'
-import pluginVue from 'eslint-plugin-vue'
 import tseslint from 'typescript-eslint'
-import eslintConfigPrettier from 'eslint-config-prettier'
-import vueParser from 'vue-eslint-parser'
 
 export default tseslint.config(
   {
@@ -18,7 +18,6 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
-  ...pluginVue.configs['flat/recommended'],
   {
     files: ['**/*.{ts,tsx,mts,cts}'],
     languageOptions: {
@@ -26,13 +25,31 @@ export default tseslint.config(
       parserOptions: {
         ecmaVersion: 'latest',
         sourceType: 'module',
+        ecmaFeatures: { jsx: true },
       },
       globals: {
         ...globals.browser,
         ...globals.node,
       },
     },
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+    },
     rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
+      'react-refresh/only-export-components': [
+        'warn',
+        {
+          allowConstantExport: true,
+          allowExportNames: [
+            'buttonVariants',
+            'badgeVariants',
+            'tabsListVariants',
+          ],
+        },
+      ],
       '@typescript-eslint/no-unused-vars': [
         'warn',
         {
@@ -44,26 +61,5 @@ export default tseslint.config(
       'no-console': 'off',
     },
   },
-  {
-    files: ['**/*.vue'],
-    languageOptions: {
-      parser: vueParser,
-      parserOptions: {
-        parser: tseslint.parser,
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-        extraFileExtensions: ['.vue'],
-      },
-      globals: {
-        ...globals.browser,
-        ...globals.node,
-      },
-    },
-    rules: {
-      'vue/multi-word-component-names': 'off',
-      '@typescript-eslint/no-explicit-any': 'off',
-      'no-console': 'off',
-    },
-  },
-  eslintConfigPrettier,
+  prettier,
 )

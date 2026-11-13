@@ -28,6 +28,8 @@ const enUS = {
       bindings: 'Bindings',
       audit: 'Audit log',
     },
+    settings: 'Settings',
+    darkMode: 'Dark mode',
     changePassword: 'Change password',
     signOut: 'Sign out',
     openNavigation: 'Open navigation',
@@ -40,6 +42,10 @@ const enUS = {
       zhCN: 'Simplified Chinese',
     },
     user: 'User',
+    notFound: {
+      title: 'Page not found',
+      description: 'The requested page does not exist.',
+    },
   },
   auth,
   dashboard,
@@ -68,6 +74,10 @@ const enUS = {
     empty: {
       noData: 'No data',
     },
+    pagination: 'Page {page} of {totalPages}',
+    paginationPrev: 'Previous page',
+    paginationNext: 'Next page',
+    sortBy: 'Sort by {column}',
     errorAlert: {
       description: 'The request failed. Check the details and try again.',
       retry: 'Retry',
@@ -113,6 +123,7 @@ const enUS = {
       idle: 'Idle',
       stale: 'Stale',
       archived: 'Archived',
+      expired: 'Expired',
       cleanup_failed: 'Cleanup failed',
       removed: 'Removed',
       cancelled: 'Cancelled',
