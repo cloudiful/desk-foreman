@@ -20,7 +20,7 @@ use super::{
     RunnerBackend,
     backend::RunnerOperationLease,
     session_gate::{SessionGate, SessionPermit},
-    shell_session::ShellSession,
+    shell_session::{self, ShellSession},
     shell_spawn::{build_command, build_pty_command, open_pty},
 };
 
@@ -202,8 +202,11 @@ impl ShellManager {
         let output = match output {
             Ok(output) => output,
             Err(error) => {
-                self.sessions.lock().await.remove(&request.session_id);
-                let _ = session.session.kill().await;
+                // An input failure keeps the session for later poll, cancel or TTL.
+                if !shell_session::is_input_failure(&error) {
+                    self.sessions.lock().await.remove(&request.session_id);
+                    let _ = session.session.kill().await;
+                }
                 return Err(error);
             }
         };

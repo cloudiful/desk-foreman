@@ -63,13 +63,51 @@ pub(super) async fn execute_job(
             error: None,
         },
         Err(error) => {
-            tracing::error!(job_id, kind = %job.kind, error = %error, "runner job failed");
+            let message = job_failure_message(&job.kind, &error);
+            tracing::error!(job_id, kind = %job.kind, error = %message, "runner job failed");
             RunnerJobResult {
                 job_id,
                 ok: false,
                 result: None,
-                error: Some(error.to_string()),
+                error: Some(message),
             }
         }
+    }
+}
+
+/// `write_stdin` keeps its full source chain in log and result; other kinds keep top-level context.
+fn job_failure_message(kind: &str, error: &anyhow::Error) -> String {
+    if kind == "write_stdin" {
+        format!("{error:#}")
+    } else {
+        error.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::job_failure_message;
+
+    fn broken_pipe_error() -> anyhow::Error {
+        anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "write side closed",
+        ))
+        .context("failed to write to session input (session_id 7)")
+    }
+
+    #[test]
+    fn write_stdin_failure_keeps_full_chain() {
+        let message = job_failure_message("write_stdin", &broken_pipe_error());
+        assert_eq!(
+            message,
+            "failed to write to session input (session_id 7): write side closed"
+        );
+    }
+
+    #[test]
+    fn other_job_kinds_keep_top_level_context() {
+        let message = job_failure_message("exec_shell", &broken_pipe_error());
+        assert_eq!(message, "failed to write to session input (session_id 7)");
     }
 }
