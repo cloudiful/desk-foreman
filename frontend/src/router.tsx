@@ -8,6 +8,7 @@ import {
 import { ChangePasswordPage } from '@/features/auth/change-password-page'
 import { LoginPage } from '@/features/auth/login-page'
 import { AppShell } from '@/features/shell/app-shell'
+import { SettingsPage } from '@/features/settings/settings-page'
 import { NotFoundPage } from '@/features/shell/not-found-page'
 import { RouteErrorPage } from '@/features/shell/route-error-page'
 import { DashboardPage } from '@/features/dashboard/dashboard-page'
@@ -47,6 +48,7 @@ export const router = createBrowserRouter([
     errorElement: <RouteErrorPage />,
     children: [
       { index: true, element: <DashboardPage /> },
+      { path: 'settings', element: <SettingsPage /> },
       {
         path: 'admin',
         element: <RequireAdmin />,

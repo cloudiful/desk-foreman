@@ -175,9 +175,14 @@ export function RunnerManagersPage() {
             >
               <RefreshCw aria-hidden="true" />
             </Button>
-            <Button onClick={() => setFormTarget(null)}>
+            <Button
+              aria-label={t('runnerManagers.actions.add')}
+              onClick={() => setFormTarget(null)}
+            >
               <Plus aria-hidden="true" />
-              {t('runnerManagers.actions.add')}
+              <span className="hidden sm:inline">
+                {t('runnerManagers.actions.add')}
+              </span>
             </Button>
           </>
         }

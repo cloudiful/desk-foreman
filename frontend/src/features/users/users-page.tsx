@@ -308,9 +308,14 @@ export function UsersPage() {
             >
               <RefreshCw aria-hidden="true" />
             </Button>
-            <Button onClick={() => setFormTarget(null)}>
+            <Button
+              aria-label={t('users.actions.create')}
+              onClick={() => setFormTarget(null)}
+            >
               <Plus aria-hidden="true" />
-              {t('users.actions.create')}
+              <span className="hidden sm:inline">
+                {t('users.actions.create')}
+              </span>
             </Button>
           </>
         }

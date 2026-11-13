@@ -271,7 +271,9 @@ export function OperationsPage() {
                 className={autoRefresh ? 'size-4 text-primary' : 'size-4'}
                 aria-hidden="true"
               />
-              {t('operations.autoRefresh')}
+              <span className="hidden sm:inline">
+                {t('operations.autoRefresh')}
+              </span>
             </span>
             <Switch
               size="sm"

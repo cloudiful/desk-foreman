@@ -179,9 +179,14 @@ export function ApplicationsPage() {
             >
               <RefreshCw aria-hidden="true" />
             </Button>
-            <Button onClick={() => setFormTarget(null)}>
+            <Button
+              aria-label={t('applications.actions.create')}
+              onClick={() => setFormTarget(null)}
+            >
               <Plus aria-hidden="true" />
-              {t('applications.actions.create')}
+              <span className="hidden sm:inline">
+                {t('applications.actions.create')}
+              </span>
             </Button>
           </>
         }

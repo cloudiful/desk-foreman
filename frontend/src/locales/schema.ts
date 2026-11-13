@@ -27,6 +27,8 @@ export interface MessageSchema {
       bindings: string
       audit: string
     }
+    settings: string
+    darkMode: string
     changePassword: string
     signOut: string
     openNavigation: string

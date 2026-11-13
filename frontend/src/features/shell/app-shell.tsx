@@ -7,10 +7,9 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  Moon,
+  Settings,
   ScrollText,
   ServerCog,
-  Sun,
   Users,
   X,
   type LucideIcon,
@@ -30,8 +29,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import { useTheme } from '@/lib/theme-context'
-import { SUPPORTED_LOCALES, setLocale, type Locale } from '@/i18n'
+import { PageActionsContext } from './page-actions'
 import { useSession } from '@/features/auth/session-context'
 
 interface NavItem {
@@ -42,12 +40,12 @@ interface NavItem {
 }
 
 export function AppShell() {
-  const { t, i18n } = useTranslation()
-  const { isDark, toggle } = useTheme()
+  const { t } = useTranslation()
   const { user, logout } = useSession()
   const location = useLocation()
   const navigate = useNavigate()
   const [navOpen, setNavOpen] = useState(false)
+  const [actionTarget, setActionTarget] = useState<HTMLDivElement | null>(null)
 
   const navItems: NavItem[] = [
     {
@@ -105,9 +103,10 @@ export function AppShell() {
     )
   }
 
-  const title =
-    visibleItems.find((item) => isActive(item.path))?.label ??
-    t('shell.productName')
+  const title = isActive('/settings')
+    ? t('shell.settings')
+    : (visibleItems.find((item) => isActive(item.path))?.label ??
+      t('shell.productName'))
 
   async function handleLogout(): Promise<void> {
     try {
@@ -144,154 +143,142 @@ export function AppShell() {
     </nav>
   )
 
-  return (
-    <div className="min-h-screen bg-muted">
-      <div className="mx-auto flex max-w-7xl">
-        <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r bg-card lg:flex">
-          <div className="flex items-center gap-2.5 px-5 py-4">
-            <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <Hammer className="size-4.5" aria-hidden="true" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold">
-                {t('shell.productName')}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {t('shell.subtitle')}
-              </div>
-            </div>
-          </div>
-          <div className="mt-2 flex-1 overflow-y-auto px-3 pb-4">{navList}</div>
-          <div className="border-t p-3">
-            <Link
-              to="/change-password"
-              className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            >
-              <KeyRound className="size-4.5" aria-hidden="true" />
-              {t('shell.changePassword')}
-            </Link>
-          </div>
-        </aside>
-
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 flex items-center gap-3 border-b bg-card/80 px-4 py-3 backdrop-blur md:px-6">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="lg:hidden"
-              aria-label={t('shell.openNavigation')}
-              onClick={() => setNavOpen((open) => !open)}
-            >
-              {navOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
-            </Button>
-            <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">
-              {title}
-            </h2>
-
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={
-                isDark
-                  ? t('shell.switchToLightMode')
-                  : t('shell.switchToDarkMode')
-              }
-              onClick={toggle}
-            >
-              {isDark ? (
-                <Sun aria-hidden="true" />
-              ) : (
-                <Moon aria-hidden="true" />
-              )}
-            </Button>
-
-            <select
-              className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-              aria-label={t('shell.language')}
-              value={i18n.language}
-              onChange={(event) => setLocale(event.target.value as Locale)}
-            >
-              {SUPPORTED_LOCALES.map((locale) => (
-                <option key={locale} value={locale}>
-                  {t(`shell.languages.${locale === 'en-US' ? 'enUS' : 'zhCN'}`)}
-                </option>
-              ))}
-            </select>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="flex size-8 items-center justify-center rounded-full bg-secondary text-xs font-medium text-secondary-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                  aria-label={t('shell.openUserMenu')}
-                >
-                  {(user?.display_name ?? user?.login_name ?? t('shell.user'))
-                    .slice(0, 2)
-                    .toUpperCase()}
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>
-                  {user?.display_name ?? user?.login_name ?? t('shell.user')}
-                </DropdownMenuLabel>
-                {user?.email ? (
-                  <div className="px-2 py-1 text-xs text-muted-foreground">
-                    {user.email}
-                  </div>
-                ) : null}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => navigate('/change-password')}>
-                  <KeyRound aria-hidden="true" />
-                  {t('shell.changePassword')}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="text-destructive focus:text-destructive"
-                  onSelect={() => void handleLogout()}
-                >
-                  <LogOut aria-hidden="true" />
-                  {t('shell.signOut')}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </header>
-
-          <main className="flex-1 px-4 py-6 md:px-6">
-            <Outlet />
-          </main>
-        </div>
-      </div>
-
-      {navOpen ? (
-        <div className="fixed inset-0 z-40 lg:hidden">
+  const footer = (
+    <div className="border-t p-3">
+      <Link
+        to="/settings"
+        onClick={() => setNavOpen(false)}
+        className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+      >
+        <Settings className="size-4.5" aria-hidden="true" />
+        {t('shell.settings')}
+      </Link>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="absolute inset-0 bg-black/50"
-            aria-label={t('shell.openNavigation')}
-            onClick={() => setNavOpen(false)}
-          />
-          <div className="absolute inset-y-0 left-0 w-64 border-r bg-card p-4">
-            <div className="mb-4 flex items-center gap-2.5">
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            aria-label={t('shell.openUserMenu')}
+          >
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-medium text-secondary-foreground">
+              {(user?.display_name ?? user?.login_name ?? t('shell.user'))
+                .slice(0, 2)
+                .toUpperCase()}
+            </span>
+            <span className="truncate">
+              {user?.display_name ?? user?.login_name ?? t('shell.user')}
+            </span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start">
+          <DropdownMenuLabel>
+            {user?.display_name ?? user?.login_name ?? t('shell.user')}
+          </DropdownMenuLabel>
+          {user?.email ? (
+            <div className="px-2 py-1 text-xs text-muted-foreground">
+              {user.email}
+            </div>
+          ) : null}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => {
+              setNavOpen(false)
+              navigate('/change-password')
+            }}
+          >
+            <KeyRound aria-hidden="true" />
+            {t('shell.changePassword')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onSelect={() => void handleLogout()}
+          >
+            <LogOut aria-hidden="true" />
+            {t('shell.signOut')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+
+  return (
+    <PageActionsContext.Provider value={actionTarget}>
+      <div className="min-h-screen bg-muted">
+        <div className="mx-auto flex max-w-7xl">
+          <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r bg-card lg:flex">
+            <div className="flex items-center gap-2.5 px-5 py-4">
               <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
                 <Hammer className="size-4.5" aria-hidden="true" />
               </div>
-              <div className="text-sm font-semibold">
-                {t('shell.productName')}
+              <div>
+                <div className="text-sm font-semibold">
+                  {t('shell.productName')}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {t('shell.subtitle')}
+                </div>
               </div>
             </div>
-            {navList}
-            <div className="mt-4 border-t pt-3">
-              <Link
-                to="/change-password"
-                onClick={() => setNavOpen(false)}
-                className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground"
-              >
-                <KeyRound className="size-4.5" aria-hidden="true" />
-                {t('shell.changePassword')}
-              </Link>
+            <div className="mt-2 flex-1 overflow-y-auto px-3 pb-4">
+              {navList}
             </div>
+            {footer}
+          </aside>
+
+          <div className="flex min-w-0 flex-1 flex-col">
+            <header className="sticky top-0 z-20 flex items-center gap-3 border-b bg-card/80 px-4 py-3 backdrop-blur md:px-6">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="lg:hidden"
+                aria-label={t('shell.openNavigation')}
+                onClick={() => setNavOpen((open) => !open)}
+              >
+                {navOpen ? (
+                  <X aria-hidden="true" />
+                ) : (
+                  <Menu aria-hidden="true" />
+                )}
+              </Button>
+              <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">
+                {title}
+              </h2>
+
+              <div
+                ref={setActionTarget}
+                className="flex shrink-0 items-center gap-2"
+              />
+            </header>
+
+            <main className="flex-1 px-4 py-6 md:px-6">
+              <Outlet />
+            </main>
           </div>
         </div>
-      ) : null}
-    </div>
+
+        {navOpen ? (
+          <div className="fixed inset-0 z-40 lg:hidden">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/50"
+              aria-label={t('shell.openNavigation')}
+              onClick={() => setNavOpen(false)}
+            />
+            <div className="absolute inset-y-0 left-0 flex w-64 flex-col border-r bg-card">
+              <div className="flex items-center gap-2.5 p-4">
+                <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                  <Hammer className="size-4.5" aria-hidden="true" />
+                </div>
+                <div className="text-sm font-semibold">
+                  {t('shell.productName')}
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto px-3">{navList}</div>
+              {footer}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </PageActionsContext.Provider>
   )
 }

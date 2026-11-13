@@ -1,11 +1,12 @@
-import type { ReactNode } from 'react'
+import { useContext, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { PageActionsContext } from '@/features/shell/page-actions'
 
 interface PageHeaderProps {
   actions?: ReactNode
 }
 
 export function PageHeader({ actions }: PageHeaderProps) {
-  return (
-    <div className="flex min-h-9 items-center justify-end gap-2">{actions}</div>
-  )
+  const target = useContext(PageActionsContext)
+  return target ? createPortal(actions, target) : null
 }

@@ -28,6 +28,8 @@ const enUS = {
       bindings: 'Bindings',
       audit: 'Audit log',
     },
+    settings: 'Settings',
+    darkMode: 'Dark mode',
     changePassword: 'Change password',
     signOut: 'Sign out',
     openNavigation: 'Open navigation',

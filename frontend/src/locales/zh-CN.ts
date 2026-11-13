@@ -28,6 +28,8 @@ const zhCN = {
       bindings: '绑定',
       audit: '审计日志',
     },
+    settings: '设置',
+    darkMode: '深色模式',
     changePassword: '修改密码',
     signOut: '退出登录',
     openNavigation: '打开导航',

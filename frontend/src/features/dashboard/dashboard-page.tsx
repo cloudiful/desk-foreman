@@ -66,7 +66,7 @@ export function DashboardPage() {
             onClick={refresh}
           >
             <RefreshCw aria-hidden="true" />
-            {t('dashboard.refresh')}
+            <span className="hidden sm:inline">{t('dashboard.refresh')}</span>
           </Button>
         }
       />
