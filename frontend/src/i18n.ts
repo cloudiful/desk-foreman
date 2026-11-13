@@ -1,7 +1,6 @@
-import { ref, watch } from 'vue'
-import { createI18n } from 'vue-i18n'
+import i18next from 'i18next'
+import { initReactI18next } from 'react-i18next'
 import enUS from './locales/en-US'
-import type { MessageSchema } from './locales/schema'
 import zhCN from './locales/zh-CN'
 
 export const SUPPORTED_LOCALES = ['en-US', 'zh-CN'] as const
@@ -9,11 +8,6 @@ export type Locale = (typeof SUPPORTED_LOCALES)[number]
 export const DEFAULT_LOCALE: Locale = 'en-US'
 
 const STORAGE_KEY = 'desk-foreman-locale'
-
-const messages: Record<Locale, MessageSchema> = {
-  'en-US': enUS,
-  'zh-CN': zhCN,
-}
 
 function isLocale(value: string | null): value is Locale {
   return value !== null && SUPPORTED_LOCALES.includes(value as Locale)
@@ -39,31 +33,36 @@ function resolveInitialLocale(): Locale {
   return browserLocale()
 }
 
-export const locale = ref<Locale>(resolveInitialLocale())
+export const i18n = i18next.createInstance()
 
-export const i18n = createI18n<[MessageSchema], Locale, false>({
-  legacy: false,
-  locale: locale.value,
-  fallbackLocale: DEFAULT_LOCALE,
-  messages,
+void i18n.use(initReactI18next).init({
+  resources: {
+    'en-US': { translation: enUS },
+    'zh-CN': { translation: zhCN },
+  },
+  lng: resolveInitialLocale(),
+  fallbackLng: DEFAULT_LOCALE,
+  initAsync: false,
+  interpolation: {
+    escapeValue: false,
+    prefix: '{',
+    suffix: '}',
+  },
 })
 
-function applyLocale(value: Locale): void {
-  i18n.global.locale.value = value
+if (typeof document !== 'undefined') {
+  document.documentElement.lang = i18n.language
+}
+
+export function setLocale(value: Locale): void {
+  void i18n.changeLanguage(value)
   if (typeof document !== 'undefined') {
     document.documentElement.lang = value
   }
-  if (typeof window !== 'undefined') {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, value)
-    } catch {
-      // Locale still applies for this session when persistence is unavailable.
-    }
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(STORAGE_KEY, value)
+  } catch {
+    // Locale still applies for this session when persistence is unavailable.
   }
-}
-
-watch(locale, applyLocale, { immediate: true })
-
-export function setLocale(value: Locale): void {
-  if (locale.value !== value) locale.value = value
 }

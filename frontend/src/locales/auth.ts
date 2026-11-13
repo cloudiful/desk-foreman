@@ -11,6 +11,7 @@ export interface AuthMessages {
   changePassword: {
     title: string
     subtitle: string
+    voluntarySubtitle: string
     currentPassword: string
     newPassword: string
     newPasswordHint: string
@@ -40,6 +41,7 @@ const auth = {
   changePassword: {
     title: 'Set a new password',
     subtitle: 'You must change the default password before continuing',
+    voluntarySubtitle: 'Update the password for your account',
     currentPassword: 'Current password',
     newPassword: 'New password',
     newPasswordHint: 'At least 8 characters',
@@ -69,6 +71,7 @@ export const zhCN: AuthMessages = {
   changePassword: {
     title: '设置新密码',
     subtitle: '继续之前必须修改默认密码',
+    voluntarySubtitle: '更新你的账户密码',
     currentPassword: '当前密码',
     newPassword: '新密码',
     newPasswordHint: '至少 8 个字符',

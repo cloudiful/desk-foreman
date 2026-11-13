@@ -31,6 +31,8 @@ export interface RunnerManagersMessages {
   drawer: {
     createTitle: string
     editTitle: string
+    createDescription: string
+    editDescription: string
   }
   sections: {
     connection: string
@@ -125,6 +127,9 @@ const runnerManagers: RunnerManagersMessages = {
   drawer: {
     createTitle: 'Create runner manager',
     editTitle: 'Edit runner manager',
+    createDescription:
+      'Register a pull-based runner manager and issue its token.',
+    editDescription: 'Update connection, container and resource limits.',
   },
   sections: {
     connection: 'Connection',
@@ -222,6 +227,8 @@ export const zhCN: RunnerManagersMessages = {
   drawer: {
     createTitle: '创建运行器管理器',
     editTitle: '编辑运行器管理器',
+    createDescription: '注册拉取式运行器管理器并签发其令牌。',
+    editDescription: '更新连接、容器和资源限制。',
   },
   sections: {
     connection: '连接',

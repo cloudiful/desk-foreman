@@ -38,6 +38,8 @@ export interface ApplicationsMessages {
   drawer: {
     createTitle: string
     editTitle: string
+    createDescription: string
+    editDescription: string
   }
   sections: {
     general: string
@@ -68,7 +70,10 @@ export interface ApplicationsMessages {
   }
   validation: {
     nameRequired: string
+    limitNonNegative: string
+    tokenNameRequired: string
   }
+  retainedScopes: string
   notifications: {
     created: string
     updated: string
@@ -130,6 +135,9 @@ const applications: ApplicationsMessages = {
   drawer: {
     createTitle: 'Create application',
     editTitle: 'Edit application',
+    createDescription:
+      'Add an application that can authenticate with workspace tokens.',
+    editDescription: 'Update application access, scopes and resource limits.',
   },
   sections: {
     general: 'General',
@@ -160,7 +168,10 @@ const applications: ApplicationsMessages = {
   },
   validation: {
     nameRequired: 'Name is required',
+    limitNonNegative: 'Limits must be zero or greater',
+    tokenNameRequired: 'Token name is required',
   },
+  retainedScopes: 'Retained scopes: {scopes}',
   notifications: {
     created: 'Application created',
     updated: 'Application updated',
@@ -223,6 +234,8 @@ export const zhCN: ApplicationsMessages = {
   drawer: {
     createTitle: '创建应用',
     editTitle: '编辑应用',
+    createDescription: '添加可使用工作区令牌进行身份验证的应用。',
+    editDescription: '更新应用访问权限、权限范围和资源限制。',
   },
   sections: {
     general: '常规',
@@ -253,7 +266,10 @@ export const zhCN: ApplicationsMessages = {
   },
   validation: {
     nameRequired: '名称为必填项',
+    limitNonNegative: '限制值必须大于或等于零',
+    tokenNameRequired: '令牌名称为必填项',
   },
+  retainedScopes: '保留的权限范围：{scopes}',
   notifications: {
     created: '应用已创建',
     updated: '应用已更新',

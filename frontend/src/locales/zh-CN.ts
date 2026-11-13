@@ -40,6 +40,10 @@ const zhCN = {
       zhCN: '简体中文',
     },
     user: '用户',
+    notFound: {
+      title: '页面不存在',
+      description: '请求的页面不存在。',
+    },
   },
   auth,
   dashboard,
@@ -68,6 +72,10 @@ const zhCN = {
     empty: {
       noData: '暂无数据',
     },
+    pagination: '第 {page} 页，共 {totalPages} 页',
+    paginationPrev: '上一页',
+    paginationNext: '下一页',
+    sortBy: '按{column}排序',
     errorAlert: {
       description: '请求失败，请检查详情后重试。',
       retry: '重试',
@@ -112,6 +120,7 @@ const zhCN = {
       idle: '空闲',
       stale: '已过期',
       archived: '已归档',
+      expired: '已过期',
       cleanup_failed: '清理失败',
       removed: '已移除',
       cancelled: '已取消',

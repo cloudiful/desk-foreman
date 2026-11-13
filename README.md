@@ -105,12 +105,13 @@ Tool audit records store actor/workspace/tool metadata, hashes, status, duration
 
 ## Frontend
 
-- `frontend/` is a Vue 3 + Nuxt UI + Tailwind CSS admin SPA (dark mode by default)
-- Rust exports `openapi.json` and the frontend consumes generated OpenAPI SDK stubs
-- `frontend` scripts use `bun` by default
+- `frontend/` is a React + TypeScript + shadcn/ui + Tailwind CSS admin SPA (dark mode by default) using TanStack Query, Table and Form
+- Rust exports `openapi.json`; the frontend consumes generated OpenAPI SDK types plus native TanStack Query options and mutations
+- Pages cover login and password change, the dashboard, operations, audit, users, applications, runner managers and workspace bindings
+- `frontend` scripts use `bun`: `bun run gen:api`, `bun run dev`, `bun run build`, `bun run typecheck`, `bun run lint` and `bun run format:check`
 - `bun.lock` is intentionally not committed; CI resolves frontend deps at build time
-- Local dev frontend runs on `5173`
-- Containerized frontend is served by `nginx` on port `80`
+- Local dev frontend runs on `5173` and proxies `/api` to `http://127.0.0.1:3000`
+- Containerized frontend is served by `nginx` on port `80`; the service serves `frontend/dist/index.html` from the same origin
 
 ## Run
 
