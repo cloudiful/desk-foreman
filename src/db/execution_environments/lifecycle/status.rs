@@ -10,6 +10,7 @@
 //! obsolete ensure records; an unconfirmed stop downgrades `stopping` to
 //! `uncertain`.
 
+use crate::db::task_runtime::TaskRuntime;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -27,11 +28,12 @@ use super::types::{
 /// Reconcile persisted evidence and return the lifecycle descriptor.
 pub async fn execution_environment_status(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
 ) -> Result<EnvironmentOperationDescriptor, LifecycleError> {
     let mut tx = pool.begin().await?;
-    expire_overdue_jobs(&mut tx, application_id, environment_id).await?;
+    expire_overdue_jobs(&mut tx, runtime, application_id, environment_id).await?;
     let Some(mut environment) = lock_environment(&mut tx, application_id, environment_id).await?
     else {
         return Err(LifecycleError::NotFound);
@@ -88,6 +90,7 @@ pub async fn execution_environment_status(
             // reconciliation is a no-op once they are terminal.
             supersede_ensure_jobs(
                 &mut tx,
+                runtime,
                 application_id,
                 environment_id,
                 manager_id,

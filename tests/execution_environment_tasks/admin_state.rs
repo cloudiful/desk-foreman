@@ -14,11 +14,13 @@ use super::support::call;
 
 pub async fn test_state_with_admin(
     pool: PgPool,
+    runtime: std::sync::Arc<desk_foreman::db::task_runtime::TaskRuntime>,
     workspace_root: &str,
     login_name: &str,
     password: &str,
 ) -> AppState {
-    let base = super::helpers::test_state(pool.clone());
+    let mut base = super::helpers::test_state(pool.clone());
+    base.task_runtime = Arc::clone(&runtime);
     let mut config = (*base.config).clone();
     config.workspace_root = PathBuf::from(workspace_root);
     config.bootstrap_admin_login = Some(login_name.to_string());
@@ -30,6 +32,7 @@ pub async fn test_state_with_admin(
         runner_broker: Arc::clone(&base.runner_broker),
         db: pool,
         git_capability_signing_key: base.git_capability_signing_key.clone(),
+        task_runtime: Arc::clone(&base.task_runtime),
     };
     desk_foreman::db::bootstrap_admin(&state.db, &state.config)
         .await

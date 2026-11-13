@@ -105,6 +105,7 @@ pub(crate) mod support {
                 frontend_dist: PathBuf::from("/tmp/frontend"),
                 build_started_at: SystemTime::now(),
                 git_gateway: Default::default(),
+                credential_protector: None,
             }),
             git_capability_signing_key: desk_foreman::git_gateway::signing_key::from_bytes(
                 &[7u8; 32],
@@ -112,7 +113,8 @@ pub(crate) mod support {
             .expect("test signing key"),
             runner,
             runner_broker: RunnerBroker::new(broker_pool),
-            db: pool,
+            db: pool.clone(),
+            task_runtime: Arc::new(desk_foreman::db::task_runtime::TaskRuntime::new(pool)),
         }
     }
 

@@ -45,6 +45,8 @@ struct IssueDbIdentity {
 
 struct RetentionLedger {
     pool: PgPool,
+    /// The initialized durable task runtime of the fixture database.
+    task_runtime: Arc<db::task_runtime::TaskRuntime>,
     application_id: i64,
     manager_id: i64,
     root: tempfile::TempDir,
@@ -93,8 +95,14 @@ impl RetentionLedger {
         db::queries::touch_runner_manager(&pool, manager.runner_manager_id)
             .await
             .expect("mark retention fixture manager online");
+        let task_runtime = Arc::new(db::task_runtime::TaskRuntime::new(pool.clone()));
+        task_runtime
+            .initialize()
+            .await
+            .expect("initialize the durable task runtime");
         Self {
             pool,
+            task_runtime,
             application_id: application.application_id,
             manager_id: manager.runner_manager_id,
             root: tempfile::tempdir().expect("retention temp root"),
@@ -224,6 +232,7 @@ fn unique_name(prefix: &str) -> String {
 fn state_with_root(ledger: &RetentionLedger) -> AppState {
     let mut state = fake_state(FakeRunnerService::new());
     state.db = ledger.pool.clone();
+    state.task_runtime = Arc::clone(&ledger.task_runtime);
     let mut config = (*state.config).clone();
     config.workspace_root = ledger.root.path().to_path_buf();
     config.workspace_retention = Duration::from_millis(1);
@@ -342,6 +351,7 @@ async fn released_task_retains_archived_binding_and_directory() {
         };
         let task = db::execution_environments::tasks::admit_native_task(
             &ledger.pool,
+            &ledger.task_runtime,
             ledger.application_id,
             environment.environment_id,
             db::execution_environments::tasks::NativeTaskRequest {

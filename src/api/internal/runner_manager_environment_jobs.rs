@@ -23,7 +23,8 @@ use crate::{
         execution_environment_jobs::{
             DurableJobCompletion, claim_next_assigned_manager_environment_job,
             complete_assigned_manager_environment_job, encode_environment_job_wire_id,
-            environment_job_owner, environment_job_wire_kind, is_environment_job_wire_id,
+            environment_job_owner, environment_job_wire_kind,
+            find_overdue_export_environment_for_manager, is_environment_job_wire_id,
             parse_environment_job_wire_id,
         },
         types::WorkspaceBindingResponse,
@@ -276,9 +277,11 @@ pub(super) async fn next_assigned_environment_job(
     state: &AppState,
     manager_id: i64,
 ) -> Result<Option<RunnerJob>, AppError> {
-    let Some(row) = claim_next_assigned_manager_environment_job(&state.db, manager_id)
-        .await
-        .map_err(AppError::internal)?
+    expire_one_overdue_export_environment(state, manager_id).await?;
+    let Some(row) =
+        claim_next_assigned_manager_environment_job(&state.db, &state.task_runtime, manager_id)
+            .await
+            .map_err(AppError::internal)?
     else {
         return Ok(None);
     };
@@ -388,6 +391,34 @@ pub(super) async fn next_assigned_environment_job(
     }))
 }
 
+/// Expire at most one overdue export environment of the authenticated manager.
+///
+/// The native expiry of the domain covers the preparation, start and stop
+/// jobs; an export job that was never claimed has no other expiry path. The
+/// preflight runs before the claim in its own transaction, so the expiry and
+/// the later claim never share a transaction. A manager that never polls
+/// keeps the existing limitation: nothing expires its export jobs.
+async fn expire_one_overdue_export_environment(
+    state: &AppState,
+    manager_id: i64,
+) -> Result<(), AppError> {
+    let Some(overdue) = find_overdue_export_environment_for_manager(&state.db, manager_id)
+        .await
+        .map_err(AppError::internal)?
+    else {
+        return Ok(());
+    };
+    crate::db::execution_environment_jobs::expire_execution_environment_jobs(
+        &state.db,
+        &state.task_runtime,
+        overdue.application_id,
+        overdue.environment_id,
+    )
+    .await
+    .map_err(AppError::internal)?;
+    Ok(())
+}
+
 /// Route one durable result id to the durable handler and map its typed
 /// outcome to an HTTP status.
 pub(super) async fn complete_environment_job_result(
@@ -400,9 +431,15 @@ pub(super) async fn complete_environment_job_result(
             "invalid execution environment job id",
         ));
     };
-    let outcome = complete_assigned_manager_environment_job(&state.db, manager_id, job_id, &result)
-        .await
-        .map_err(AppError::internal)?;
+    let outcome = complete_assigned_manager_environment_job(
+        &state.db,
+        &state.task_runtime,
+        manager_id,
+        job_id,
+        &result,
+    )
+    .await
+    .map_err(AppError::internal)?;
     match outcome {
         DurableJobCompletion::Completed | DurableJobCompletion::AlreadyTerminal => {
             Ok(StatusCode::NO_CONTENT)

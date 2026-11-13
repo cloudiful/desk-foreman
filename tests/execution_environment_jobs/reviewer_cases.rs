@@ -200,16 +200,23 @@ async fn late_results_after_expiry_never_mutate_the_uncertain_record() {
     };
     assert!(
         matches!(
-            claim_execution_environment_job(&db.pool, app, env, "rev-late-token", manager)
-                .await
-                .expect("claim"),
+            claim_execution_environment_job(
+                &db.pool,
+                &db.task_runtime,
+                app,
+                env,
+                "rev-late-token",
+                manager
+            )
+            .await
+            .expect("claim"),
             ClaimOutcome::Claimed(_)
         ),
         "the assigned manager must claim before the deadline"
     );
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    let expired = expire_execution_environment_jobs(&db.pool, app, env)
+    let expired = expire_execution_environment_jobs(&db.pool, &db.task_runtime, app, env)
         .await
         .expect("expire");
     assert_eq!(expired.len(), 1);
@@ -219,6 +226,7 @@ async fn late_results_after_expiry_never_mutate_the_uncertain_record() {
     // A contradicting late success is refused.
     match complete_execution_environment_job(
         &db.pool,
+        &db.task_runtime,
         app,
         env,
         "rev-late-token",
@@ -241,6 +249,7 @@ async fn late_results_after_expiry_never_mutate_the_uncertain_record() {
     // A matching replay of the recorded terminal state is idempotent.
     match complete_execution_environment_job(
         &db.pool,
+        &db.task_runtime,
         app,
         env,
         "rev-late-token",
@@ -261,11 +270,11 @@ async fn late_results_after_expiry_never_mutate_the_uncertain_record() {
     }
 
     // Expiry is idempotent and the blocker keeps forbidding new work.
-    let again = expire_execution_environment_jobs(&db.pool, app, env)
+    let again = expire_execution_environment_jobs(&db.pool, &db.task_runtime, app, env)
         .await
         .expect("second expire");
     assert!(again.is_empty(), "expiry must not re-terminal a row");
-    let active = expire_execution_environment_jobs(&db.pool, app, Uuid::new_v4())
+    let active = expire_execution_environment_jobs(&db.pool, &db.task_runtime, app, Uuid::new_v4())
         .await
         .expect("foreign environment expiry");
     assert!(active.is_empty(), "expiry is owner-scoped");
@@ -324,7 +333,7 @@ async fn expiry_only_touches_the_scoped_owner_environment() {
         );
     }
 
-    let expired = expire_execution_environment_jobs(&db.pool, app_a, env_a)
+    let expired = expire_execution_environment_jobs(&db.pool, &db.task_runtime, app_a, env_a)
         .await
         .expect("expire A");
     assert_eq!(expired.len(), 1);
@@ -376,9 +385,16 @@ async fn claim_refuses_an_expired_pending_job_before_any_expiry_sweep() {
         "an intent with a past deadline is still recorded, it is only unclaimable"
     );
 
-    match claim_execution_environment_job(&db.pool, app, env, "rev-claim-deadline-token", manager)
-        .await
-        .expect("claim after deadline")
+    match claim_execution_environment_job(
+        &db.pool,
+        &db.task_runtime,
+        app,
+        env,
+        "rev-claim-deadline-token",
+        manager,
+    )
+    .await
+    .expect("claim after deadline")
     {
         ClaimOutcome::NotClaimable { current } => {
             let row = current.expect("own row");

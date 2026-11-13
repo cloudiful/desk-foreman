@@ -132,6 +132,14 @@ docker compose --profile build-only up --build
 
 Then log into the admin UI, create per-user MCP tokens there, and open `http://localhost:8080`.
 
+### Durable task storage
+
+The service migrates its own schema and the durable task schema of the
+environment operations on the same database before it accepts a request. The
+task tables live in the `cloudiful_tasks` schema and are written by the task
+library only. An environment operation that misses its deadline becomes
+`uncertain` and is never retried automatically.
+
 The Compose defaults are local-development placeholders. Set `POSTGRES_PASSWORD`, `DATABASE_URL`, and the runner manager connection variables before exposing the service outside a local machine.
 
 ## Runner Split

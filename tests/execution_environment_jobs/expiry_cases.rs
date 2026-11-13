@@ -25,9 +25,16 @@ async fn completion_after_deadline_never_succeeds_and_late_results_keep_the_bloc
     let deadline = Utc::now() + ChronoDuration::milliseconds(300);
     let job_id = seed_ensure(&db.pool, app, env, manager, "deadline-token", deadline).await;
 
-    match claim_execution_environment_job(&db.pool, app, env, "deadline-token", manager)
-        .await
-        .expect("claim")
+    match claim_execution_environment_job(
+        &db.pool,
+        &db.task_runtime,
+        app,
+        env,
+        "deadline-token",
+        manager,
+    )
+    .await
+    .expect("claim")
     {
         ClaimOutcome::Claimed(_) => {}
         other => panic!("expected Claimed before deadline, got {other:?}"),
@@ -37,6 +44,7 @@ async fn completion_after_deadline_never_succeeds_and_late_results_keep_the_bloc
 
     let late = complete_execution_environment_job(
         &db.pool,
+        &db.task_runtime,
         app,
         env,
         "deadline-token",
@@ -58,7 +66,7 @@ async fn completion_after_deadline_never_succeeds_and_late_results_keep_the_bloc
         .expect("row");
     assert_eq!(current.state, "claimed");
 
-    let expired = expire_execution_environment_jobs(&db.pool, app, env)
+    let expired = expire_execution_environment_jobs(&db.pool, &db.task_runtime, app, env)
         .await
         .expect("expire");
     assert_eq!(expired.len(), 1);
@@ -66,6 +74,7 @@ async fn completion_after_deadline_never_succeeds_and_late_results_keep_the_bloc
 
     let stale = complete_execution_environment_job(
         &db.pool,
+        &db.task_runtime,
         app,
         env,
         "deadline-token",
@@ -124,16 +133,23 @@ async fn pending_expiry_becomes_uncertain_and_is_never_claimable() {
     )
     .await;
 
-    let expired = expire_execution_environment_jobs(&db.pool, app, env)
+    let expired = expire_execution_environment_jobs(&db.pool, &db.task_runtime, app, env)
         .await
         .expect("expire");
     assert_eq!(expired.len(), 1);
     assert_eq!(expired[0].state, "uncertain");
     assert!(expired[0].claimed_at.is_none());
 
-    match claim_execution_environment_job(&db.pool, app, env, "pending-expiry-token", manager)
-        .await
-        .expect("claim expired")
+    match claim_execution_environment_job(
+        &db.pool,
+        &db.task_runtime,
+        app,
+        env,
+        "pending-expiry-token",
+        manager,
+    )
+    .await
+    .expect("claim expired")
     {
         ClaimOutcome::NotClaimable { current } => {
             assert_eq!(current.expect("own row").state, "uncertain");
@@ -160,7 +176,7 @@ async fn uncertain_survives_reconnect_and_blocks_new_ensure_of_any_generation() 
     )
     .await;
 
-    let expired = expire_execution_environment_jobs(&db.pool, app, env)
+    let expired = expire_execution_environment_jobs(&db.pool, &db.task_runtime, app, env)
         .await
         .expect("expire");
     assert_eq!(expired[0].state, "uncertain");

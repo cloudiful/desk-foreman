@@ -42,6 +42,7 @@ pub async fn start_native_task_handler(
     let application_id = application_actor(&state, &headers).await?;
     let descriptor = start_native_task(
         &state.db,
+        &state.task_runtime,
         application_id,
         environment_id,
         task_id,

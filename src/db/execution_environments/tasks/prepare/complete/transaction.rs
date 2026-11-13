@@ -15,6 +15,7 @@ use crate::db::execution_environments::tasks::{
     queries::{lock_binding, lock_environment, lock_task},
     seeds::find_native_task_seed_identity,
 };
+use crate::db::task_runtime::{JobDisposition, TaskRuntime};
 
 struct LockedPreparation<'a> {
     tx: Transaction<'a, Postgres>,
@@ -147,10 +148,11 @@ fn environment_accepts_preparation_binding(
 /// Validate the proof, then record job success and `prepared` atomically.
 pub(super) async fn complete(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     completion: PreparationCompletion,
 ) -> anyhow::Result<PreparationCompletionOutcome> {
     if completion.failed {
-        return fail(pool, completion.manager_id, completion.job_id).await;
+        return fail(pool, runtime, completion.manager_id, completion.job_id).await;
     }
     let Some(ack) = completion.result.as_ref() else {
         return Ok(PreparationCompletionOutcome::Inconsistent(
@@ -214,6 +216,18 @@ pub(super) async fn complete(
         locked.tx.rollback().await?;
         return Ok(PreparationCompletionOutcome::NotCompletable);
     }
+    if let Err(error) = runtime
+        .settle(
+            &mut locked.tx,
+            locked.job_id,
+            Some("prepare_native_task"),
+            JobDisposition::Succeeded,
+        )
+        .await
+    {
+        locked.tx.rollback().await?;
+        return Err(error);
+    }
     locked.tx.commit().await?;
     Ok(PreparationCompletionOutcome::Prepared)
 }
@@ -221,6 +235,7 @@ pub(super) async fn complete(
 /// Fail one claimed preparation atomically, retaining both exclusivity anchors.
 pub(super) async fn fail(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     manager_id: i64,
     job_id: Uuid,
 ) -> anyhow::Result<PreparationCompletionOutcome> {
@@ -261,6 +276,18 @@ pub(super) async fn fail(
     if completed.is_none() {
         locked.tx.rollback().await?;
         return Ok(PreparationCompletionOutcome::NotCompletable);
+    }
+    if let Err(error) = runtime
+        .settle(
+            &mut locked.tx,
+            job_id,
+            Some("prepare_native_task"),
+            JobDisposition::Failed,
+        )
+        .await
+    {
+        locked.tx.rollback().await?;
+        return Err(error);
     }
     locked.tx.commit().await?;
     Ok(PreparationCompletionOutcome::Uncertain)

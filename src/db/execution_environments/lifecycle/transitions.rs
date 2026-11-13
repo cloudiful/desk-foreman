@@ -10,6 +10,7 @@ use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::db::execution_environment_jobs::ExecutionEnvironmentJob;
+use crate::db::task_runtime::{JobDisposition, TaskRuntime};
 
 use super::types::LifecycleEnvironment;
 
@@ -143,13 +144,14 @@ pub(crate) async fn replace_update(
 /// Supersede matching obsolete ensure rows with an explicit stop-proof result.
 pub(crate) async fn supersede_ensure_jobs(
     tx: &mut Transaction<'_, Postgres>,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
     manager_id: i64,
     stopped_generation: i64,
 ) -> anyhow::Result<Vec<ExecutionEnvironmentJob>> {
     let result = serde_json::to_value(super::types::superseded_result())?;
-    Ok(sqlx::query_file_as!(
+    let superseded: Vec<ExecutionEnvironmentJob> = sqlx::query_file_as!(
         ExecutionEnvironmentJob,
         "src/sql/execution_environments/lifecycle/supersede_lifecycle_ensure_jobs.sql",
         application_id,
@@ -159,5 +161,11 @@ pub(crate) async fn supersede_ensure_jobs(
         result,
     )
     .fetch_all(&mut **tx)
-    .await?)
+    .await?;
+    for job in &superseded {
+        runtime
+            .settle(tx, job.job_id, Some(&job.job_kind), JobDisposition::Failed)
+            .await?;
+    }
+    Ok(superseded)
 }

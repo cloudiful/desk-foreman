@@ -70,6 +70,7 @@ pub async fn admit_native_task_handler(
     let application_id = application_actor(&state, &headers).await?;
     let task = admit_native_task(
         &state.db,
+        &state.task_runtime,
         application_id,
         environment_id,
         NativeTaskRequest {

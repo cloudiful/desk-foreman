@@ -156,6 +156,7 @@ impl BindingFixture {
         let environment_id = self.ensure_environment(subject).await;
         admit_native_task(
             &self.database.pool,
+            &desk_foreman::db::task_runtime::TaskRuntime::new(self.database.pool.clone()),
             self.application_id,
             environment_id,
             NativeTaskRequest {

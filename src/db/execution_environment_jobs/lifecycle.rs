@@ -14,6 +14,7 @@ use super::types::{
     ExecutionEnvironmentJob, ExecutionEnvironmentJobResult, job_state_is_terminal,
     redact_error_summary,
 };
+use crate::db::task_runtime::{JobDisposition, TaskRuntime};
 
 /// Outcome of an atomic claim.
 #[derive(Debug)]
@@ -47,14 +48,17 @@ pub enum CompleteOutcome {
 ///
 /// Exactly one concurrent caller wins; the loser sees `NotClaimable` with the
 /// post-winner row. Expired or terminal jobs never claim, and no reclaim of
-/// claimed/uncertain jobs exists.
+/// claimed/uncertain jobs exists. The claim and the durable task of the job
+/// commit together: a claim without a tracked task never becomes durable.
 pub async fn claim_execution_environment_job(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
     token: &str,
     manager_id: i64,
 ) -> anyhow::Result<ClaimOutcome> {
+    let mut tx = pool.begin().await?;
     let claimed: Option<ExecutionEnvironmentJob> = sqlx::query_file_as!(
         ExecutionEnvironmentJob,
         "src/sql/execution_environment_jobs/claim_execution_environment_job.sql",
@@ -63,12 +67,21 @@ pub async fn claim_execution_environment_job(
         environment_id,
         manager_id,
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
 
     if let Some(row) = claimed {
+        if let Err(error) = runtime
+            .track_claim(&mut tx, row.job_id, &row.job_kind, manager_id)
+            .await
+        {
+            tx.rollback().await?;
+            return Err(error);
+        }
+        tx.commit().await?;
         return Ok(ClaimOutcome::Claimed(row));
     }
+    tx.rollback().await?;
 
     let current =
         find_execution_environment_job_by_token(pool, application_id, environment_id, token)
@@ -85,6 +98,7 @@ pub async fn claim_execution_environment_job(
 /// deadline never succeeds.
 pub async fn complete_execution_environment_job(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
     token: &str,
@@ -100,6 +114,7 @@ pub async fn complete_execution_environment_job(
     let result_value = result.as_ref().map(serde_json::to_value).transpose()?;
     let error_summary = error_summary.map(redact_error_summary);
 
+    let mut tx = pool.begin().await?;
     let completed: Option<ExecutionEnvironmentJob> = sqlx::query_file_as!(
         ExecutionEnvironmentJob,
         "src/sql/execution_environment_jobs/complete_execution_environment_job.sql",
@@ -112,12 +127,26 @@ pub async fn complete_execution_environment_job(
         result_value,
         error_summary.as_deref(),
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
 
     if let Some(row) = completed {
+        if let Err(error) = runtime
+            .settle(
+                &mut tx,
+                row.job_id,
+                Some(&row.job_kind),
+                JobDisposition::for_state(&row.state),
+            )
+            .await
+        {
+            tx.rollback().await?;
+            return Err(error);
+        }
+        tx.commit().await?;
         return Ok(CompleteOutcome::Completed(row));
     }
+    tx.rollback().await?;
 
     let Some(current) =
         find_execution_environment_job_by_token(pool, application_id, environment_id, token)
@@ -142,11 +171,37 @@ pub async fn complete_execution_environment_job(
     }
 }
 
+/// The environment of one overdue export job of the authenticated manager.
+///
+/// The bounded poll preflight uses it to expire at most one overdue export
+/// environment before the next claim. A manager that never polls keeps the
+/// existing limitation that no global expiry runs.
+pub(crate) async fn find_overdue_export_environment_for_manager(
+    pool: &PgPool,
+    manager_id: i64,
+) -> anyhow::Result<Option<OverdueExportEnvironment>> {
+    Ok(sqlx::query_file_as!(
+        OverdueExportEnvironment,
+        "src/sql/execution_environment_jobs/find_overdue_export_environment_for_manager.sql",
+        manager_id,
+    )
+    .fetch_optional(pool)
+    .await?)
+}
+
+/// The owner pair of one overdue export job of a manager.
+#[derive(sqlx::FromRow)]
+pub(crate) struct OverdueExportEnvironment {
+    pub(crate) application_id: i64,
+    pub(crate) environment_id: Uuid,
+}
+
 /// Fail closed: every expired pending or claimed job of one owned environment
 /// becomes `uncertain` in a single atomic statement. Uncertain jobs are never
 /// claimable again and no API clears them.
 pub async fn expire_execution_environment_jobs(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
 ) -> anyhow::Result<Vec<ExecutionEnvironmentJob>> {
@@ -164,6 +219,7 @@ pub async fn expire_execution_environment_jobs(
     }
     crate::db::execution_environments::tasks::native_execution::expire_overdue_native_jobs(
         &mut tx,
+        runtime,
         application_id,
         environment_id,
     )
@@ -177,6 +233,21 @@ pub async fn expire_execution_environment_jobs(
     )
     .fetch_all(&mut *tx)
     .await?;
+
+    for job in &expired {
+        if let Err(error) = runtime
+            .settle(
+                &mut tx,
+                job.job_id,
+                Some(&job.job_kind),
+                JobDisposition::Failed,
+            )
+            .await
+        {
+            tx.rollback().await?;
+            return Err(error);
+        }
+    }
 
     tx.commit().await?;
     Ok(expired)

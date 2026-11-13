@@ -80,6 +80,7 @@ async fn complete_rejects_non_terminal_state_before_any_query() {
     assert!(
         complete_execution_environment_job(
             &pool,
+            &crate::db::task_runtime::TaskRuntime::new(pool.clone()),
             1,
             Uuid::new_v4(),
             "token",

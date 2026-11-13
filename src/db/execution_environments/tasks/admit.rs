@@ -5,6 +5,7 @@
 //! those locks are held, so a racing legacy write waits and then re-reads the
 //! native-active state instead of trusting the snapshot it started from.
 
+use crate::db::task_runtime::TaskRuntime;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -72,6 +73,7 @@ async fn admit_shape_is_eligible(
 
 pub(super) async fn admit(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
     request: NativeTaskRequest,
@@ -83,7 +85,7 @@ pub(super) async fn admit(
     let mut tx = pool.begin().await.map_err(internal)?;
     // Overdue lifecycle rows fail closed to `uncertain` before any decision, so
     // an expired ensure can never read as "no blockers".
-    expire_overdue_jobs(&mut tx, application_id, environment_id)
+    expire_overdue_jobs(&mut tx, runtime, application_id, environment_id)
         .await
         .map_err(internal)?;
 

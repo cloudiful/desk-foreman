@@ -9,11 +9,13 @@ use crate::db::execution_environment_jobs::{
     DurableJobCompletion, ExecutionEnvironmentJob, ExecutionEnvironmentJobResult,
     job_state_is_terminal,
 };
+use crate::db::task_runtime::{JobDisposition, TaskRuntime};
 
 const FAILURE_DIAGNOSTIC: &str = "assigned manager failed native task export";
 
 pub(super) async fn complete_export_failure(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     manager_id: i64,
     observed: &ExecutionEnvironmentJob,
 ) -> anyhow::Result<DurableJobCompletion> {
@@ -113,6 +115,18 @@ pub(super) async fn complete_export_failure(
     .await?;
     if completed.is_none() {
         return Ok(DurableJobCompletion::NotCompletable);
+    }
+    if let Err(error) = runtime
+        .settle(
+            &mut tx,
+            job.job_id,
+            Some("export_native_task"),
+            JobDisposition::Failed,
+        )
+        .await
+    {
+        tx.rollback().await?;
+        return Err(error);
     }
     tx.commit().await?;
     Ok(DurableJobCompletion::Completed)

@@ -40,7 +40,12 @@ async fn consistent_success_and_confirmed_stop_persist() {
     )
     .await;
 
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
 
     let pulled = pull(&base, &token).await;
     assert_eq!(pulled, format!("envjob:{ensure_id}"));
@@ -107,7 +112,12 @@ async fn duplicate_terminal_replay_is_idempotent_and_conflict_is_refused() {
     )
     .await;
 
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
     let pulled = pull(&base, &token).await;
     assert_eq!(pulled, format!("envjob:{job_id}"));
 

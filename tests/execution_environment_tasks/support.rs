@@ -37,6 +37,8 @@ pub struct TaskFixture {
     pub environment_id: Uuid,
     pub binding_id: i64,
     pub relay: std::sync::Arc<desk_foreman::runner::service_relay::RelayRegistry>,
+    /// The initialized durable task runtime of the fixture database.
+    pub task_runtime: std::sync::Arc<desk_foreman::db::task_runtime::TaskRuntime>,
     _temp: tempfile::TempDir,
 }
 
@@ -74,7 +76,15 @@ impl TaskFixture {
         }
         let binding_id =
             create_resource_binding(&database.pool, application_id, &root, "artifact:alpha").await;
+        let task_runtime = std::sync::Arc::new(desk_foreman::db::task_runtime::TaskRuntime::new(
+            database.pool.clone(),
+        ));
+        task_runtime
+            .initialize()
+            .await
+            .expect("initialize the durable task runtime");
         let mut state = super::helpers::test_state(database.pool.clone());
+        state.task_runtime = std::sync::Arc::clone(&task_runtime);
         let mut config = (*state.config).clone();
         config.workspace_root = temp.path().to_path_buf();
         state.config = std::sync::Arc::new(config);
@@ -91,6 +101,7 @@ impl TaskFixture {
             environment_id,
             binding_id,
             relay,
+            task_runtime,
             _temp: temp,
         }
     }

@@ -54,7 +54,9 @@ pub async fn upload_native_task_export_handler(
             Ok(upload) => upload,
             Err(response) => return response,
         };
-    match upload_native_task_export(&state.db, manager_id, job_id, upload).await {
+    match upload_native_task_export(&state.db, &state.task_runtime, manager_id, job_id, upload)
+        .await
+    {
         Ok(
             NativeTaskExportUploadOutcome::Uploaded
             | NativeTaskExportUploadOutcome::AlreadyUploaded,

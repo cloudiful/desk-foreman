@@ -200,6 +200,7 @@ impl Rig {
         let task_id = Uuid::new_v4();
         admit_native_task(
             &db.pool,
+            &desk_foreman::db::task_runtime::TaskRuntime::new(db.pool.clone()),
             app_id,
             env_id,
             NativeTaskRequest {

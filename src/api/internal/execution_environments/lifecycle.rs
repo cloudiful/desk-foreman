@@ -21,7 +21,7 @@ use crate::{
         validation::ValidatedJson,
     },
     db::execution_environments::{
-        EnvironmentOperationDescriptor, LifecycleError, ScopeAuthority,
+        EnvironmentOperationDescriptor, LifecycleError, ReplaceRequest, ScopeAuthority, ScopedCall,
         execution_environment_status as lifecycle_status,
         provision_execution_environment as lifecycle_provision,
         provision_execution_environment_scoped as lifecycle_provision_scoped,
@@ -73,21 +73,25 @@ pub async fn provision_execution_environment(
             let auth = application_scope_auth(&state, &headers).await?;
             lifecycle_provision_scoped(
                 &state.db,
+                &state.task_runtime,
                 auth.application_id,
                 environment_id,
                 request.expected_generation,
                 &request.operation_token,
-                Some(ScopeAuthority {
-                    workspace_binding_id: auth.workspace_binding.workspace_binding_id,
-                    lease_owner: auth.lease_owner,
+                Some(ScopedCall {
+                    authority: ScopeAuthority {
+                        workspace_binding_id: auth.workspace_binding.workspace_binding_id,
+                        lease_owner: auth.lease_owner,
+                    },
+                    runner: state.runner.as_ref(),
                 }),
-                Some(state.runner.as_ref()),
             )
             .await
         }
         _ => {
             lifecycle_provision(
                 &state.db,
+                &state.task_runtime,
                 application_id,
                 environment_id,
                 request.expected_generation,
@@ -126,6 +130,7 @@ pub async fn stop_execution_environment(
     let application_id = application_actor(&state, &headers).await?;
     let (descriptor, cancel_through_generation) = lifecycle_stop(
         &state.db,
+        &state.task_runtime,
         application_id,
         environment_id,
         request.expected_generation,
@@ -175,29 +180,37 @@ pub async fn replace_execution_environment(
             let auth = application_scope_auth(&state, &headers).await?;
             lifecycle_replace_scoped(
                 &state.db,
+                &state.task_runtime,
                 auth.application_id,
                 environment_id,
-                request.expected_generation,
-                request.expected_container_generation,
-                request.expected_stop_job_id,
-                &request.operation_token,
-                Some(ScopeAuthority {
-                    workspace_binding_id: auth.workspace_binding.workspace_binding_id,
-                    lease_owner: auth.lease_owner,
+                &ReplaceRequest {
+                    expected_generation: request.expected_generation,
+                    expected_container_generation: request.expected_container_generation,
+                    expected_stop_job_id: request.expected_stop_job_id,
+                    operation_token: &request.operation_token,
+                },
+                Some(ScopedCall {
+                    authority: ScopeAuthority {
+                        workspace_binding_id: auth.workspace_binding.workspace_binding_id,
+                        lease_owner: auth.lease_owner,
+                    },
+                    runner: state.runner.as_ref(),
                 }),
-                Some(state.runner.as_ref()),
             )
             .await
         }
         _ => {
             lifecycle_replace(
                 &state.db,
+                &state.task_runtime,
                 application_id,
                 environment_id,
-                request.expected_generation,
-                request.expected_container_generation,
-                request.expected_stop_job_id,
-                &request.operation_token,
+                &ReplaceRequest {
+                    expected_generation: request.expected_generation,
+                    expected_container_generation: request.expected_container_generation,
+                    expected_stop_job_id: request.expected_stop_job_id,
+                    operation_token: &request.operation_token,
+                },
             )
             .await
         }
@@ -226,9 +239,14 @@ pub async fn execution_environment_status(
     Path(environment_id): Path<Uuid>,
 ) -> Result<Json<EnvironmentOperationDescriptor>, AppError> {
     let application_id = application_actor(&state, &headers).await?;
-    let descriptor = lifecycle_status(&state.db, application_id, environment_id)
-        .await
-        .map_err(map_lifecycle_error)?;
+    let descriptor = lifecycle_status(
+        &state.db,
+        &state.task_runtime,
+        application_id,
+        environment_id,
+    )
+    .await
+    .map_err(map_lifecycle_error)?;
     Ok(Json(descriptor))
 }
 

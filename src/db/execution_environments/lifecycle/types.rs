@@ -57,6 +57,23 @@ pub struct ScopeAuthority {
     pub lease_owner: String,
 }
 
+/// The authenticated scope of one scoped lifecycle call.
+///
+/// It carries the caller's authority and the runner seam used for the bounded
+/// pre-intent session observation.
+pub struct ScopedCall<'a> {
+    pub authority: ScopeAuthority,
+    pub runner: &'a dyn crate::runner::RunnerService,
+}
+
+/// The fences of one replacement request.
+pub struct ReplaceRequest<'a> {
+    pub expected_generation: i64,
+    pub expected_container_generation: i64,
+    pub expected_stop_job_id: Uuid,
+    pub operation_token: &'a str,
+}
+
 /// Environment row with lifecycle metadata. `container_generation` is the
 /// provision candidate (`None` before the first admitted provision);
 /// `assigned_manager_id` is the immutable manager binding; the stop-proof

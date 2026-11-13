@@ -32,7 +32,12 @@ async fn assigned_manager_pulls_and_other_manager_cannot() {
     )
     .await;
 
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
 
     let (status, body) = http_get(&base, NEXT, Some(&token_a)).await;
     assert_eq!(status, 200, "assigned manager pull must succeed");
@@ -80,7 +85,12 @@ async fn concurrent_polls_claim_the_job_once() {
     )
     .await;
 
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
 
     let first_base = base.clone();
     let second_base = base.clone();
@@ -136,9 +146,16 @@ async fn expired_claimed_and_uncertain_rows_are_never_pulled() {
         future_deadline(),
     )
     .await;
-    claim_execution_environment_job(&db.pool, app, claimed_env, "skip-claimed-token", manager)
-        .await
-        .expect("claim");
+    claim_execution_environment_job(
+        &db.pool,
+        &db.task_runtime,
+        app,
+        claimed_env,
+        "skip-claimed-token",
+        manager,
+    )
+    .await
+    .expect("claim");
 
     let uncertain_env = create_environment(&db.pool, app, "skip-uncertain").await;
     let uncertain = seed_job(
@@ -154,6 +171,7 @@ async fn expired_claimed_and_uncertain_rows_are_never_pulled() {
     .await;
     claim_execution_environment_job(
         &db.pool,
+        &db.task_runtime,
         app,
         uncertain_env,
         "skip-uncertain-token",
@@ -163,6 +181,7 @@ async fn expired_claimed_and_uncertain_rows_are_never_pulled() {
     .expect("claim uncertain");
     match complete_execution_environment_job(
         &db.pool,
+        &db.task_runtime,
         app,
         uncertain_env,
         "skip-uncertain-token",
@@ -192,7 +211,12 @@ async fn expired_claimed_and_uncertain_rows_are_never_pulled() {
     )
     .await;
 
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
 
     let (status, body) = http_get(&base, NEXT, Some(&token)).await;
     assert_eq!(status, 200);

@@ -4,6 +4,7 @@ use super::queries::{lock_context, lock_job};
 use crate::db::execution_environment_jobs::{
     ExecutionEnvironmentJob, ExecutionEnvironmentJobResult,
 };
+use crate::db::task_runtime::{JobDisposition, TaskRuntime};
 
 const EXPIRY_DIAGNOSTIC: &str = "native task operation deadline expired without positive proof";
 
@@ -11,6 +12,7 @@ const EXPIRY_DIAGNOSTIC: &str = "native task operation deadline expired without 
 /// -> job lock order. The environment may already be held by the caller.
 pub(crate) async fn expire_overdue_native_jobs(
     tx: &mut Transaction<'_, Postgres>,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: uuid::Uuid,
 ) -> anyhow::Result<()> {
@@ -160,6 +162,9 @@ pub(crate) async fn expire_overdue_native_jobs(
         if expired.is_none() {
             anyhow::bail!("native execution deadline changed while locked");
         }
+        runtime
+            .settle(tx, job.job_id, Some(&job.job_kind), JobDisposition::Failed)
+            .await?;
     }
     Ok(())
 }

@@ -8,6 +8,7 @@
 
 use std::time::Duration;
 
+use desk_foreman::db::task_runtime::TaskRuntime;
 use desk_foreman::db::{queries::create_runner_manager, types::CreateRunnerManagerRequest};
 use serde_json::{Value, json};
 use sqlx::{PgPool, postgres::PgPoolOptions};
@@ -32,6 +33,8 @@ fn replace_database_name(base_url: &str, db_name: &str) -> String {
 /// Isolated per-test database with async cleanup and a reconnectable URL.
 pub struct LifecycleDb {
     pub pool: PgPool,
+    /// The initialized durable task runtime of this database.
+    pub task_runtime: std::sync::Arc<TaskRuntime>,
     url: String,
     admin_pool: PgPool,
     db_name: String,
@@ -63,8 +66,14 @@ impl LifecycleDb {
             .run(&pool)
             .await
             .expect("run migrations on isolated lifecycle test database");
+        let task_runtime = std::sync::Arc::new(TaskRuntime::new(pool.clone()));
+        task_runtime
+            .initialize()
+            .await
+            .expect("initialize the durable task runtime");
         Self {
             pool,
+            task_runtime,
             url,
             admin_pool,
             db_name,

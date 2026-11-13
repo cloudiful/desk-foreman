@@ -11,6 +11,7 @@
 //! manager observation and a bounded session-free observation; the unscoped
 //! wrapper keeps its exact behavior.
 
+use crate::db::task_runtime::TaskRuntime;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -24,8 +25,8 @@ use super::support::{
 };
 use super::transitions::replace_update;
 use super::types::{
-    EnvironmentOperationDescriptor, LIFECYCLE_STATE_REPLACED, ScopeAuthority, confirmed_stop_state,
-    environment_descriptor, operation_descriptor,
+    EnvironmentOperationDescriptor, LIFECYCLE_STATE_REPLACED, ReplaceRequest, ScopedCall,
+    confirmed_stop_state, environment_descriptor, operation_descriptor,
 };
 
 /// Admit (or idempotently replay) one replacement.
@@ -34,22 +35,17 @@ use super::types::{
 /// is refused even on an identical replay because no authority is supplied.
 pub async fn replace_execution_environment(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
-    expected_generation: i64,
-    expected_container_generation: i64,
-    expected_stop_job_id: Uuid,
-    operation_token: &str,
+    request: &ReplaceRequest<'_>,
 ) -> Result<EnvironmentOperationDescriptor, LifecycleError> {
     replace_execution_environment_scoped(
         pool,
+        runtime,
         application_id,
         environment_id,
-        expected_generation,
-        expected_container_generation,
-        expected_stop_job_id,
-        operation_token,
-        None,
+        request,
         None,
     )
     .await
@@ -60,29 +56,37 @@ pub async fn replace_execution_environment(
 /// pre-intent session observation.
 pub async fn replace_execution_environment_scoped(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
-    expected_generation: i64,
-    expected_container_generation: i64,
-    expected_stop_job_id: Uuid,
-    operation_token: &str,
-    authority: Option<ScopeAuthority>,
-    runner: Option<&dyn crate::runner::RunnerService>,
+    request: &ReplaceRequest<'_>,
+    scope: Option<ScopedCall<'_>>,
 ) -> Result<EnvironmentOperationDescriptor, LifecycleError> {
+    let ReplaceRequest {
+        expected_generation,
+        expected_container_generation,
+        expected_stop_job_id,
+        operation_token,
+    } = *request;
     if !job_token_is_valid(operation_token) {
         return Err(LifecycleError::InvalidToken);
     }
 
     let mut tx = pool.begin().await?;
-    expire_overdue_jobs(&mut tx, application_id, environment_id).await?;
+    expire_overdue_jobs(&mut tx, runtime, application_id, environment_id).await?;
     let Some(environment) = lock_environment(&mut tx, application_id, environment_id).await? else {
         return Err(LifecycleError::NotFound);
     };
 
     // Resolve the stored scope and, when present, lock and validate the fresh
     // bound binding before any replay or intent decision.
-    let scope_binding =
-        scope::authorize_scope(&mut tx, application_id, environment_id, authority.as_ref()).await?;
+    let scope_binding = scope::authorize_scope(
+        &mut tx,
+        application_id,
+        environment_id,
+        scope.as_ref().map(|scope| &scope.authority),
+    )
+    .await?;
 
     // Same-token replay of an identical replacement intent returns the original
     // operation unchanged.
@@ -165,7 +169,13 @@ pub async fn replace_execution_environment_scoped(
             if environment.state != LIFECYCLE_STATE_REPLACED {
                 return Err(LifecycleError::InvalidState);
             }
-            scope::admit_scoped_intent(&mut tx, binding, Some(manager_id), runner).await?
+            scope::admit_scoped_intent(
+                &mut tx,
+                binding,
+                Some(manager_id),
+                scope.as_ref().map(|scope| scope.runner),
+            )
+            .await?
         }
         None => manager_id,
     };

@@ -19,6 +19,7 @@ use uuid::Uuid;
 use super::lifecycle::{CompleteOutcome, complete_execution_environment_job};
 use super::resolution::{EnvironmentJobResolution, resolve_environment_job_result};
 use super::types::ExecutionEnvironmentJob;
+use crate::db::task_runtime::TaskRuntime;
 
 /// Reserved opaque wire-id prefix for durable environment jobs. Legacy broker
 /// ids are plain UUIDs, so the namespace is unambiguous.
@@ -67,16 +68,30 @@ pub(crate) enum DurableJobCompletion {
 /// expired rows are never returned.
 pub(crate) async fn claim_next_assigned_manager_environment_job(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     manager_id: i64,
 ) -> anyhow::Result<Option<ExecutionEnvironmentJob>> {
-    sqlx::query_file_as!(
+    let mut tx = pool.begin().await?;
+    let claimed: Option<ExecutionEnvironmentJob> = sqlx::query_file_as!(
         ExecutionEnvironmentJob,
         "src/sql/execution_environment_jobs/claim_next_for_assigned_manager.sql",
         manager_id,
     )
-    .fetch_optional(pool)
-    .await
-    .map_err(Into::into)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(row) = claimed else {
+        tx.rollback().await?;
+        return Ok(None);
+    };
+    if let Err(error) = runtime
+        .track_claim(&mut tx, row.job_id, &row.job_kind, manager_id)
+        .await
+    {
+        tx.rollback().await?;
+        return Err(error);
+    }
+    tx.commit().await?;
+    Ok(Some(row))
 }
 
 /// Mark the linked task uncertain and the job uncertain after a failed or
@@ -84,11 +99,13 @@ pub(crate) async fn claim_next_assigned_manager_environment_job(
 /// re-dispatched.
 async fn complete_preparation_failure(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     row: &ExecutionEnvironmentJob,
 ) -> anyhow::Result<DurableJobCompletion> {
     let outcome =
         crate::db::execution_environments::tasks::prepare::complete_native_task_preparation(
             pool,
+            runtime,
             crate::db::execution_environments::tasks::prepare::PreparationCompletion {
                 manager_id: row.assigned_manager_id,
                 job_id: row.job_id,
@@ -137,6 +154,7 @@ pub(crate) async fn find_execution_environment_job_by_id(
 /// match its exact owner before a terminal outcome is recorded.
 pub(crate) async fn complete_assigned_manager_environment_job(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     manager_id: i64,
     job_id: Uuid,
     result: &RunnerJobResult,
@@ -149,7 +167,7 @@ pub(crate) async fn complete_assigned_manager_environment_job(
     }
     if row.job_kind == "export_native_task" {
         return crate::db::execution_environments::tasks::exports::complete_export_result(
-            pool, manager_id, &row, result,
+            pool, runtime, manager_id, &row, result,
         )
         .await;
     }
@@ -160,7 +178,7 @@ pub(crate) async fn complete_assigned_manager_environment_job(
         use crate::db::execution_environments::tasks::native_execution::NativeJobCompletion;
         let outcome =
             crate::db::execution_environments::tasks::native_execution::complete_native_task_job(
-                pool, manager_id, job_id, result,
+                pool, runtime, manager_id, job_id, result,
             )
             .await?;
         return Ok(match outcome {
@@ -178,7 +196,7 @@ pub(crate) async fn complete_assigned_manager_environment_job(
     // pure owner/container evaluation below.
     if row.job_kind == "prepare_native_task" {
         if !result.ok {
-            return complete_preparation_failure(pool, &row).await;
+            return complete_preparation_failure(pool, runtime, &row).await;
         }
         let Some(value) = result.result.clone() else {
             return Ok(DurableJobCompletion::Inconsistent(
@@ -193,6 +211,7 @@ pub(crate) async fn complete_assigned_manager_environment_job(
         let outcome =
             crate::db::execution_environments::tasks::prepare::complete_native_task_preparation(
                 pool,
+                runtime,
                 crate::db::execution_environments::tasks::prepare::PreparationCompletion {
                     manager_id,
                     job_id: row.job_id,
@@ -251,6 +270,7 @@ pub(crate) async fn complete_assigned_manager_environment_job(
 
     let outcome = complete_execution_environment_job(
         pool,
+        runtime,
         row.application_id,
         row.environment_id,
         &row.token,

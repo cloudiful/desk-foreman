@@ -9,6 +9,7 @@
 //! manager observation and a bounded session-free observation; the unscoped
 //! wrapper keeps its exact behavior.
 
+use crate::db::task_runtime::TaskRuntime;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -22,7 +23,7 @@ use super::support::{
 };
 use super::transitions::provision_update;
 use super::types::{
-    EnvironmentOperationDescriptor, ScopeAuthority, environment_descriptor, operation_descriptor,
+    EnvironmentOperationDescriptor, ScopedCall, environment_descriptor, operation_descriptor,
 };
 
 /// Admit one provision for `(application_id, environment_id)`.
@@ -31,6 +32,7 @@ use super::types::{
 /// is refused even on an identical replay because no authority is supplied.
 pub async fn provision_execution_environment(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
     expected_generation: i64,
@@ -38,11 +40,11 @@ pub async fn provision_execution_environment(
 ) -> Result<EnvironmentOperationDescriptor, LifecycleError> {
     provision_execution_environment_scoped(
         pool,
+        runtime,
         application_id,
         environment_id,
         expected_generation,
         operation_token,
-        None,
         None,
     )
     .await
@@ -52,27 +54,32 @@ pub async fn provision_execution_environment(
 /// runner seam used for the bounded pre-intent session observation.
 pub async fn provision_execution_environment_scoped(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     application_id: i64,
     environment_id: Uuid,
     expected_generation: i64,
     operation_token: &str,
-    authority: Option<ScopeAuthority>,
-    runner: Option<&dyn crate::runner::RunnerService>,
+    scope: Option<ScopedCall<'_>>,
 ) -> Result<EnvironmentOperationDescriptor, LifecycleError> {
     if !job_token_is_valid(operation_token) {
         return Err(LifecycleError::InvalidToken);
     }
 
     let mut tx = pool.begin().await?;
-    expire_overdue_jobs(&mut tx, application_id, environment_id).await?;
+    expire_overdue_jobs(&mut tx, runtime, application_id, environment_id).await?;
     let Some(environment) = lock_environment(&mut tx, application_id, environment_id).await? else {
         return Err(LifecycleError::NotFound);
     };
 
     // Resolve the stored scope and, when present, lock and validate the fresh
     // bound binding before any replay or intent decision.
-    let scope_binding =
-        scope::authorize_scope(&mut tx, application_id, environment_id, authority.as_ref()).await?;
+    let scope_binding = scope::authorize_scope(
+        &mut tx,
+        application_id,
+        environment_id,
+        scope.as_ref().map(|scope| &scope.authority),
+    )
+    .await?;
 
     // A same-token replay of an identical ensure intent returns the original
     // operation unchanged; anything else under that token is a conflict.
@@ -115,8 +122,13 @@ pub async fn provision_execution_environment_scoped(
             if environment.state != "absent" {
                 return Err(LifecycleError::InvalidState);
             }
-            scope::admit_scoped_intent(&mut tx, binding, environment.assigned_manager_id, runner)
-                .await?
+            scope::admit_scoped_intent(
+                &mut tx,
+                binding,
+                environment.assigned_manager_id,
+                scope.as_ref().map(|scope| scope.runner),
+            )
+            .await?
         }
         None => match environment.assigned_manager_id {
             Some(manager_id) => manager_id,

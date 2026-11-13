@@ -44,12 +44,20 @@ pub struct AppState {
     pub runner_broker: Arc<RunnerBroker>,
     pub db: sqlx::PgPool,
     pub git_capability_signing_key: ring::hmac::Key,
+    /// The durable task runtime of the environment jobs.
+    ///
+    /// The runtime is required: it is initialized before the server accepts a
+    /// request, and every claim and every terminal outcome of a domain job
+    /// goes through it.
+    pub task_runtime: Arc<db::task_runtime::TaskRuntime>,
 }
 
 pub async fn run() -> anyhow::Result<()> {
     let config = Arc::new(AppConfig::from_env()?);
     let db = db::connect(&config).await?;
     db::migrate(&db).await?;
+    let task_runtime = Arc::new(db::task_runtime::TaskRuntime::new(db.clone()));
+    task_runtime.initialize().await?;
     let git_capability_signing_key = git_gateway::signing_key::load_or_create(&db).await?;
     db::bootstrap_admin(&db, &config).await?;
     let runner_broker = RunnerBroker::new(db.clone());
@@ -62,6 +70,7 @@ pub async fn run() -> anyhow::Result<()> {
         runner_broker,
         db,
         git_capability_signing_key,
+        task_runtime,
     };
     lifecycle::spawn_janitor(state.clone());
 

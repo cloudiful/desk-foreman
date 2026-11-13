@@ -98,6 +98,8 @@ fn state_with_pool(root: &Path, pool: PgPool) -> crate::AppState {
     let runner = FakeRunnerService::new() as Arc<dyn RunnerService>;
     let mut state = app_state_with_runner(root.to_path_buf(), runner);
     state.db = pool.clone();
+    state.task_runtime =
+        std::sync::Arc::new(crate::db::task_runtime::TaskRuntime::new(pool.clone()));
     state.runner_broker = RunnerBroker::new(pool);
     state
 }

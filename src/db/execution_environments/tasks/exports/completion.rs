@@ -6,9 +6,11 @@ use crate::db::execution_environment_jobs::{
     DurableJobCompletion, ExecutionEnvironmentJob, find_execution_environment_job_by_id,
     job_state_is_terminal,
 };
+use crate::db::task_runtime::TaskRuntime;
 
 pub(crate) async fn complete_export_result(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     manager_id: i64,
     row: &ExecutionEnvironmentJob,
     reported: &RunnerJobResult,
@@ -23,7 +25,7 @@ pub(crate) async fn complete_export_result(
                 "failed export result carried no diagnostic",
             ));
         }
-        return complete_export_failure(pool, manager_id, row).await;
+        return complete_export_failure(pool, runtime, manager_id, row).await;
     }
 
     let Some(value) = reported.result.clone() else {

@@ -26,9 +26,16 @@ async fn only_assigned_manager_can_claim_and_complete() {
     )
     .await;
 
-    match claim_execution_environment_job(&db.pool, app, env, "assigned-token", other)
-        .await
-        .expect("wrong manager claim")
+    match claim_execution_environment_job(
+        &db.pool,
+        &db.task_runtime,
+        app,
+        env,
+        "assigned-token",
+        other,
+    )
+    .await
+    .expect("wrong manager claim")
     {
         ClaimOutcome::NotClaimable { current } => {
             assert_eq!(current.expect("own row").state, "pending");
@@ -36,9 +43,16 @@ async fn only_assigned_manager_can_claim_and_complete() {
         other => panic!("wrong manager must not claim, got {other:?}"),
     }
 
-    let claimed = claim_execution_environment_job(&db.pool, app, env, "assigned-token", assigned)
-        .await
-        .expect("assigned claim");
+    let claimed = claim_execution_environment_job(
+        &db.pool,
+        &db.task_runtime,
+        app,
+        env,
+        "assigned-token",
+        assigned,
+    )
+    .await
+    .expect("assigned claim");
     assert!(
         matches!(claimed, ClaimOutcome::Claimed(_)),
         "got {claimed:?}"
@@ -46,6 +60,7 @@ async fn only_assigned_manager_can_claim_and_complete() {
 
     match complete_execution_environment_job(
         &db.pool,
+        &db.task_runtime,
         app,
         env,
         "assigned-token",
@@ -66,6 +81,7 @@ async fn only_assigned_manager_can_claim_and_complete() {
 
     let completed = complete_execution_environment_job(
         &db.pool,
+        &db.task_runtime,
         app,
         env,
         "assigned-token",
@@ -107,8 +123,22 @@ async fn competing_claims_yield_one_winner() {
     let first_pool = db.pool.clone();
     let second_pool = db.pool.clone();
     let (first, second) = tokio::join!(
-        claim_execution_environment_job(&first_pool, app, env, "claim-race-token", manager),
-        claim_execution_environment_job(&second_pool, app, env, "claim-race-token", manager),
+        claim_execution_environment_job(
+            &first_pool,
+            &db.task_runtime,
+            app,
+            env,
+            "claim-race-token",
+            manager,
+        ),
+        claim_execution_environment_job(
+            &second_pool,
+            &db.task_runtime,
+            app,
+            env,
+            "claim-race-token",
+            manager,
+        ),
     );
     let first = first.expect("first claim");
     let second = second.expect("second claim");
@@ -137,12 +167,20 @@ async fn terminal_duplicate_replays_and_conflicting_replay_is_refused() {
     )
     .await;
 
-    claim_execution_environment_job(&db.pool, app, env, "terminal-token", manager)
-        .await
-        .expect("claim");
+    claim_execution_environment_job(
+        &db.pool,
+        &db.task_runtime,
+        app,
+        env,
+        "terminal-token",
+        manager,
+    )
+    .await
+    .expect("claim");
     let result = ExecutionEnvironmentJobResult::stop_confirmed("exited");
     complete_execution_environment_job(
         &db.pool,
+        &db.task_runtime,
         app,
         env,
         "terminal-token",
@@ -157,6 +195,7 @@ async fn terminal_duplicate_replays_and_conflicting_replay_is_refused() {
 
     let duplicate = complete_execution_environment_job(
         &db.pool,
+        &db.task_runtime,
         app,
         env,
         "terminal-token",
@@ -175,6 +214,7 @@ async fn terminal_duplicate_replays_and_conflicting_replay_is_refused() {
 
     let conflict = complete_execution_environment_job(
         &db.pool,
+        &db.task_runtime,
         app,
         env,
         "terminal-token",

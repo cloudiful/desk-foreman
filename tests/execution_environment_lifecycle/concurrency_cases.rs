@@ -14,7 +14,12 @@ async fn concurrent_provisions_admit_exactly_one() {
     let db = LifecycleDb::setup().await;
     let (_, app_token) = create_app_with_token(&db.pool, "conc-prov-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "conc-prov-mgr").await;
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
     bring_manager_online(&base, &mgr_token).await;
     let env = create_environment(&base, &app_token, "conc-prov-user").await;
 
@@ -51,7 +56,12 @@ async fn concurrent_stops_admit_exactly_one_and_increment_once() {
     let db = LifecycleDb::setup().await;
     let (_, app_token) = create_app_with_token(&db.pool, "conc-stop-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "conc-stop-mgr").await;
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
     bring_manager_online(&base, &mgr_token).await;
     let env = create_environment(&base, &app_token, "conc-stop-user").await;
 
@@ -125,7 +135,12 @@ async fn concurrent_replacements_admit_exactly_one_and_consume_the_proof_once() 
     let db = LifecycleDb::setup().await;
     let (_, app_token) = create_app_with_token(&db.pool, "conc-repl-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "conc-repl-mgr").await;
-    let (base, handle) = spawn_http(test_state(db.pool.clone())).await;
+    let (base, handle) = spawn_http({
+        let mut state = test_state(db.pool.clone());
+        state.task_runtime = db.task_runtime.clone();
+        state
+    })
+    .await;
     bring_manager_online(&base, &mgr_token).await;
     let env = create_environment(&base, &app_token, "conc-repl-user").await;
 

@@ -18,9 +18,10 @@ pub use lifecycle::{
     EnvironmentOperationDescriptor, LIFECYCLE_ENVIRONMENT_STATES, LIFECYCLE_STATE_READY,
     LIFECYCLE_STATE_REPLACED, LIFECYCLE_STATE_STARTING, LIFECYCLE_STATE_STOPPING,
     LIFECYCLE_STATE_UNCERTAIN, LifecycleEnvironment, LifecycleError, OperationDescriptor,
-    ScopeAuthority, execution_environment_status, provision_execution_environment,
-    provision_execution_environment_scoped, replace_execution_environment,
-    replace_execution_environment_scoped, stop_execution_environment,
+    ReplaceRequest, ScopeAuthority, ScopedCall, execution_environment_status,
+    provision_execution_environment, provision_execution_environment_scoped,
+    replace_execution_environment, replace_execution_environment_scoped,
+    stop_execution_environment,
 };
 pub use service::{ServiceEnvironment, find_execution_environment_for_service};
 pub use store::{

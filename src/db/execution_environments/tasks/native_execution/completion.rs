@@ -7,9 +7,11 @@ use super::completion_resolution::{resolve, runtime_identity};
 use super::queries::{lock_context, lock_job};
 use super::types::NativeJobCompletion;
 use crate::db::execution_environment_jobs::ExecutionEnvironmentJob;
+use crate::db::task_runtime::{JobDisposition, TaskRuntime};
 
 pub(crate) async fn complete_native_task_job(
     pool: &PgPool,
+    runtime: &TaskRuntime,
     manager_id: i64,
     job_id: Uuid,
     reported: &RunnerJobResult,
@@ -127,6 +129,18 @@ pub(crate) async fn complete_native_task_job(
 
     if job.deadline_at <= chrono::Utc::now() {
         expire_locked_job(&mut tx, &environment, &task, &job).await?;
+        if let Err(error) = runtime
+            .settle(
+                &mut tx,
+                job.job_id,
+                Some(&job.job_kind),
+                JobDisposition::Failed,
+            )
+            .await
+        {
+            tx.rollback().await?;
+            return Err(error);
+        }
         tx.commit().await?;
         return Ok(NativeJobCompletion::NotCompletable);
     }
@@ -204,7 +218,7 @@ pub(crate) async fn complete_native_task_job(
             return Ok(NativeJobCompletion::NotCompletable);
         }
         let superseded = serde_json::json!({"outcome": "superseded_by_native_task_stop"});
-        let _: Vec<Uuid> = sqlx::query_file_scalar!(
+        let superseded_jobs: Vec<Uuid> = sqlx::query_file_scalar!(
             "src/sql/execution_environments/tasks/stop/supersede_inflight_task_jobs.sql",
             task_id,
             superseded,
@@ -212,6 +226,15 @@ pub(crate) async fn complete_native_task_job(
         )
         .fetch_all(&mut *tx)
         .await?;
+        for superseded_job in superseded_jobs {
+            if let Err(error) = runtime
+                .settle(&mut tx, superseded_job, None, JobDisposition::Failed)
+                .await
+            {
+                tx.rollback().await?;
+                return Err(error);
+            }
+        }
     } else {
         mark_uncertain(&mut tx, &environment, &task, &job).await?;
     }
@@ -249,6 +272,18 @@ pub(crate) async fn complete_native_task_job(
     if completed.is_none() {
         tx.rollback().await?;
         return Ok(NativeJobCompletion::NotCompletable);
+    }
+    if let Err(error) = runtime
+        .settle(
+            &mut tx,
+            job.job_id,
+            Some(&job.job_kind),
+            JobDisposition::for_state(resolution.state),
+        )
+        .await
+    {
+        tx.rollback().await?;
+        return Err(error);
     }
     tx.commit().await?;
     Ok(NativeJobCompletion::Completed)
