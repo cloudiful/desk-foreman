@@ -6,7 +6,10 @@ use std::{
 
 use anyhow::{Context, bail};
 
-use crate::policy::{ALL_SCOPES, ResourceLimits};
+use crate::{
+    credential_cipher::{CredentialProtector, MasterKey},
+    policy::{ALL_SCOPES, ResourceLimits},
+};
 
 /// Public native Git gateway settings (issue 1180 P28). An absent key or base
 /// URL leaves the gateway disabled: Shell still works, while `/git` and
@@ -108,6 +111,10 @@ pub struct AppConfig {
     pub frontend_dist: PathBuf,
     pub build_started_at: SystemTime,
     pub git_gateway: GitGatewayConfig,
+    /// Protector for persisted Git upstream credentials. Absent when no master
+    /// key is configured: the service still starts, but protected credential
+    /// writes and protected credential use fail closed.
+    pub credential_protector: Option<CredentialProtector>,
 }
 
 impl AppConfig {
@@ -190,6 +197,8 @@ impl AppConfig {
 
         let frontend_dist = workspace_root.join(frontend_dist);
         let git_gateway = GitGatewayConfig::from_env()?;
+        let credential_protector =
+            credential_protector_from_env(env::var("DF_CREDENTIAL_MASTER_KEY").ok())?;
 
         Ok(Self {
             bind_addr,
@@ -217,8 +226,34 @@ impl AppConfig {
             frontend_dist,
             build_started_at: SystemTime::now(),
             git_gateway,
+            credential_protector,
         })
     }
+}
+
+/// Build the credential protector from the configured master key.
+///
+/// An absent or empty value leaves protected credentials disabled without
+/// stopping the service. A nonempty value that is not base64 for exactly 32
+/// bytes is an invalid configuration and fails startup; the error names only
+/// the setting, never the value.
+fn credential_protector_from_env(
+    raw: Option<String>,
+) -> anyhow::Result<Option<CredentialProtector>> {
+    let Some(master_key) = parse_credential_master_key(raw.as_deref())? else {
+        return Ok(None);
+    };
+    Ok(Some(CredentialProtector::new(master_key)))
+}
+
+/// Parse the configured master key.
+pub fn parse_credential_master_key(raw: Option<&str>) -> anyhow::Result<Option<MasterKey>> {
+    let Some(value) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    MasterKey::from_base64(value).map(Some).map_err(|_| {
+        anyhow::anyhow!("DF_CREDENTIAL_MASTER_KEY must be base64 encoding exactly 32 bytes")
+    })
 }
 
 fn comma_separated_values(value: &str) -> Vec<String> {
@@ -247,7 +282,7 @@ fn canonical_workspace_root(name: &str, path: &Path) -> anyhow::Result<PathBuf> 
 
 #[cfg(test)]
 mod tests {
-    use super::comma_separated_values;
+    use super::{comma_separated_values, parse_credential_master_key};
 
     #[test]
     fn comma_separated_values_trim_and_drop_blanks() {
@@ -255,5 +290,36 @@ mod tests {
             comma_separated_values("localhost, desk.example.com:443, ,127.0.0.1"),
             ["localhost", "desk.example.com:443", "127.0.0.1"]
         );
+    }
+
+    #[test]
+    fn master_key_is_optional_and_bounded() {
+        assert!(
+            parse_credential_master_key(None)
+                .expect("absent key")
+                .is_none()
+        );
+        assert!(
+            parse_credential_master_key(Some("  "))
+                .expect("blank key")
+                .is_none()
+        );
+        assert!(
+            parse_credential_master_key(Some("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="))
+                .expect("valid key")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn malformed_master_key_fails_without_echoing_the_value() {
+        let error = parse_credential_master_key(Some("not base64 !!"))
+            .expect_err("malformed key must fail")
+            .to_string();
+        assert!(error.contains("DF_CREDENTIAL_MASTER_KEY"));
+        assert!(!error.contains("not base64"));
+
+        let short = parse_credential_master_key(Some("AAEC")).expect_err("short key must fail");
+        assert!(short.to_string().contains("DF_CREDENTIAL_MASTER_KEY"));
     }
 }

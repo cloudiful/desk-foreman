@@ -157,6 +157,7 @@ pub(crate) fn fake_state(runner: Arc<FakeRunnerService>) -> AppState {
             frontend_dist: PathBuf::from("/tmp/frontend"),
             build_started_at: SystemTime::now(),
             git_gateway: Default::default(),
+            credential_protector: None,
         }),
         git_capability_signing_key: crate::git_gateway::signing_key::from_bytes(&[7u8; 32])
             .expect("test signing key"),

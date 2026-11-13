@@ -191,11 +191,35 @@ async fn handle(
         return error_response(StatusCode::FORBIDDEN, "credential_resupply_required");
     }
 
+    // A stored credential is opened under the row identity that owns it. A
+    // missing key or an unreadable frame fails closed: the request never
+    // falls back to an anonymous upstream and never clears the stored row.
+    let secret = match upstream.credential_ciphertext.as_ref() {
+        None => None,
+        Some(frame) => {
+            let Some(protector) = state.config.credential_protector.as_ref() else {
+                return error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "credential encryption key is not configured",
+                );
+            };
+            match protector.open(upstream.workspace_binding_id, upstream.upstream_id, frame) {
+                Ok(secret) => Some(secret),
+                Err(_) => {
+                    return error_response(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "stored credential could not be decrypted",
+                    );
+                }
+            }
+        }
+    };
+
     let target = match parse_target(&upstream.target_url, route) {
         Ok(url) => UpstreamTarget {
             url,
             username: upstream.credential_username,
-            secret: upstream.credential_secret,
+            secret,
         },
         Err(_) => return error_response(StatusCode::BAD_GATEWAY, "upstream target invalid"),
     };

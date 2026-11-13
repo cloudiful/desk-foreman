@@ -99,6 +99,9 @@ Tool audit records store actor/workspace/tool metadata, hashes, status, duration
 - `NETWORK_ENABLED` default `true` for policy calculation; Docker runner network remains separately controlled
 - `WORKSPACE_RETENTION_DAYS` default `30`, archived workspace retention before janitor deletion
 - `FRONTEND_DIST` default `frontend/dist`
+- `DF_GIT_PUBLIC_BASE_URL` optional public base URL of the native Git gateway; empty disables the gateway while normal Shell tools keep working
+- `DF_GIT_GATEWAY_MAX_BODY_BYTES` default `268435456`, maximum `1073741824`
+- `DF_CREDENTIAL_MASTER_KEY` optional base64 master key for stored Git upstream credentials, exactly 32 bytes, identical across restarts and all control-plane replicas. Empty leaves the service running but protected credential writes and protected credential use fail closed with `503`; a nonempty value that is not 32 base64-encoded bytes stops startup. The key is never baked into an image and never appears in logs, errors or responses.
 
 ## Frontend
 

@@ -15,6 +15,7 @@ edition = "2024"
 anyhow = "1.0.104"
 argon2 = "0.6.0"
 base64 = "0.22"
+cloudiful-secret-crypto = { git = "https://forgejo.cloud1ful.com/crates/secret-crypto.git", rev = "2763fc1288d196b2fcec0d23dee6d1da71bb05a6" }
 axum = { version = "0.8.9", features = ["http1", "json", "tokio", "tracing", "ws"] }
 axum-extra = { version = "0.12.6", features = ["cookie"] }
 chrono = { version = "0.4.45", features = ["serde"] }
@@ -56,6 +57,7 @@ description = "Workspace-scoped MCP coding service with isolated runners"
 anyhow.workspace = true
 argon2.workspace = true
 base64.workspace = true
+cloudiful-secret-crypto.workspace = true
 axum.workspace = true
 axum-extra.workspace = true
 chrono.workspace = true

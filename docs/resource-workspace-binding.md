@@ -73,13 +73,32 @@ active binding and returns `409` otherwise. Unknown or cross-binding upstream
 ids return `404`, and a duplicate alias for the same binding returns `409`.
 
 Credentials are write-only: responses expose only `has_credential`, never the
-username or secret. Upstream credentials are stored as plaintext in the
-database by explicit product decision; no operator key or extra configuration is
-required to create or update them. Rows written by the previous encrypted
-format remain detectable but are never decrypted: their upstream requests fail
-closed with `credential_resupply_required` until an administrator supplies a new
-credential, which replaces the legacy row. `enabled` is metadata only: it does
-not assert network reachability and does not make a Git push succeed by itself.
+username or secret. An upstream credential is stored as one authenticated
+ciphertext frame bound to the row that holds it; the plaintext secret is never
+persisted. The frame is sealed with the control-plane master key
+`DF_CREDENTIAL_MASTER_KEY` (base64 for exactly 32 bytes, identical across
+restarts and across all control-plane replicas). Without that key the service
+still starts, but setting or replacing a credential and using a stored
+credential fail closed with `503`; an explicit credential clear, a
+metadata-only update that keeps the credential, and an anonymous upstream need
+no key. A nonempty but malformed key stops startup with a metadata-only error
+that never echoes the value.
+
+The stored key name is derived from the workspace binding and the upstream row,
+never from a token or a URL, so a frame copied from another row never opens.
+A repeated update with the same username and secret is a no-op: the stored
+credential is opened under its own row identity and compared in constant time,
+and the capability generation is not incremented. A real credential change or
+an explicit clear keeps the existing generation invalidation.
+
+The credential encryption migration clears the previously stored credential
+material of every row and keeps the username, so an affected upstream reports
+the explicit `credential_resupply_required` state instead of forwarding
+anonymously, and its capability generation is incremented once. Clients that
+re-supply credentials automatically must do so on their next bind or
+registration step; a retry or a push alone never re-supplies them. `enabled` is
+metadata only: it does not assert network reachability and does not make a Git
+push succeed by itself.
 
 ## Native Git gateway
 
@@ -97,7 +116,10 @@ configuration. The runner authenticates with Basic username `df-git` and a
 short-lived signed capability scoped to the workspace binding and alias
 generation. Upstream
 credentials are read only inside the gateway request and are never placed
-in the runner, its argv, `.git/config`, or the workspace. Client cookies,
+in the runner, its argv, `.git/config`, or the workspace. A stored credential is
+opened under the row identity that owns it: without the master key, or when the
+stored frame cannot be opened, the request fails closed with `503` and never
+falls back to an anonymous upstream. Client cookies,
 authorization, proxy and forwarding headers are stripped; redirects, upstream
 error bodies, `Location`, `Set-Cookie` and `WWW-Authenticate` are never
 forwarded. Request and response packs are streamed with a configurable 256 MiB
