@@ -451,21 +451,66 @@ async fn mint_with(fixture: &Fixture, token: &str) -> (String, String) {
     )
 }
 
+const PRODUCTION_HELPER_BODY: &str = r#"#!/bin/sh
+test "$1" = get || exit 0
+protocol=
+host=
+seen_protocol=0
+seen_host=0
+while IFS='=' read -r key value; do
+    case "$key" in
+        "") break ;;
+        protocol)
+            [ "$seen_protocol" -eq 0 ] || exit 0
+            protocol=$value
+            seen_protocol=1
+            ;;
+        host)
+            [ "$seen_host" -eq 0 ] || exit 0
+            host=$value
+            seen_host=1
+            ;;
+    esac
+done
+[ "$seen_protocol" -eq 1 ] && [ "$seen_host" -eq 1 ] || exit 0
+protocol=$(printf '%s' "$protocol" | tr 'A-Z' 'a-z')
+host=$(printf '%s' "$host" | tr 'A-Z' 'a-z')
+case "$protocol" in
+    http|https) ;;
+    *) exit 0 ;;
+esac
+[ -n "$host" ] || exit 0
+[ -r /run/df-git/allowed-origins ] || exit 0
+matches() {
+    while IFS= read -r line; do
+        [ "$line" = "$1" ] && return 0
+    done < /run/df-git/allowed-origins
+    return 1
+}
+pair=$(printf '%s\t%s' "$protocol" "$host")
+matches "$pair" || exit 0
+[ -r /run/df-git/capability ] && [ -s /run/df-git/capability ] || exit 0
+printf 'username=%s\n' df-git
+printf 'password=%s\n' "$(cat /run/df-git/capability)"
+"#;
+
 fn credential_helper_script(fixture: &Fixture, capability: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let dir = fixture.scratch.join("auth");
     std::fs::create_dir_all(&dir).unwrap();
     let capability_file = dir.join("capability");
     std::fs::write(&capability_file, capability).unwrap();
+    let origins_file = dir.join("allowed-origins");
+    let gateway_origin = fixture.gateway_url.strip_prefix("http://").unwrap();
+    std::fs::write(&origins_file, format!("http\t{gateway_origin}\n")).unwrap();
     let script = dir.join("credential-helper");
-    std::fs::write(
-        &script,
-        format!(
-            "#!/bin/sh\ntest \"$1\" = get || exit 0\nprintf 'username=%s\\n' df-git\nprintf 'password=%s\\n' \"$(cat {})\"\n",
-            capability_file.display()
-        ),
-    )
-    .unwrap();
+    let body = PRODUCTION_HELPER_BODY
+        .replace("/run/df-git/capability", capability_file.to_str().unwrap())
+        .replace(
+            "/run/df-git/allowed-origins",
+            origins_file.to_str().unwrap(),
+        );
+    std::fs::write(&script, body).unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
     script
 }
@@ -476,7 +521,7 @@ fn helper_env(script: &Path) -> Vec<(&str, String)> {
         ("GIT_CONFIG_KEY_0", "credential.helper".to_string()),
         (
             "GIT_CONFIG_VALUE_0",
-            format!("!{}", script.to_str().unwrap()),
+            format!("!/bin/sh {}", script.to_str().unwrap()),
         ),
         ("GIT_CONFIG_KEY_1", "credential.interactive".to_string()),
         ("GIT_CONFIG_VALUE_1", "false".to_string()),

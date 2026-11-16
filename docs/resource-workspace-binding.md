@@ -115,6 +115,14 @@ DF aliases as remotes and never removes unrelated user remotes. Native Git
 authenticates through the static `credential.helper` that reads that file per
 dispatch; the helper is configured at process scope for every shell exec, so a
 first clone in a workspace that has no `.git/config` yet already resolves it.
+The helper also reads a companion tmpfs scope file holding the exact gateway
+`protocol`/`authority` pairs derived from this dispatch's broker URLs. It
+answers a challenge only when the remote's scheme and host (with default `80`
+and `443` treated as equivalent to an omitted port) match that scope, and it
+stays silent for every other host, subdomain, suffix, port or scheme so Git can
+try other helpers. A missing, empty, invalid or mixed-origin scope installs no
+helper credentials; the scope file is cleared and re-derived on every prepare
+and disable.
 No credential or capability is ever placed in a Git configuration value, an
 environment value, or an argument list, and no askpass program is configured.
 Disable, delete,

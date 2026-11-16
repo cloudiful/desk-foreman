@@ -407,6 +407,17 @@ impl DockerRunnerBackend {
                 remotes: 0,
             });
         };
+        // Derive and validate the trusted gateway origin only after the stale
+        // scope was cleared, so a failed derivation can never leave an older
+        // scope paired with a fresh capability.
+        let Some(allowed_origins) =
+            super::workspace_git::allowed_origins_metadata(&request.upstreams)
+        else {
+            return Ok(PrepareWorkspaceGitResult {
+                prepared: false,
+                remotes: 0,
+            });
+        };
 
         self.write_workspace_git_file(
             &container_name,
@@ -418,6 +429,12 @@ impl DockerRunnerBackend {
             &container_name,
             super::workspace_git::CREDENTIAL_HELPER_PATH,
             super::workspace_git::credential_helper_script().as_bytes(),
+        )
+        .await?;
+        self.write_workspace_git_file(
+            &container_name,
+            super::workspace_git::ALLOWED_ORIGINS_PATH,
+            allowed_origins.as_bytes(),
         )
         .await?;
 
@@ -469,6 +486,7 @@ impl DockerRunnerBackend {
             "sh".to_string(),
             super::workspace_git::CAPABILITY_PATH.to_string(),
             super::workspace_git::CREDENTIAL_HELPER_PATH.to_string(),
+            super::workspace_git::ALLOWED_ORIGINS_PATH.to_string(),
         ];
         let output = self
             .docker_output_owned(args, Some(15_000), Some(64 * 1024))

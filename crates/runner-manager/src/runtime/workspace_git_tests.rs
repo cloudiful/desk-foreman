@@ -1,16 +1,102 @@
 use super::workspace_git::{
-    CAPABILITY_PATH, CREDENTIAL_HELPER, CREDENTIAL_HELPER_PATH, credential_helper_script,
-    process_config_env, process_git_env, remote_config_args, valid_alias, valid_remote_url,
+    ALLOWED_ORIGINS_PATH, CAPABILITY_PATH, CREDENTIAL_HELPER, CREDENTIAL_HELPER_PATH,
+    allowed_origins_metadata, credential_helper_script, process_config_env, process_git_env,
+    remote_config_args, valid_alias, valid_remote_url,
 };
+use runner_protocol::workspace_git::WorkspaceGitRemote;
+
+fn remote(url: &str) -> WorkspaceGitRemote {
+    WorkspaceGitRemote {
+        remote_alias: "origin".to_string(),
+        url: url.to_string(),
+    }
+}
 
 #[test]
 fn helper_script_is_static_and_token_free() {
     let helper = credential_helper_script();
     assert!(helper.contains("/run/df-git/capability"));
+    assert!(helper.contains("/run/df-git/allowed-origins"));
     assert!(helper.contains("df-git"));
     assert!(!helper.contains("dfgit1."));
     assert_eq!(CAPABILITY_PATH, "/run/df-git/capability");
     assert_eq!(CREDENTIAL_HELPER_PATH, "/run/df-git/credential-helper");
+    assert_eq!(ALLOWED_ORIGINS_PATH, "/run/df-git/allowed-origins");
+}
+
+#[test]
+fn helper_guards_the_origin_before_reading_the_capability() {
+    let helper = credential_helper_script();
+    assert!(helper.starts_with("#!/bin/sh\n"));
+    assert!(helper.contains("test \"$1\" = get || exit 0"));
+    assert!(helper.contains("read -r key value"));
+    assert!(helper.contains("tr 'A-Z' 'a-z'"));
+    assert!(!helper.contains("eval"));
+    assert!(!helper.contains("sh -c"));
+    assert!(!helper.contains("curl"));
+    let scope = helper.find("allowed-origins").unwrap();
+    let secret = helper.find("capability").unwrap();
+    assert!(
+        scope < secret,
+        "the helper must match the origin before touching the capability"
+    );
+}
+
+#[test]
+fn default_port_forms_share_one_canonical_origin() {
+    let metadata = allowed_origins_metadata(&[
+        remote("https://DF.Example.com/git/7/origin"),
+        remote("https://df.example.com:443/git/7/upstream"),
+    ])
+    .unwrap();
+    assert_eq!(
+        metadata,
+        "https\tdf.example.com\nhttps\tdf.example.com:443\n"
+    );
+
+    let metadata = allowed_origins_metadata(&[remote("http://127.0.0.1:80/git/7/origin")]).unwrap();
+    assert_eq!(metadata, "http\t127.0.0.1\nhttp\t127.0.0.1:80\n");
+}
+
+#[test]
+fn nondefault_port_and_ipv6_brackets_are_preserved() {
+    let metadata =
+        allowed_origins_metadata(&[remote("http://127.0.0.1:3000/git/7/origin")]).unwrap();
+    assert_eq!(metadata, "http\t127.0.0.1:3000\n");
+
+    let metadata = allowed_origins_metadata(&[remote("https://[::1]:8443/git/7/origin")]).unwrap();
+    assert_eq!(metadata, "https\t[::1]:8443\n");
+
+    let metadata = allowed_origins_metadata(&[remote("http://[::1]/git/7/origin")]).unwrap();
+    assert_eq!(metadata, "http\t[::1]\nhttp\t[::1]:80\n");
+}
+
+#[test]
+fn invalid_or_mixed_origins_fail_closed() {
+    assert!(
+        allowed_origins_metadata(&[remote("https://user@df.example.com/git/7/origin")]).is_none()
+    );
+    assert!(
+        allowed_origins_metadata(&[remote("https://df.example.com/git/7/origin?token=1")])
+            .is_none()
+    );
+    assert!(
+        allowed_origins_metadata(&[remote("https://df.example.com/git/7/origin#frag")]).is_none()
+    );
+    assert!(allowed_origins_metadata(&[remote("ftp://df.example.com/git/7/origin")]).is_none());
+    assert!(
+        allowed_origins_metadata(&[
+            remote("https://df.example.com/git/7/origin"),
+            remote("https://other.example.com/git/7/origin"),
+        ])
+        .is_none(),
+        "aliases with different origins must not share one trusted scope"
+    );
+}
+
+#[test]
+fn missing_scope_yields_no_helper_credentials() {
+    assert!(allowed_origins_metadata(&[]).is_none());
 }
 
 #[test]

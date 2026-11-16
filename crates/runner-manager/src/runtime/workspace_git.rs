@@ -3,22 +3,122 @@
 //!
 //! The capability lives only in `/run/df-git/capability` on a small tmpfs. The
 //! helper script is static, contains no token, and is invoked through
-//! `/bin/sh` because the mount is `noexec`.
+//! `/bin/sh` because the mount is `noexec`. A companion `allowed-origins` file
+//! holds the exact gateway origin for the current dispatch; the helper answers
+//! only a matching challenge and stays silent for every other origin.
 //!
 //! Git never receives a program path for the credential material: the native
 //! `credential.helper` is configured at process scope for every shell exec, so
 //! even the first clone of a workspace that has no `.git/config` yet resolves
 //! the helper before Git could fall back to an askpass program.
 
+use runner_protocol::workspace_git::WorkspaceGitRemote;
+
 pub(crate) const CAPABILITY_PATH: &str = "/run/df-git/capability";
 pub(crate) const CREDENTIAL_HELPER_PATH: &str = "/run/df-git/credential-helper";
+pub(crate) const ALLOWED_ORIGINS_PATH: &str = "/run/df-git/allowed-origins";
 pub(crate) const CREDENTIAL_HELPER: &str = "!/bin/sh /run/df-git/credential-helper";
 
 const MAX_ALIAS_BYTES: usize = 64;
 const MAX_URL_BYTES: usize = 2048;
+const MAX_ALLOWED_ORIGINS_BYTES: usize = 1024;
+
+/// Static helper body. Only the two fixed tmpfs paths stand between `git` and
+/// the capability: a challenge is answered only for an exact trusted origin.
+const CREDENTIAL_HELPER_SCRIPT: &str = r#"#!/bin/sh
+test "$1" = get || exit 0
+protocol=
+host=
+seen_protocol=0
+seen_host=0
+while IFS='=' read -r key value; do
+    case "$key" in
+        "") break ;;
+        protocol)
+            [ "$seen_protocol" -eq 0 ] || exit 0
+            protocol=$value
+            seen_protocol=1
+            ;;
+        host)
+            [ "$seen_host" -eq 0 ] || exit 0
+            host=$value
+            seen_host=1
+            ;;
+    esac
+done
+[ "$seen_protocol" -eq 1 ] && [ "$seen_host" -eq 1 ] || exit 0
+protocol=$(printf '%s' "$protocol" | tr 'A-Z' 'a-z')
+host=$(printf '%s' "$host" | tr 'A-Z' 'a-z')
+case "$protocol" in
+    http|https) ;;
+    *) exit 0 ;;
+esac
+[ -n "$host" ] || exit 0
+[ -r /run/df-git/allowed-origins ] || exit 0
+matches() {
+    while IFS= read -r line; do
+        [ "$line" = "$1" ] && return 0
+    done < /run/df-git/allowed-origins
+    return 1
+}
+pair=$(printf '%s\t%s' "$protocol" "$host")
+matches "$pair" || exit 0
+[ -r /run/df-git/capability ] && [ -s /run/df-git/capability ] || exit 0
+printf 'username=%s\n' df-git
+printf 'password=%s\n' "$(cat /run/df-git/capability)"
+"#;
 
 pub(crate) fn credential_helper_script() -> &'static str {
-    "#!/bin/sh\ntest \"$1\" = get || exit 0\nprintf 'username=%s\\n' df-git\nprintf 'password=%s\\n' \"$(cat /run/df-git/capability)\"\n"
+    CREDENTIAL_HELPER_SCRIPT
+}
+
+/// Derives the single trusted gateway origin from the broker URLs the manager
+/// already receives for this dispatch. The file holds exact `scheme<TAB>
+/// authority` pairs; an explicit default port is accepted as the same origin,
+/// other ports, hosts and schemes are not.
+pub(crate) fn allowed_origins_metadata(upstreams: &[WorkspaceGitRemote]) -> Option<String> {
+    let mut origin: Option<(String, String, Option<u16>)> = None;
+    for upstream in upstreams {
+        let candidate = canonical_origin(&upstream.url)?;
+        match &origin {
+            Some(existing) if existing != &candidate => return None,
+            Some(_) => {}
+            None => origin = Some(candidate),
+        }
+    }
+    let (scheme, host, port) = origin?;
+    let authority = match port {
+        Some(port) => format!("{host}:{port}"),
+        None => host.clone(),
+    };
+    let mut body = format!("{scheme}\t{authority}\n");
+    if port.is_none() {
+        let default_port: u16 = if scheme == "https" { 443 } else { 80 };
+        body.push_str(&format!("{scheme}\t{host}:{default_port}\n"));
+    }
+    (body.len() <= MAX_ALLOWED_ORIGINS_BYTES).then_some(body)
+}
+
+fn canonical_origin(url: &str) -> Option<(String, String, Option<u16>)> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let scheme = parsed.scheme();
+    if !matches!(scheme, "http" | "https") {
+        return None;
+    }
+    if !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return None;
+    }
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    if host.is_empty() {
+        return None;
+    }
+    let default_port: u16 = if scheme == "https" { 443 } else { 80 };
+    let port = parsed.port().filter(|port| *port != default_port);
+    Some((scheme.to_string(), host, port))
 }
 
 /// Process-scope Git configuration injected into every shell exec.
