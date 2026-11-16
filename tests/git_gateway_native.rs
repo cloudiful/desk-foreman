@@ -17,14 +17,12 @@ use support::{EXTERNAL_USER_ID, Fixture, run_git, run_ok};
 async fn native_clone_fetch_and_push_through_gateway() {
     let fixture = Fixture::setup().await;
     let capability = mint(&fixture).await;
-    let askpass = askpass_script(&fixture, &capability);
-    let env = askpass_env(&askpass);
+    let helper = credential_helper_script(&fixture, &capability);
+    let env = helper_env(&helper);
 
     let clone_dir = fixture.scratch.join("clone");
     let output = run_git(
         &[
-            "-c",
-            "credential.helper=",
             "clone",
             &fixture.remote_url("origin"),
             clone_dir.to_str().unwrap(),
@@ -453,28 +451,81 @@ async fn mint_with(fixture: &Fixture, token: &str) -> (String, String) {
     )
 }
 
-fn askpass_script(fixture: &Fixture, capability: &str) -> std::path::PathBuf {
+const PRODUCTION_HELPER_BODY: &str = r#"#!/bin/sh
+test "$1" = get || exit 0
+protocol=
+host=
+seen_protocol=0
+seen_host=0
+while IFS='=' read -r key value; do
+    case "$key" in
+        "") break ;;
+        protocol)
+            [ "$seen_protocol" -eq 0 ] || exit 0
+            protocol=$value
+            seen_protocol=1
+            ;;
+        host)
+            [ "$seen_host" -eq 0 ] || exit 0
+            host=$value
+            seen_host=1
+            ;;
+    esac
+done
+[ "$seen_protocol" -eq 1 ] && [ "$seen_host" -eq 1 ] || exit 0
+protocol=$(printf '%s' "$protocol" | tr 'A-Z' 'a-z')
+host=$(printf '%s' "$host" | tr 'A-Z' 'a-z')
+case "$protocol" in
+    http|https) ;;
+    *) exit 0 ;;
+esac
+[ -n "$host" ] || exit 0
+[ -r /run/df-git/allowed-origins ] || exit 0
+matches() {
+    while IFS= read -r line; do
+        [ "$line" = "$1" ] && return 0
+    done < /run/df-git/allowed-origins
+    return 1
+}
+pair=$(printf '%s\t%s' "$protocol" "$host")
+matches "$pair" || exit 0
+[ -r /run/df-git/capability ] && [ -s /run/df-git/capability ] || exit 0
+printf 'username=%s\n' df-git
+printf 'password=%s\n' "$(cat /run/df-git/capability)"
+"#;
+
+fn credential_helper_script(fixture: &Fixture, capability: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let dir = fixture.scratch.join("auth");
     std::fs::create_dir_all(&dir).unwrap();
     let capability_file = dir.join("capability");
     std::fs::write(&capability_file, capability).unwrap();
-    let script = dir.join("askpass");
-    std::fs::write(
-        &script,
-        format!(
-            "#!/bin/sh\ncase \"$1\" in\n  Username*) printf '%s\\n' df-git ;;\n  Password*) cat {} ;;\n  *) exit 1 ;;\nesac\n",
-            capability_file.display()
-        ),
-    )
-    .unwrap();
+    let origins_file = dir.join("allowed-origins");
+    let gateway_origin = fixture.gateway_url.strip_prefix("http://").unwrap();
+    std::fs::write(&origins_file, format!("http\t{gateway_origin}\n")).unwrap();
+    let script = dir.join("credential-helper");
+    let body = PRODUCTION_HELPER_BODY
+        .replace("/run/df-git/capability", capability_file.to_str().unwrap())
+        .replace(
+            "/run/df-git/allowed-origins",
+            origins_file.to_str().unwrap(),
+        );
+    std::fs::write(&script, body).unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
     script
 }
 
-fn askpass_env(script: &Path) -> Vec<(&str, String)> {
+fn helper_env(script: &Path) -> Vec<(&str, String)> {
     vec![
-        ("GIT_ASKPASS", script.to_str().unwrap().to_string()),
+        ("GIT_CONFIG_COUNT", "2".to_string()),
+        ("GIT_CONFIG_KEY_0", "credential.helper".to_string()),
+        (
+            "GIT_CONFIG_VALUE_0",
+            format!("!/bin/sh {}", script.to_str().unwrap()),
+        ),
+        ("GIT_CONFIG_KEY_1", "credential.interactive".to_string()),
+        ("GIT_CONFIG_VALUE_1", "false".to_string()),
+        ("GIT_ASKPASS", String::new()),
         ("GIT_TERMINAL_PROMPT", "0".to_string()),
     ]
 }
