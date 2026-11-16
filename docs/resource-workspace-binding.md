@@ -111,7 +111,13 @@ response-header and total-stream deadlines.
 
 Each shell or `write_stdin` dispatch mints a fresh capability and writes it to a
 small `noexec` tmpfs credential file. The manager configures only the enabled
-DF aliases as remotes and never removes unrelated user remotes. Disable, delete,
+DF aliases as remotes and never removes unrelated user remotes. Native Git
+authenticates through the static `credential.helper` that reads that file per
+dispatch; the helper is configured at process scope for every shell exec, so a
+first clone in a workspace that has no `.git/config` yet already resolves it.
+No credential or capability is ever placed in a Git configuration value, an
+environment value, or an argument list, and no askpass program is configured.
+Disable, delete,
 alias/target change, credential replacement or a generation change invalidates
 older capabilities on their next request. When the public base URL is absent
 the gateway returns a fixed `503`, native Git stays unavailable, and normal

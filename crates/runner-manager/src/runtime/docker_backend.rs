@@ -81,6 +81,10 @@ impl RunnerBackend for DockerRunnerBackend {
             args.push(workdir);
             args.push("-e".to_string());
             args.push(format!("WORKSPACE_ROOT={}", config.workdir));
+            for (key, value) in super::workspace_git::process_git_env() {
+                args.push("-e".to_string());
+                args.push(format!("{key}={value}"));
+            }
             args.push(container_name);
             args.push(request.shell);
             args.extend(append_shell_args(request.login, &request.command));
@@ -341,8 +345,6 @@ impl DockerRunnerBackend {
             "-e".to_string(),
             format!("WORKSPACE_ROOT={}", config.workdir),
             "-e".to_string(),
-            format!("GIT_ASKPASS={}", super::workspace_git::GIT_ASKPASS),
-            "-e".to_string(),
             "GIT_TERMINAL_PROMPT=0".to_string(),
             "-v".to_string(),
             format!("{}:{}", host_workspace_root.display(), config.workdir),
@@ -414,12 +416,6 @@ impl DockerRunnerBackend {
         .await?;
         self.write_workspace_git_file(
             &container_name,
-            super::workspace_git::ASKPASS_PATH,
-            super::workspace_git::askpass_script().as_bytes(),
-        )
-        .await?;
-        self.write_workspace_git_file(
-            &container_name,
             super::workspace_git::CREDENTIAL_HELPER_PATH,
             super::workspace_git::credential_helper_script().as_bytes(),
         )
@@ -472,7 +468,6 @@ impl DockerRunnerBackend {
             "rm -f -- \"$@\"".to_string(),
             "sh".to_string(),
             super::workspace_git::CAPABILITY_PATH.to_string(),
-            super::workspace_git::ASKPASS_PATH.to_string(),
             super::workspace_git::CREDENTIAL_HELPER_PATH.to_string(),
         ];
         let output = self

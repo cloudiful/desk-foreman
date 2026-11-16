@@ -17,14 +17,12 @@ use support::{EXTERNAL_USER_ID, Fixture, run_git, run_ok};
 async fn native_clone_fetch_and_push_through_gateway() {
     let fixture = Fixture::setup().await;
     let capability = mint(&fixture).await;
-    let askpass = askpass_script(&fixture, &capability);
-    let env = askpass_env(&askpass);
+    let helper = credential_helper_script(&fixture, &capability);
+    let env = helper_env(&helper);
 
     let clone_dir = fixture.scratch.join("clone");
     let output = run_git(
         &[
-            "-c",
-            "credential.helper=",
             "clone",
             &fixture.remote_url("origin"),
             clone_dir.to_str().unwrap(),
@@ -453,17 +451,17 @@ async fn mint_with(fixture: &Fixture, token: &str) -> (String, String) {
     )
 }
 
-fn askpass_script(fixture: &Fixture, capability: &str) -> std::path::PathBuf {
+fn credential_helper_script(fixture: &Fixture, capability: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let dir = fixture.scratch.join("auth");
     std::fs::create_dir_all(&dir).unwrap();
     let capability_file = dir.join("capability");
     std::fs::write(&capability_file, capability).unwrap();
-    let script = dir.join("askpass");
+    let script = dir.join("credential-helper");
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\ncase \"$1\" in\n  Username*) printf '%s\\n' df-git ;;\n  Password*) cat {} ;;\n  *) exit 1 ;;\nesac\n",
+            "#!/bin/sh\ntest \"$1\" = get || exit 0\nprintf 'username=%s\\n' df-git\nprintf 'password=%s\\n' \"$(cat {})\"\n",
             capability_file.display()
         ),
     )
@@ -472,9 +470,17 @@ fn askpass_script(fixture: &Fixture, capability: &str) -> std::path::PathBuf {
     script
 }
 
-fn askpass_env(script: &Path) -> Vec<(&str, String)> {
+fn helper_env(script: &Path) -> Vec<(&str, String)> {
     vec![
-        ("GIT_ASKPASS", script.to_str().unwrap().to_string()),
+        ("GIT_CONFIG_COUNT", "2".to_string()),
+        ("GIT_CONFIG_KEY_0", "credential.helper".to_string()),
+        (
+            "GIT_CONFIG_VALUE_0",
+            format!("!{}", script.to_str().unwrap()),
+        ),
+        ("GIT_CONFIG_KEY_1", "credential.interactive".to_string()),
+        ("GIT_CONFIG_VALUE_1", "false".to_string()),
+        ("GIT_ASKPASS", String::new()),
         ("GIT_TERMINAL_PROMPT", "0".to_string()),
     ]
 }
