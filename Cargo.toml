@@ -13,7 +13,7 @@ edition = "2024"
 
 [workspace.dependencies]
 anyhow = "1.0.104"
-cloudiful-tasks = { git = "https://github.com/cloudiful/tasks", rev = "20ba7145d81814b6094cbe28cb973f75fb82ca5c" }
+cloudiful-tasks = { git = "https://github.com/cloudiful/tasks", rev = "3ea7f31cded4a11fb010c5e9d82e6c994712c528" }
 argon2 = "0.6.0"
 base64 = "0.23.1"
 cloudiful-secret-crypto = { git = "https://forgejo.cloud1ful.com/crates/secret-crypto.git", branch = "main" }
