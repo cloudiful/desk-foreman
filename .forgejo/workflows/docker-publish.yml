@@ -22,17 +22,14 @@ jobs:
         [{"platform":"linux/amd64","runner":"aio"}]
       before_build_command: rm -rf ci-image-input
       build_command: >-
-        export CARGO_TERM_COLOR=always RUSTC_WRAPPER=sccache;
-        cargo build --release
-        -p desk-foreman --bin desk-foreman --bin export-openapi
-        && cargo build --release
-        -p desk-foreman-runner-manager --bin desk-foreman-runner-manager
+        cargo build --release -p desk-foreman --bin desk-foreman --bin export-openapi
+        &&
+        cargo build --release -p desk-foreman-runner-manager --bin desk-foreman-runner-manager
       binary_mappings: >-
         [{"source":"target/release/desk-foreman","destination":"desk-foreman"},
         {"source":"target/release/export-openapi","destination":"export-openapi"},
         {"source":"target/release/desk-foreman-runner-manager","destination":"desk-foreman-runner-manager"}]
       after_build_command: |
-        set -euo pipefail
         mkdir -p ci-image-input/frontend-dist
         cd frontend
         ../ci-image-input/export-openapi openapi.json
