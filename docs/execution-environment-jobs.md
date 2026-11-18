@@ -127,6 +127,13 @@ cancelled task, without a retry.
 The application owns no task schema and writes no task SQL. The task library
 migrates its own schema on the existing pool before the server accepts a
 request, and the desk application reaches the tasks only through that library.
+The pinned library implements schema protocol version 5, and the initialized
+runtime must match it exactly. The migration is lazy and runs in
+`TaskRuntime::initialize`; an older client refuses a newer schema, so stop every
+older client on the same database before the new binary first initializes it.
+Mixed protocol versions are not supported: do not reset data or rely on implicit
+retention. Protocol 5 only adds the terminal-cleanup index, and this application
+enables no retention or task deletion.
 An operation that was claimed before this integration existed has no task: its
 completion stays a no-op for the task and never invents one. That no-op requires
 that no queue of the namespace holds a task for the operation: a task found in
