@@ -193,7 +193,7 @@ impl AppConfig {
         let bootstrap_admin_timezone =
             env::var("BOOTSTRAP_ADMIN_TIMEZONE").unwrap_or_else(|_| "UTC".to_string());
         let frontend_dist =
-            env::var("FRONTEND_DIST").unwrap_or_else(|_| "frontend/dist".to_string());
+            env::var("FRONTEND_DIST").unwrap_or_else(|_| "/app/frontend/dist".to_string());
 
         let frontend_dist = workspace_root.join(frontend_dist);
         let git_gateway = GitGatewayConfig::from_env()?;

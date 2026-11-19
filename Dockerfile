@@ -1,10 +1,10 @@
 FROM debian:trixie-slim AS runtime-base
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates curl gnupg nginx tini \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl gnupg tini \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --uid 10001 desk-foreman \
-    && install -d -o desk-foreman -g desk-foreman /workspace /var/lib/desk-foreman /usr/share/nginx/html
+    && install -d -o desk-foreman -g desk-foreman /workspace /var/lib/desk-foreman
 
 WORKDIR /workspace
 
@@ -19,13 +19,8 @@ RUN install -d /etc/apt/keyrings \
 
 FROM runtime-base AS runtime
 
-COPY docker/nginx.conf /etc/nginx/nginx.conf
-COPY docker/start-desk-foreman.sh /usr/local/bin/start-desk-foreman
 COPY --chmod=755 ci-image-input/desk-foreman /usr/local/bin/desk-foreman
-COPY ci-image-input/frontend-dist /usr/share/nginx/html
-
-RUN chmod +x /usr/local/bin/start-desk-foreman \
-    && chown -R desk-foreman:desk-foreman /usr/share/nginx/html /var/lib/desk-foreman
+COPY ci-image-input/frontend-dist /app/frontend/dist
 
 USER desk-foreman
 
@@ -38,11 +33,11 @@ ENV WEB_COOKIE_NAME=desk_foreman_session
 ENV WEB_COOKIE_SECURE=false
 ENV MAX_OUTPUT_BYTES=262144
 ENV PATCH_SURFACE_MODE=function_compat
-ENV FRONTEND_DIST=/usr/share/nginx/html
+ENV FRONTEND_DIST=/app/frontend/dist
 
-EXPOSE 80
+EXPOSE 3000
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/start-desk-foreman"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/desk-foreman"]
 
 FROM runtime-base AS runner-manager
 
