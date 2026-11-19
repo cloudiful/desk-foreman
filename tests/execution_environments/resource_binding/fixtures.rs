@@ -47,7 +47,7 @@ impl BindingFixture {
         let database = IsolatedDb::setup().await;
         let temp = tempfile::tempdir().expect("tempdir");
         let (application_id, token) = create_app_with_token(&database.pool, "binding-owner").await;
-        let mut state = test_state(database.pool.clone());
+        let mut state = test_state(database.pool.clone()).await;
         let mut config = (*state.config).clone();
         config.workspace_root = temp.path().to_path_buf();
         state.config = Arc::new(config);

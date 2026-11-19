@@ -84,7 +84,7 @@ async fn stop_after_replacement_is_admitted_with_a_fresh_token() {
     let (_, app_token) = create_app_with_token(&db.pool, "rv-restop-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "rv-restop-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -136,7 +136,7 @@ async fn replacement_cycle_repeats_after_a_second_confirmed_stop() {
     let (_, app_token) = create_app_with_token(&db.pool, "rv-cycle-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "rv-cycle-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -181,7 +181,7 @@ async fn current_candidate_stop_guards_survive_the_repair() {
     let (_, app_token) = create_app_with_token(&db.pool, "rv-guard-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "rv-guard-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -269,7 +269,7 @@ async fn three_repeated_stop_replace_cycles_are_monotonic() {
     let (_, app_token) = create_app_with_token(&db.pool, "rv-multi-app").await;
     let (manager_id, mgr_token) = create_manager(&db.pool, "rv-multi-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })

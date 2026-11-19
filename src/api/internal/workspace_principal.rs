@@ -69,15 +69,21 @@ pub async fn stop_workspace_principal(
     let application = crate::db::queries::find_application_by_id(&state.db, token.application_id)
         .await?
         .ok_or_else(|| AppError::unauthorized("application bearer token required"))?;
-    let policy = crate::policy::AccessPolicy::from_layers(
+    let facts = crate::authz::application_facts(
+        &format!("application:{}", application.application_id),
         &application.default_scopes,
         &token.scopes,
         &state.config.server_scopes,
-        application.resource_limits(),
-        token.token_limits(),
-        state.config.server_limits.clone(),
     );
-    if !policy.allows(crate::policy::WORKSPACE_SHELL) {
+    if !crate::authz::check(
+        state.authz.as_ref(),
+        crate::authz::Operation::Workspace {
+            facts: &facts,
+            action: crate::authz::WorkspaceAction::Shell,
+        },
+    )
+    .is_allowed()
+    {
         return Err(AppError::forbidden("workspace.shell scope required"));
     }
     let Json(request) = payload.map_err(|_| AppError::bad_request("invalid stop request"))?;

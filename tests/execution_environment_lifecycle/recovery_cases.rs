@@ -20,7 +20,7 @@ async fn historical_stop_proof_does_not_short_circuit_a_new_candidate_stop() {
     let (_, app_token) = create_app_with_token(&db.pool, "hist-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "hist-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -118,7 +118,7 @@ async fn uncertain_ensure_and_stop_recover_then_replace() {
     let (_, app_token) = create_app_with_token(&db.pool, "recovery-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "recovery-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -241,7 +241,7 @@ async fn proof_is_consumed_once_and_cannot_be_reused() {
     let (_, app_token) = create_app_with_token(&db.pool, "proof-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "proof-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })

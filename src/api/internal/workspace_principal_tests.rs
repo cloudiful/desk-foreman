@@ -113,7 +113,7 @@ async fn router_stop_is_fenced_and_lease_scoped() -> anyhow::Result<()> {
     restricted.scopes = Some(vec![]);
     let (restricted_token, _) = queries::create_application_token(&pool, &restricted).await?;
     let temp = tempfile::tempdir()?;
-    let mut state = support::fake_state(support::FakeRunnerService::new());
+    let mut state = support::fake_state(support::FakeRunnerService::new()).await;
     state.db = pool.clone();
     let mut config = (*state.config).clone();
     config.workspace_root = temp.path().into();

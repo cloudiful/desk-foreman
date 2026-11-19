@@ -44,6 +44,17 @@ fields.
 
 Authenticated application resource requests can select isolated execution with `X-DF-Runner-Isolation: principal`. Supply one `X-DF-External-User-Id`, `X-DF-Workspace-Key` and `X-DF-Lease-Owner`; the external user and lease owner must match and the workspace key must identify a resource. Existing write-lease and scope checks still apply. Execution requires a Docker-backed runner manager. A principal stop fence is permanent for that identity; a new lifecycle needs a fresh identity. A resource workspace request without the isolation header is rejected with `403` (`resource workspace requires an isolated principal`). Personal, non-resource application workspaces retain their ownership behavior. Workspace reconstruction is explicit; authentication never resets or rewrites workspace contents.
 
+## Workspace scope decisions
+
+Workspace actions (`workspace.read`, `workspace.search`, `workspace.shell`,
+`workspace.patch`) are decided by the shared authorization engine built once at
+startup. Application default scopes supply the subject roles, token scopes
+supply the credential grants, and the configured server scopes supply the server
+grants. All three explicit layers must allow the exact action; an empty layer
+denies, unknown legacy scope strings are ignored, and a cookie web session has
+no credential grant while an empty token scope set still denies. Numeric
+resource limits, binding proofs, and the write lease remain separate checks.
+
 ## Workspace reads
 
 Direct file reads stay available without a write lease. A read that runs inside a runner container (`glob`, `grep`) locks the binding row before dispatch: the locked row must still match the binding and application, keep the same workspace root, and remain active and unarchived. A missing, archived, resetting, or otherwise guarded binding — including an active native task, scoped session — refuses the search with `workspace is not available for reads`. Read-only search never acquires a write lease, and the lock is held through the runner dispatch, including the first Running acknowledgement.

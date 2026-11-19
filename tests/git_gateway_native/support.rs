@@ -199,7 +199,7 @@ impl Fixture {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let gateway_addr = listener.local_addr().unwrap();
         let gateway_url = format!("http://{gateway_addr}");
-        let state = test_state(pool.clone(), gateway_url.clone());
+        let state = test_state(pool.clone(), gateway_url.clone()).await;
         tokio::spawn(async move {
             axum::serve(listener, desk_foreman::api::router().with_state(state))
                 .await
@@ -251,7 +251,7 @@ fn protector() -> desk_foreman::credential_cipher::CredentialProtector {
     )
 }
 
-fn test_state(pool: PgPool, gateway_url: String) -> AppState {
+async fn test_state(pool: PgPool, gateway_url: String) -> AppState {
     let runner: Arc<dyn RunnerService> = Arc::new(NoopRunner);
     let broker_pool = pool.clone();
     AppState {
@@ -294,6 +294,11 @@ fn test_state(pool: PgPool, gateway_url: String) -> AppState {
         runner_broker: RunnerBroker::new(broker_pool),
         db: pool.clone(),
         task_runtime: std::sync::Arc::new(desk_foreman::db::task_runtime::TaskRuntime::new(pool)),
+        authz: Arc::new(
+            desk_foreman::authz::build()
+                .await
+                .expect("test authorization engine"),
+        ),
     }
 }
 

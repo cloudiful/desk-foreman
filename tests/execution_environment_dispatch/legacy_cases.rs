@@ -22,7 +22,7 @@ const RESULT: &str = "/api/internal/runner-manager/jobs/result";
 async fn plain_uuid_legacy_job_still_round_trips_through_the_broker() {
     let db = DispatchDb::setup().await;
     let (_, token) = create_manager_with_token(&db.pool, "dispatch-legacy-mgr").await;
-    let mut state = test_state(db.pool.clone());
+    let mut state = test_state(db.pool.clone()).await;
     state.task_runtime = db.task_runtime.clone();
     let broker = Arc::clone(&state.runner_broker);
     let (base, handle) = spawn_http(state).await;
@@ -68,7 +68,7 @@ async fn reserved_result_ids_never_fall_back_to_legacy() {
     let db = DispatchDb::setup().await;
     let (_, token) = create_manager_with_token(&db.pool, "dispatch-namespace-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })

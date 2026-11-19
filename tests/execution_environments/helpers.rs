@@ -151,7 +151,7 @@ impl RunnerService for NoopRunner {
 }
 
 /// Build an `AppState` for HTTP tests backed by the isolated pool.
-pub fn test_state(pool: PgPool) -> AppState {
+pub async fn test_state(pool: PgPool) -> AppState {
     let runner: Arc<dyn RunnerService> = Arc::new(NoopRunner);
     let broker_pool = pool.clone();
     AppState {
@@ -191,6 +191,11 @@ pub fn test_state(pool: PgPool) -> AppState {
         runner_broker: RunnerBroker::new(broker_pool),
         db: pool.clone(),
         task_runtime: Arc::new(TaskRuntime::new(pool)),
+        authz: Arc::new(
+            desk_foreman::authz::build()
+                .await
+                .expect("test authorization engine"),
+        ),
     }
 }
 

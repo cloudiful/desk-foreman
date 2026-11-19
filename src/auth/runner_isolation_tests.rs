@@ -105,7 +105,7 @@ async fn authentication_carries_checked_principal_without_invalid_binding_creati
     )
     .await?;
     let temp = tempfile::tempdir()?;
-    let mut state = support::fake_state(support::FakeRunnerService::new());
+    let mut state = support::fake_state(support::FakeRunnerService::new()).await;
     state.db = pool.clone();
     let mut config = (*state.config).clone();
     config.workspace_root = temp.path().into();

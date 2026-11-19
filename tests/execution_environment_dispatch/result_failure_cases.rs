@@ -30,7 +30,7 @@ async fn inconsistent_acks_are_rejected_and_leave_the_row_claimable() {
     .await;
 
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -155,7 +155,7 @@ async fn unconfirmed_and_failed_outcomes_become_uncertain_blockers() {
     .await;
 
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -250,7 +250,7 @@ async fn completion_after_the_deadline_never_mutates_the_row() {
     .await;
 
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })

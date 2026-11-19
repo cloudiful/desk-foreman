@@ -14,6 +14,7 @@ use crate::{
 };
 
 use super::users::require_admin;
+use crate::authz::ControlAction;
 
 #[utoipa::path(
     get,
@@ -27,7 +28,7 @@ pub async fn list_audit_logs(
     jar: CookieJar,
     ValidatedQuery(params): ValidatedQuery<ListAuditLogsParams>,
 ) -> Result<Json<Page<AuditLogResponse>>, AppError> {
-    require_admin(&state, &jar).await?;
+    require_admin(&state, &jar, ControlAction::Audit).await?;
     Ok(Json(
         crate::db::queries::list_audit_logs(&state.db, &params).await?,
     ))
@@ -45,7 +46,7 @@ pub async fn list_workspace_runners(
     jar: CookieJar,
     ValidatedQuery(params): ValidatedQuery<ListWorkspaceRunnersParams>,
 ) -> Result<Json<Page<WorkspaceRunnerResponse>>, AppError> {
-    require_admin(&state, &jar).await?;
+    require_admin(&state, &jar, ControlAction::Runtime).await?;
     let page = crate::db::queries::list_workspace_runners(&state.db, &params).await?;
     Ok(Json(Page {
         items: page
@@ -71,7 +72,7 @@ pub async fn list_runner_sessions(
     jar: CookieJar,
     ValidatedQuery(params): ValidatedQuery<ListRunnerSessionsParams>,
 ) -> Result<Json<Page<RunnerSessionResponse>>, AppError> {
-    require_admin(&state, &jar).await?;
+    require_admin(&state, &jar, ControlAction::Runtime).await?;
     let limit = params.limit.unwrap_or(100);
     let offset = params.offset.unwrap_or(0);
     let all = state.runner.list_sessions().await?;
@@ -122,7 +123,7 @@ pub async fn operations_summary(
     State(state): State<AppState>,
     jar: CookieJar,
 ) -> Result<Json<OperationsSummary>, AppError> {
-    require_admin(&state, &jar).await?;
+    require_admin(&state, &jar, ControlAction::Runtime).await?;
     let (
         active_runners,
         failed_operations,

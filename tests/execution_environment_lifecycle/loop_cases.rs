@@ -15,7 +15,7 @@ async fn full_provision_stop_replace_loop() {
     let (_, app_token) = create_app_with_token(&db.pool, "loop-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "loop-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -117,7 +117,7 @@ async fn late_ensure_cannot_revert_stopping_or_replaced_to_ready() {
     let (_, app_token) = create_app_with_token(&db.pool, "late-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "late-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -183,7 +183,7 @@ async fn affinity_candidate_and_proof_survive_pool_reopen() {
     let (_, app_token) = create_app_with_token(&db.pool, "reopen-app").await;
     let (manager_id, mgr_token) = create_manager(&db.pool, "reopen-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -234,7 +234,7 @@ async fn offline_manager_is_never_reassigned() {
     let (_, mgr_a_token) = create_manager(&db.pool, "offline-mgr-a2").await;
     let (_, mgr_b_token) = create_manager(&db.pool, "offline-mgr-b").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -278,7 +278,7 @@ async fn unknown_environment_is_not_found() {
     let db = LifecycleDb::setup().await;
     let (_, app_token) = create_app_with_token(&db.pool, "missing-app").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })

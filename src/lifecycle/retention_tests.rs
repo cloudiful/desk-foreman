@@ -229,8 +229,8 @@ fn unique_name(prefix: &str) -> String {
     format!("{prefix}-{}", Uuid::new_v4().simple())
 }
 
-fn state_with_root(ledger: &RetentionLedger) -> AppState {
-    let mut state = fake_state(FakeRunnerService::new());
+async fn state_with_root(ledger: &RetentionLedger) -> AppState {
+    let mut state = fake_state(FakeRunnerService::new()).await;
     state.db = ledger.pool.clone();
     state.task_runtime = Arc::clone(&ledger.task_runtime);
     let mut config = (*state.config).clone();
@@ -319,7 +319,7 @@ async fn audit_reference_retains_archived_binding_and_directory() {
         .expect("record retained audit evidence");
         ledger.archive(binding.workspace_binding_id).await;
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let state = state_with_root(&ledger);
+        let state = state_with_root(&ledger).await;
         super::cleanup_archived_workspaces(&state)
             .await
             .expect("janitor sweep");
@@ -375,7 +375,7 @@ async fn released_task_retains_archived_binding_and_directory() {
         .expect("release fixture native task");
         ledger.archive(binding.workspace_binding_id).await;
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let state = state_with_root(&ledger);
+        let state = state_with_root(&ledger).await;
         super::cleanup_archived_workspaces(&state)
             .await
             .expect("janitor sweep");
@@ -412,7 +412,7 @@ async fn scoped_environment_reference_retains_archived_binding_and_directory() {
         );
         ledger.archive(binding.workspace_binding_id).await;
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let state = state_with_root(&ledger);
+        let state = state_with_root(&ledger).await;
         super::cleanup_archived_workspaces(&state)
             .await
             .expect("janitor sweep");
@@ -465,12 +465,16 @@ async fn read_fence_is_lease_free_and_serializes_container_dispatch() {
                 ALL_SCOPES.iter().map(|scope| (*scope).to_string()),
                 ResourceLimits::unrestricted(true),
             ),
+            workspace_facts: crate::authz::fixture_facts(
+                &format!("workspace_binding:{}", binding.workspace_binding_id),
+                cloudiful_authz::PrincipalKind::Application,
+            ),
             lease_owner: None,
         };
 
         // The fixture row holds a lease for a different writer; read admission
         // must ignore it and succeed without a caller lease.
-        let state = state_with_root(&ledger);
+        let state = state_with_root(&ledger).await;
         let fence = crate::tools::fenced_read::admit_workspace_read(&state, &actor)
             .await
             .expect("a lease-free read must admit the active binding");
@@ -514,7 +518,7 @@ async fn filesystem_failure_retains_first_binding_and_still_cleans_later_orphan(
         std::fs::set_permissions(&failing_root, std::fs::Permissions::from_mode(0o500))
             .expect("lock failing directory");
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let state = state_with_root(&ledger);
+        let state = state_with_root(&ledger).await;
         super::cleanup_archived_workspaces(&state)
             .await
             .expect("janitor sweep continues after a per-binding failure");
@@ -545,7 +549,7 @@ async fn no_reference_orphan_is_deleted_with_one_success_audit() {
         let (orphan, root) = ledger.create_binding("orphan").await;
         ledger.archive(orphan.workspace_binding_id).await;
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let state = state_with_root(&ledger);
+        let state = state_with_root(&ledger).await;
         super::cleanup_archived_workspaces(&state)
             .await
             .expect("janitor sweep");

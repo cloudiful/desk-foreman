@@ -42,7 +42,7 @@ fn tool_signature_snapshot(service: &DeskForemanService) -> String {
 #[tokio::test]
 async fn exported_catalog_matches_serving_registry() {
     let temp = tempdir().expect("tempdir");
-    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()));
+    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()).await);
     let mut registered = service.tool_router.list_all();
     registered.sort_by(|a, b| a.name.cmp(&b.name));
     let catalog = DeskForemanService::tool_catalog();
@@ -63,7 +63,7 @@ async fn exported_catalog_matches_serving_registry() {
 #[tokio::test]
 async fn tool_schemas_match_expected_surface() {
     let temp = tempdir().expect("tempdir");
-    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()));
+    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()).await);
     assert_eq!(
         tool_signature_snapshot(&service),
         r#"{
@@ -157,7 +157,7 @@ async fn tool_schemas_match_expected_surface() {
 #[tokio::test]
 async fn every_input_property_has_a_description() {
     let temp = tempdir().expect("tempdir");
-    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()));
+    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()).await);
     for tool in service.tool_router.list_all() {
         let Some(properties) = tool
             .input_schema
@@ -198,7 +198,7 @@ fn shell_rejects_host_only_fields() {
 #[tokio::test]
 async fn apply_patch_output_schema_is_a_strict_three_variant_union() {
     let temp = tempdir().expect("tempdir");
-    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()));
+    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()).await);
     let apply_patch = service
         .tool_router
         .list_all()
@@ -247,7 +247,7 @@ async fn apply_patch_output_schema_is_a_strict_three_variant_union() {
 #[tokio::test]
 async fn apply_patch_output_schema_requires_all_nullable_fields() {
     let temp = tempdir().expect("tempdir");
-    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()));
+    let service = DeskForemanService::new(app_state(temp.path().to_path_buf()).await);
     let apply_patch = service
         .tool_router
         .list_all()

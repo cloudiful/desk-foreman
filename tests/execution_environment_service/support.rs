@@ -252,7 +252,7 @@ impl ServiceFixture {
             "ready",
         )
         .await;
-        let state = super::helpers::test_state(database.pool.clone());
+        let state = super::helpers::test_state(database.pool.clone()).await;
         let (base, _handle) = spawn_http(state).await;
         Self {
             database,

@@ -83,7 +83,7 @@ impl TaskFixture {
             .initialize()
             .await
             .expect("initialize the durable task runtime");
-        let mut state = super::helpers::test_state(database.pool.clone());
+        let mut state = super::helpers::test_state(database.pool.clone()).await;
         state.task_runtime = std::sync::Arc::clone(&task_runtime);
         let mut config = (*state.config).clone();
         config.workspace_root = temp.path().to_path_buf();

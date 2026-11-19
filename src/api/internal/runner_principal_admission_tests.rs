@@ -56,7 +56,7 @@ async fn endpoint_auth_persistence_and_binding_lock() -> anyhow::Result<()> {
         .execute(&pool)
         .await?;
     }
-    let mut state = support::fake_state(support::FakeRunnerService::new());
+    let mut state = support::fake_state(support::FakeRunnerService::new()).await;
     state.db = pool.clone();
     let mut headers = HeaderMap::new();
     let owner = application_principal_owner(817101, 817102, "principal", "workspace").unwrap();
@@ -189,7 +189,7 @@ async fn real_resource_marker_admission_and_no_evidence_fence() -> anyhow::Resul
     .await?;
     let temp = tempfile::tempdir()?;
     let runner = support::FakeRunnerService::new();
-    let mut state = support::fake_state(runner.clone());
+    let mut state = support::fake_state(runner.clone()).await;
     state.db = pool.clone();
     let mut config = (*state.config).clone();
     config.workspace_root = temp.path().into();

@@ -18,6 +18,7 @@ use crate::{
 
 use super::shared::record_admin_audit;
 use super::users::require_admin;
+use crate::authz::ControlAction;
 
 #[utoipa::path(
     get,
@@ -35,7 +36,7 @@ pub async fn list_mcp_tokens(
     jar: CookieJar,
     ValidatedQuery(params): ValidatedQuery<ListMcpTokensParams>,
 ) -> Result<Json<Page<McpTokenResponse>>, AppError> {
-    require_admin(&state, &jar).await?;
+    require_admin(&state, &jar, ControlAction::Token).await?;
     Ok(Json(
         crate::db::queries::list_mcp_tokens(&state.db, &params).await?,
     ))
@@ -57,7 +58,7 @@ pub async fn create_mcp_token(
     jar: CookieJar,
     ValidatedJson(request): ValidatedJson<CreateMcpTokenRequest>,
 ) -> Result<(StatusCode, Json<CreateMcpTokenResponse>), AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::Token).await?;
     let Some(_) = crate::db::queries::find_user_by_id(&state.db, request.user_id).await? else {
         return Err(AppError::not_found("user not found"));
     };
@@ -96,7 +97,7 @@ pub async fn delete_mcp_token(
     jar: CookieJar,
     Path(token_id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::Token).await?;
     let Some(token) = crate::db::queries::find_mcp_token_by_id(&state.db, token_id).await? else {
         return Err(AppError::not_found("mcp token not found"));
     };
@@ -129,7 +130,7 @@ pub async fn update_mcp_token(
     Path(token_id): Path<i64>,
     ValidatedJson(request): ValidatedJson<UpdateMcpTokenRequest>,
 ) -> Result<Json<McpTokenResponse>, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::Token).await?;
     let Some(token) = crate::db::queries::update_mcp_token(&state.db, token_id, &request).await?
     else {
         return Err(AppError::not_found("mcp token not found"));

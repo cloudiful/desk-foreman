@@ -15,6 +15,7 @@ use crate::{
 };
 
 use super::{shared::record_admin_audit, users::require_admin};
+use crate::authz::ControlAction;
 
 #[utoipa::path(
     get,
@@ -28,7 +29,7 @@ pub async fn list_runner_managers(
     jar: CookieJar,
     ValidatedQuery(params): ValidatedQuery<ListRunnerManagersParams>,
 ) -> Result<Json<Page<RunnerManagerResponse>>, AppError> {
-    require_admin(&state, &jar).await?;
+    require_admin(&state, &jar, ControlAction::RunnerManager).await?;
     Ok(Json(
         crate::db::queries::list_runner_managers(&state.db, &params).await?,
     ))
@@ -46,7 +47,7 @@ pub async fn create_runner_manager(
     jar: CookieJar,
     ValidatedJson(request): ValidatedJson<CreateRunnerManagerRequest>,
 ) -> Result<Json<CreateRunnerManagerResponse>, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::RunnerManager).await?;
     let (manager, token) = crate::db::queries::create_runner_manager(&state.db, &request).await?;
     record_admin_audit(
         &state,
@@ -74,7 +75,7 @@ pub async fn update_runner_manager(
     Path(runner_manager_id): Path<i64>,
     ValidatedJson(request): ValidatedJson<UpdateRunnerManagerRequest>,
 ) -> Result<Json<RunnerManagerResponse>, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::RunnerManager).await?;
     let manager = crate::db::queries::update_runner_manager(&state.db, runner_manager_id, &request)
         .await?
         .ok_or_else(|| AppError::not_found("runner manager not found"))?;

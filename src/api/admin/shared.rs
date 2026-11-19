@@ -1,16 +1,20 @@
 use axum_extra::extract::cookie::CookieJar;
 
-use crate::{AppState, actor::ActorContext, db::audit::AuditLogEntry, error::AppError};
+use crate::{
+    AppState, actor::ActorContext, authz::ControlAction, db::audit::AuditLogEntry, error::AppError,
+};
 
 use super::super::authn::current_user_from_jar;
 
-pub async fn require_admin(state: &AppState, jar: &CookieJar) -> Result<ActorContext, AppError> {
+pub async fn require_admin(
+    state: &AppState,
+    jar: &CookieJar,
+    action: ControlAction,
+) -> Result<ActorContext, AppError> {
     let Some((_, actor)) = current_user_from_jar(state, jar).await? else {
         return Err(AppError::unauthorized("not authenticated"));
     };
-    if !actor.is_admin() {
-        return Err(AppError::forbidden("admin access required"));
-    }
+    ensure_control_action(state, &actor, action)?;
     if actor
         .user
         .as_ref()
@@ -19,6 +23,30 @@ pub async fn require_admin(state: &AppState, jar: &CookieJar) -> Result<ActorCon
         return Err(AppError::forbidden("password change required"));
     }
     Ok(actor)
+}
+
+/// Applies the shared-engine control decision to an already verified actor.
+///
+/// The decision uses the actor's current user record and does not consult
+/// workspace token or server ceilings, matching the existing control-plane
+/// behavior.
+pub fn ensure_control_action(
+    state: &AppState,
+    actor: &ActorContext,
+    action: ControlAction,
+) -> Result<(), AppError> {
+    let Some(user) = actor.user.as_ref() else {
+        return Err(AppError::forbidden("admin access required"));
+    };
+    if !crate::authz::check(
+        state.authz.as_ref(),
+        crate::authz::Operation::Control { user, action },
+    )
+    .is_allowed()
+    {
+        return Err(AppError::forbidden("admin access required"));
+    }
+    Ok(())
 }
 
 pub async fn record_admin_audit(

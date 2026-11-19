@@ -1,6 +1,7 @@
 pub mod actor;
 pub mod api;
 pub mod auth;
+pub mod authz;
 pub mod config;
 pub mod credential_cipher;
 pub mod db;
@@ -51,10 +52,17 @@ pub struct AppState {
     /// request, and every claim and every terminal outcome of a domain job
     /// goes through it.
     pub task_runtime: Arc<db::task_runtime::TaskRuntime>,
+    /// The single build-once authorization engine for this service process.
+    pub authz: Arc<cloudiful_authz::Authorizer>,
 }
 
 pub async fn run() -> anyhow::Result<()> {
     let config = Arc::new(AppConfig::from_env()?);
+    let authz = Arc::new(
+        authz::build()
+            .await
+            .context("failed to initialize authorization engine")?,
+    );
     let db = db::connect(&config).await?;
     db::migrate(&db).await?;
     let task_runtime = Arc::new(db::task_runtime::TaskRuntime::new(db.clone()));
@@ -72,6 +80,7 @@ pub async fn run() -> anyhow::Result<()> {
         db,
         git_capability_signing_key,
         task_runtime,
+        authz,
     };
     lifecycle::spawn_janitor(state.clone());
 

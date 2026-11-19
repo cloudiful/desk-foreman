@@ -52,7 +52,7 @@ mod full_gateway_tests {
             let (app_id, app_token) = create_app(&db.pool, "gateway-owner").await;
             let (manager_id, manager_token) = create_manager(&db.pool, "gateway-manager").await;
             let env_id = create_admitted_environment(&db.pool, app_id, manager_id).await;
-            let state = test_state(db.pool.clone());
+            let state = test_state(db.pool.clone()).await;
             let (df_base, df_handle) = spawn_df(state).await;
             let agent = start_agent().await;
             let temp = tempfile::tempdir().expect("tempdir");

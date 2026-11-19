@@ -38,6 +38,29 @@ Workspace paths are checked for traversal, symlink escapes, protected credential
 
 Tool audit records store actor/workspace/tool metadata, hashes, status, duration/size fields where available, and bounded previews; full commands, patches, stdin, and shell output are not persisted by default.
 
+## Authorization
+
+Workspace actions (`read`, `search`, `shell`, `patch`) are decided by one
+shared authorization engine built at startup. Application default scopes supply
+subject roles, token scopes supply credential grants, and configured server
+scopes supply server grants; all three explicit layers must allow the exact
+action, so an empty layer denies. An internal user session has no credential
+grant, while an empty token scope set denies. Numeric resource limits, workspace
+bindings, and write leases remain separate checks.
+
+Administrator endpoints require an explicit `admin` control capability for the
+target action. Administrator authority does not grant workspace actions, and
+workspace token or server scopes do not apply to control requests. The
+`/api/tools` admin-target workspace route keeps its existing delegation
+behavior: administrator access is checked on the current caller, while the
+target workspace actor keeps its own server-scope ceilings.
+
+Rust integrations construct actors only through the verified
+`actor::actor_from_web_user`, `actor::actor_from_application_binding`, and
+`actor::actor_from_mcp_context` helpers. `ActorContext` carries crate-private
+trusted authorization facts; direct struct-literal construction is unsupported
+and may change without notice.
+
 ## Endpoints
 
 - `POST /mcp`

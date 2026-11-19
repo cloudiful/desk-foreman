@@ -173,7 +173,7 @@ pub struct HeartbeatFixture {
 impl HeartbeatFixture {
     pub async fn setup() -> Self {
         let database = IsolatedDb::setup().await;
-        let state = test_state(database.pool.clone());
+        let state = test_state(database.pool.clone()).await;
         let (base, handle) = spawn_http(state).await;
         let (record, _) = queries::create_runner_manager(
             &database.pool,

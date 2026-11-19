@@ -419,7 +419,8 @@ async fn application_authority_is_validated_under_the_binding_row_lock() -> anyh
     .await?;
 
     let mut state =
-        crate::lease_test_support::fake_state(crate::lease_test_support::FakeRunnerService::new());
+        crate::lease_test_support::fake_state(crate::lease_test_support::FakeRunnerService::new())
+            .await;
     state.db = pool.clone();
     {
         let config = std::sync::Arc::make_mut(&mut state.config);

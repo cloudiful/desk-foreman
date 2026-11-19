@@ -124,7 +124,7 @@ impl RunnerService for FakeRunnerService {
     }
 }
 
-pub(crate) fn fake_state(runner: Arc<FakeRunnerService>) -> AppState {
+pub(crate) async fn fake_state(runner: Arc<FakeRunnerService>) -> AppState {
     AppState {
         config: Arc::new(AppConfig {
             bind_addr: "127.0.0.1:0".to_string(),
@@ -175,6 +175,11 @@ pub(crate) fn fake_state(runner: Arc<FakeRunnerService>) -> AppState {
                 .connect_lazy("postgres://example.invalid/test")
                 .expect("lazy pool"),
         )),
+        authz: Arc::new(
+            crate::authz::build()
+                .await
+                .expect("test authorization engine"),
+        ),
     }
 }
 

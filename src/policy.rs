@@ -57,6 +57,11 @@ pub struct AccessPolicy {
 }
 
 impl AccessPolicy {
+    /// Builds the flat compatibility view of the workspace scope layers.
+    ///
+    /// Authorization decisions come from the shared engine in
+    /// [`crate::authz`]. This view remains for diagnostics, numeric limits,
+    /// and source compatibility; it is not an enforcement source.
     pub fn new(scopes: impl IntoIterator<Item = String>, limits: ResourceLimits) -> Self {
         let allowed = ALL_SCOPES.into_iter().collect::<HashSet<_>>();
         let mut scopes = scopes
@@ -68,6 +73,8 @@ impl AccessPolicy {
         Self { scopes, limits }
     }
 
+    /// Compatibility fact check over the flat view. Production enforcement
+    /// uses the shared engine through [`crate::authz::authorize_scope`].
     pub fn allows(&self, scope: &str) -> bool {
         self.scopes.iter().any(|candidate| candidate == scope)
     }
