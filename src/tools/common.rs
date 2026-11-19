@@ -474,12 +474,17 @@ pub(super) fn ensure_scope(
     actor: &ActorContext,
     scope: &'static str,
 ) -> Result<(), ToolError> {
-    let decision = crate::authz::authorize_scope(
-        state.authz.as_ref(),
-        crate::authz::actor_facts(actor),
-        scope,
-    );
-    if decision.is_allowed() {
+    let allowed = crate::authz::WorkspaceAction::from_scope(scope).is_some_and(|action| {
+        crate::authz::check(
+            state.authz.as_ref(),
+            crate::authz::Operation::Workspace {
+                facts: crate::authz::actor_facts(actor),
+                action,
+            },
+        )
+        .is_allowed()
+    });
+    if allowed {
         return Ok(());
     }
     spawn_tool_audit(state, actor, "policy.deny", json!({ "scope": scope }));

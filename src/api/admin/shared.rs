@@ -38,7 +38,12 @@ pub fn ensure_control_action(
     let Some(user) = actor.user.as_ref() else {
         return Err(AppError::forbidden("admin access required"));
     };
-    if !crate::authz::authorize_control(state.authz.as_ref(), user, action).is_allowed() {
+    if !crate::authz::check(
+        state.authz.as_ref(),
+        crate::authz::Operation::Control { user, action },
+    )
+    .is_allowed()
+    {
         return Err(AppError::forbidden("admin access required"));
     }
     Ok(())

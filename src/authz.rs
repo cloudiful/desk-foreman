@@ -1,10 +1,13 @@
 use std::collections::BTreeSet;
 
 use cloudiful_authz::{
-    Action, Attenuation, Authorizer, AuthorizerConfig, AuthzRequest, Capability, Decision,
-    DomainHierarchy, DomainId, FactsRevision, Grant, PrincipalId, PrincipalKind, PrincipalRef,
-    ResolvedRoles, ResourceKind, ResourceRef, RoleId, RoleSpec, ServerContext, ServiceId, Subject,
+    Action, Attenuation, Authority, Authorizer, AuthorizerConfig, AuthzRequest, Capability,
+    CredentialContext, Decision, DomainId, FactsRevision, Grant, PrincipalRef, ResolvedRoles,
+    ResourceKind, ResourceRef, RoleId, RoleSpec, ServerContext, ServiceId,
 };
+
+#[cfg(test)]
+use cloudiful_authz::PrincipalKind;
 
 use crate::{
     actor::ActorContext,
@@ -17,6 +20,40 @@ pub const AUDIENCE: &str = "desk-foreman";
 pub const WORKSPACE_RESOURCE: &str = "workspace";
 pub const CONTROL_RESOURCE: &str = "control";
 pub const ADMIN_ROLE: &str = "admin";
+
+/// Enumerated workspace actions. The scope strings remain wire/compatibility
+/// inputs and map to these actions at the existing boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WorkspaceAction {
+    Read,
+    Search,
+    Shell,
+    Patch,
+}
+
+impl WorkspaceAction {
+    #[cfg(test)]
+    pub(crate) const ALL: [Self; 4] = [Self::Read, Self::Search, Self::Shell, Self::Patch];
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Search => "search",
+            Self::Shell => "shell",
+            Self::Patch => "patch",
+        }
+    }
+
+    pub(crate) fn from_scope(scope: &str) -> Option<Self> {
+        match scope {
+            WORKSPACE_READ => Some(Self::Read),
+            WORKSPACE_SEARCH => Some(Self::Search),
+            WORKSPACE_SHELL => Some(Self::Shell),
+            WORKSPACE_PATCH => Some(Self::Patch),
+            _ => None,
+        }
+    }
+}
 
 /// Enumerated administrator actions. There is no wildcard and no workspace
 /// authority: the workspace scope decisions stay on the workspace resource.
@@ -79,28 +116,46 @@ pub(crate) struct WorkspaceFacts {
     pub server: Attenuation,
 }
 
+/// One typed authorization operation. The variants carry the verified facts
+/// each decision actually has: workspace requests carry an actor's fact set,
+/// while control requests carry the current user record because admin gates
+/// run before any workspace actor exists.
+pub(crate) enum Operation<'a> {
+    Workspace {
+        facts: &'a WorkspaceFacts,
+        action: WorkspaceAction,
+    },
+    Control {
+        user: &'a UserRecord,
+        action: ControlAction,
+    },
+}
+
+/// The single local authorization decision entry. It maps the typed operation
+/// to the core's operation-only request and registered live authority.
+pub(crate) fn check(authorizer: &Authorizer, operation: Operation<'_>) -> Decision {
+    match operation {
+        Operation::Workspace { facts, action } => {
+            let request = workspace_request(facts, action);
+            authorizer.authorize(&request, Authority::Registered(&resolved(facts)))
+        }
+        Operation::Control { user, action } => {
+            let request = control_request(action);
+            authorizer.authorize(&request, Authority::Registered(&control_resolved(user)))
+        }
+    }
+}
+
 pub async fn build() -> Result<Authorizer, cloudiful_authz::InitError> {
     let mut roles = workspace_roles();
     roles.push(RoleSpec {
         id: RoleId::new(ADMIN_ROLE),
         capabilities: ControlAction::ALL
             .into_iter()
-            .map(|action| Capability {
-                resource: ResourceKind::new(CONTROL_RESOURCE),
-                action: Action::new(action.as_str()),
-            })
+            .map(|action| Capability::new(CONTROL_RESOURCE, action.as_str()))
             .collect(),
     });
-    Authorizer::new(AuthorizerConfig {
-        facts_revision: FactsRevision(1),
-        domains: vec![DomainId::new(DOMAIN)],
-        roles,
-        assignments: Vec::new(),
-        global_assignments: Vec::new(),
-        hierarchy: DomainHierarchy::default(),
-        public_read: BTreeSet::new(),
-    })
-    .await
+    Authorizer::new(AuthorizerConfig::new(FactsRevision(1), [DOMAIN], roles)).await
 }
 
 pub(crate) fn internal_user_facts(
@@ -109,7 +164,7 @@ pub(crate) fn internal_user_facts(
     server_scopes: &[String],
 ) -> WorkspaceFacts {
     WorkspaceFacts {
-        principal: human_principal(principal_id),
+        principal: PrincipalRef::human(principal_id),
         roles: ALL_SCOPES.iter().map(|scope| RoleId::new(*scope)).collect(),
         credential: token_scopes.map(grants_for_scopes),
         server: grants_for_scopes(server_scopes),
@@ -123,10 +178,7 @@ pub(crate) fn application_facts(
     server_scopes: &[String],
 ) -> WorkspaceFacts {
     WorkspaceFacts {
-        principal: PrincipalRef {
-            kind: PrincipalKind::Application,
-            id: PrincipalId::new(principal_id),
-        },
+        principal: PrincipalRef::application(principal_id),
         roles: roles_for_scopes(application_scopes),
         credential: Some(grants_for_scopes(token_scopes)),
         server: grants_for_scopes(server_scopes),
@@ -136,71 +188,26 @@ pub(crate) fn application_facts(
 #[cfg(test)]
 pub(crate) fn fixture_facts(principal_id: &str, kind: PrincipalKind) -> WorkspaceFacts {
     WorkspaceFacts {
-        principal: PrincipalRef {
-            kind,
-            id: PrincipalId::new(principal_id),
-        },
+        principal: PrincipalRef::new(kind, principal_id),
         roles: ALL_SCOPES.iter().map(|scope| RoleId::new(*scope)).collect(),
         credential: None,
         server: grants_for_scopes(&all_scope_strings()),
     }
 }
 
-pub(crate) fn authorize_scope(
-    authorizer: &Authorizer,
-    facts: &WorkspaceFacts,
-    scope: &str,
-) -> Decision {
-    let Some(action) = action_for_scope(scope) else {
-        return Decision::Deny(cloudiful_authz::DenyReason::UnknownAction);
-    };
-    let request = workspace_request(facts, action, authorizer.facts_revision());
-    authorizer.authorize_with_roles(&request, &resolved(facts))
-}
-
+/// Existing aggregate capability-view query. Every item is derived through
+/// [`check`]; this is not a second permission engine.
 pub(crate) fn scope_decisions(authorizer: &Authorizer, facts: &WorkspaceFacts) -> Vec<String> {
     let mut scopes = ALL_SCOPES
         .into_iter()
-        .filter(|scope| authorize_scope(authorizer, facts, scope).is_allowed())
+        .filter(|scope| {
+            let action = WorkspaceAction::from_scope(scope).expect("registered workspace scope");
+            check(authorizer, Operation::Workspace { facts, action }).is_allowed()
+        })
         .map(str::to_string)
         .collect::<Vec<_>>();
     scopes.sort();
     scopes
-}
-
-pub(crate) fn authorize_control(
-    authorizer: &Authorizer,
-    user: &UserRecord,
-    action: ControlAction,
-) -> Decision {
-    let principal = human_principal(&format!("user:{}", user.user_id));
-    let roles = if user.is_admin {
-        BTreeSet::from([RoleId::new(ADMIN_ROLE)])
-    } else {
-        BTreeSet::new()
-    };
-    let request = AuthzRequest {
-        subject: Subject::Principal(principal.clone()),
-        domain: DomainId::new(DOMAIN),
-        resource: ResourceRef {
-            kind: ResourceKind::new(CONTROL_RESOURCE),
-            id: None,
-            domain: DomainId::new(DOMAIN),
-        },
-        action: Action::new(action.as_str()),
-        audience: ServiceId::new(AUDIENCE),
-        facts_revision: authorizer.facts_revision(),
-        credential: None,
-        server: None,
-    };
-    authorizer.authorize_with_roles(
-        &request,
-        &ResolvedRoles {
-            principal,
-            domain: DomainId::new(DOMAIN),
-            roles,
-        },
-    )
 }
 
 pub(crate) fn actor_facts(actor: &ActorContext) -> &WorkspaceFacts {
@@ -212,10 +219,12 @@ fn workspace_roles() -> Vec<RoleSpec> {
         .into_iter()
         .map(|scope| RoleSpec {
             id: RoleId::new(scope),
-            capabilities: BTreeSet::from([Capability {
-                resource: ResourceKind::new(WORKSPACE_RESOURCE),
-                action: Action::new(action_for_scope(scope).expect("known workspace scope")),
-            }]),
+            capabilities: BTreeSet::from([Capability::new(
+                WORKSPACE_RESOURCE,
+                WorkspaceAction::from_scope(scope)
+                    .expect("known workspace scope")
+                    .as_str(),
+            )]),
         })
         .collect()
 }
@@ -223,81 +232,68 @@ fn workspace_roles() -> Vec<RoleSpec> {
 fn roles_for_scopes(scopes: &[String]) -> BTreeSet<RoleId> {
     scopes
         .iter()
-        .filter(|scope| action_for_scope(scope).is_some())
+        .filter(|scope| WorkspaceAction::from_scope(scope).is_some())
         .map(RoleId::new)
         .collect()
 }
 
 fn grants_for_scopes(scopes: &[String]) -> Attenuation {
-    Attenuation::Grants(
-        scopes
-            .iter()
-            .filter_map(|scope| {
-                let action = action_for_scope(scope)?;
-                Some(Grant {
-                    domain: DomainId::new(DOMAIN),
-                    resource: ResourceKind::new(WORKSPACE_RESOURCE),
-                    resource_id: None,
-                    action: Action::new(action),
-                })
-            })
-            .collect(),
-    )
+    Attenuation::grants(scopes.iter().filter_map(|scope| {
+        let action = WorkspaceAction::from_scope(scope)?;
+        Some(Grant::new(DOMAIN, WORKSPACE_RESOURCE, action.as_str()))
+    }))
 }
 
-fn workspace_request(
-    facts: &WorkspaceFacts,
-    action: &str,
-    facts_revision: FactsRevision,
-) -> AuthzRequest {
+fn workspace_request(facts: &WorkspaceFacts, action: WorkspaceAction) -> AuthzRequest {
     AuthzRequest {
-        subject: Subject::Principal(facts.principal.clone()),
-        domain: DomainId::new(DOMAIN),
-        resource: ResourceRef {
-            kind: ResourceKind::new(WORKSPACE_RESOURCE),
-            id: None,
-            domain: DomainId::new(DOMAIN),
-        },
-        action: Action::new(action),
+        resource: workspace_resource(),
+        action: Action::new(action.as_str()),
         audience: ServiceId::new(AUDIENCE),
-        facts_revision,
-        credential: facts
-            .credential
-            .clone()
-            .map(|grants| cloudiful_authz::CredentialContext {
-                principal: facts.principal.clone(),
-                audience: ServiceId::new(AUDIENCE),
-                grants,
-            }),
+        credential: facts.credential.clone().map(|grants| CredentialContext {
+            principal: facts.principal.clone(),
+            audience: ServiceId::new(AUDIENCE),
+            grants,
+        }),
         server: Some(ServerContext {
             grants: facts.server.clone(),
         }),
     }
 }
 
-fn resolved(facts: &WorkspaceFacts) -> ResolvedRoles {
-    ResolvedRoles {
-        principal: facts.principal.clone(),
+fn control_request(action: ControlAction) -> AuthzRequest {
+    AuthzRequest {
+        resource: ResourceRef {
+            kind: ResourceKind::new(CONTROL_RESOURCE),
+            id: None,
+            domain: DomainId::new(DOMAIN),
+        },
+        action: Action::new(action.as_str()),
+        audience: ServiceId::new(AUDIENCE),
+        credential: None,
+        server: None,
+    }
+}
+
+fn workspace_resource() -> ResourceRef {
+    ResourceRef {
+        kind: ResourceKind::new(WORKSPACE_RESOURCE),
+        id: None,
         domain: DomainId::new(DOMAIN),
-        roles: facts.roles.clone(),
     }
 }
 
-fn human_principal(principal_id: &str) -> PrincipalRef {
-    PrincipalRef {
-        kind: PrincipalKind::Human,
-        id: PrincipalId::new(principal_id),
-    }
+fn resolved(facts: &WorkspaceFacts) -> ResolvedRoles {
+    ResolvedRoles::new(facts.principal.clone(), DOMAIN, facts.roles.iter().cloned())
 }
 
-fn action_for_scope(scope: &str) -> Option<&'static str> {
-    match scope {
-        WORKSPACE_READ => Some("read"),
-        WORKSPACE_SEARCH => Some("search"),
-        WORKSPACE_SHELL => Some("shell"),
-        WORKSPACE_PATCH => Some("patch"),
-        _ => None,
-    }
+fn control_resolved(user: &UserRecord) -> ResolvedRoles {
+    let principal = PrincipalRef::human(format!("user:{}", user.user_id));
+    let roles = if user.is_admin {
+        BTreeSet::from([RoleId::new(ADMIN_ROLE)])
+    } else {
+        BTreeSet::new()
+    };
+    ResolvedRoles::new(principal, DOMAIN, roles)
 }
 
 #[cfg(test)]
@@ -338,8 +334,12 @@ mod tests {
         values.iter().map(|value| (*value).to_string()).collect()
     }
 
-    fn allowed(authorizer: &Authorizer, facts: &WorkspaceFacts, scope: &str) -> bool {
-        authorize_scope(authorizer, facts, scope).is_allowed()
+    fn allowed(authorizer: &Authorizer, facts: &WorkspaceFacts, action: WorkspaceAction) -> bool {
+        check(authorizer, Operation::Workspace { facts, action }).is_allowed()
+    }
+
+    fn allowed_control(authorizer: &Authorizer, user: &UserRecord, action: ControlAction) -> bool {
+        check(authorizer, Operation::Control { user, action }).is_allowed()
     }
 
     #[tokio::test]
@@ -361,14 +361,14 @@ mod tests {
             &scopes(&[WORKSPACE_SHELL, WORKSPACE_READ]),
         );
 
-        assert!(allowed(&authorizer, &facts, WORKSPACE_SHELL));
-        assert!(!allowed(&authorizer, &facts, WORKSPACE_READ));
-        assert!(!allowed(&authorizer, &facts, WORKSPACE_PATCH));
-        assert!(!allowed(&authorizer, &facts, WORKSPACE_SEARCH));
+        assert!(allowed(&authorizer, &facts, WorkspaceAction::Shell));
+        assert!(!allowed(&authorizer, &facts, WorkspaceAction::Read));
+        assert!(!allowed(&authorizer, &facts, WorkspaceAction::Patch));
+        assert!(!allowed(&authorizer, &facts, WorkspaceAction::Search));
     }
 
     #[tokio::test]
-    async fn unknown_scope_strings_are_ignored_in_every_layer() {
+    async fn unknown_scope_strings_map_to_no_workspace_action() {
         let authorizer = build().await.expect("authorizer");
         let facts = application_facts(
             "application:1:user:default",
@@ -377,8 +377,8 @@ mod tests {
             &scopes(&[WORKSPACE_READ, "workspace.other"]),
         );
 
-        assert!(allowed(&authorizer, &facts, WORKSPACE_READ));
-        assert!(!allowed(&authorizer, &facts, "workspace.legacy"));
+        assert_eq!(WorkspaceAction::from_scope("workspace.legacy"), None);
+        assert!(allowed(&authorizer, &facts, WorkspaceAction::Read));
         assert_eq!(scope_decisions(&authorizer, &facts), vec![WORKSPACE_READ]);
     }
 
@@ -388,13 +388,17 @@ mod tests {
         let read = scopes(&[WORKSPACE_READ]);
 
         let empty_roles = application_facts("application:1:user:default", &[], &read, &read);
-        assert!(!allowed(&authorizer, &empty_roles, WORKSPACE_READ));
+        assert!(!allowed(&authorizer, &empty_roles, WorkspaceAction::Read));
 
         let empty_credential = application_facts("application:1:user:default", &read, &[], &read);
-        assert!(!allowed(&authorizer, &empty_credential, WORKSPACE_READ));
+        assert!(!allowed(
+            &authorizer,
+            &empty_credential,
+            WorkspaceAction::Read
+        ));
 
         let empty_server = application_facts("application:1:user:default", &read, &read, &[]);
-        assert!(!allowed(&authorizer, &empty_server, WORKSPACE_READ));
+        assert!(!allowed(&authorizer, &empty_server, WorkspaceAction::Read));
 
         let token_cannot_grant_role = application_facts(
             "application:1:user:default",
@@ -405,12 +409,12 @@ mod tests {
         assert!(!allowed(
             &authorizer,
             &token_cannot_grant_role,
-            WORKSPACE_SHELL
+            WorkspaceAction::Shell
         ));
         assert!(!allowed(
             &authorizer,
             &token_cannot_grant_role,
-            WORKSPACE_PATCH
+            WorkspaceAction::Patch
         ));
     }
 
@@ -418,10 +422,10 @@ mod tests {
     async fn absent_session_credential_differs_from_an_empty_token() {
         let authorizer = build().await.expect("authorizer");
         let session = internal_user_facts("user:7", None, &scopes(&[WORKSPACE_READ]));
-        assert!(allowed(&authorizer, &session, WORKSPACE_READ));
+        assert!(allowed(&authorizer, &session, WorkspaceAction::Read));
 
         let empty_token = internal_user_facts("user:7", Some(&[]), &scopes(&[WORKSPACE_READ]));
-        assert!(!allowed(&authorizer, &empty_token, WORKSPACE_READ));
+        assert!(!allowed(&authorizer, &empty_token, WorkspaceAction::Read));
     }
 
     #[tokio::test]
@@ -430,7 +434,7 @@ mod tests {
         let admin = user(true);
         for action in ControlAction::ALL {
             assert!(
-                authorize_control(&authorizer, &admin, action).is_allowed(),
+                allowed_control(&authorizer, &admin, action),
                 "admin must allow {}",
                 action.as_str()
             );
@@ -439,7 +443,7 @@ mod tests {
         let non_admin = user(false);
         for action in ControlAction::ALL {
             assert!(
-                !authorize_control(&authorizer, &non_admin, action).is_allowed(),
+                !allowed_control(&authorizer, &non_admin, action),
                 "non-admin must deny {}",
                 action.as_str()
             );
@@ -449,9 +453,8 @@ mod tests {
     #[tokio::test]
     async fn admin_role_grants_no_workspace_permission() {
         let authorizer = build().await.expect("authorizer");
-        let principal = human_principal("user:7");
         let facts = WorkspaceFacts {
-            principal: principal.clone(),
+            principal: PrincipalRef::human("user:7"),
             roles: BTreeSet::from([RoleId::new(ADMIN_ROLE)]),
             credential: None,
             server: grants_for_scopes(&scopes(&[
@@ -461,10 +464,11 @@ mod tests {
                 WORKSPACE_PATCH,
             ])),
         };
-        for scope in ALL_SCOPES {
+        for action in WorkspaceAction::ALL {
             assert!(
-                !allowed(&authorizer, &facts, scope),
-                "admin must not imply {scope}"
+                !allowed(&authorizer, &facts, action),
+                "admin must not imply {}",
+                action.as_str()
             );
         }
     }
@@ -519,7 +523,8 @@ mod tests {
                     let engine = scope_decisions(&authorizer, &facts);
                     assert_eq!(policy.scopes, engine);
                     for scope in ALL_SCOPES {
-                        assert_eq!(policy.allows(scope), allowed(&authorizer, &facts, scope));
+                        let action = WorkspaceAction::from_scope(scope).expect("known scope");
+                        assert_eq!(policy.allows(scope), allowed(&authorizer, &facts, action));
                     }
                 }
             }

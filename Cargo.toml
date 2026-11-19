@@ -14,7 +14,7 @@ edition = "2024"
 [workspace.dependencies]
 anyhow = "1.0.104"
 cloudiful-tasks = { git = "https://github.com/cloudiful/tasks", rev = "3ea7f31cded4a11fb010c5e9d82e6c994712c528" }
-cloudiful-authz = { git = "https://forgejo.cloud1ful.com/crates/authz.git", rev = "237463d7bec0726d90b530e346735d43ec485047" }
+cloudiful-authz = { git = "https://forgejo.cloud1ful.com/crates/authz.git", rev = "c09f6ea4a51f07686747ab282bb4094780a16e0f" }
 argon2 = "0.6.0"
 base64 = "0.23.1"
 cloudiful-secret-crypto = { git = "https://forgejo.cloud1ful.com/crates/secret-crypto.git", branch = "main" }

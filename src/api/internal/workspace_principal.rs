@@ -75,8 +75,14 @@ pub async fn stop_workspace_principal(
         &token.scopes,
         &state.config.server_scopes,
     );
-    if !crate::authz::authorize_scope(state.authz.as_ref(), &facts, crate::policy::WORKSPACE_SHELL)
-        .is_allowed()
+    if !crate::authz::check(
+        state.authz.as_ref(),
+        crate::authz::Operation::Workspace {
+            facts: &facts,
+            action: crate::authz::WorkspaceAction::Shell,
+        },
+    )
+    .is_allowed()
     {
         return Err(AppError::forbidden("workspace.shell scope required"));
     }
