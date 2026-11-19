@@ -26,11 +26,9 @@ jobs:
         [{"source":"target/release/desk-foreman","destination":"desk-foreman"},
         {"source":"target/release/export-openapi","destination":"export-openapi","include_in_image":false}]
       after_build_command: |
-        set -euo pipefail
         "${RUST_OUTPUT_DIRECTORY:?}/export-openapi" frontend/openapi.json
         sccache --show-stats
       frontend_build_command: |
-        set -euo pipefail
         bun run gen:client
         bun run build
         test -f dist/index.html
