@@ -1,0 +1,27 @@
+name: Workspace Runner Docker Publish
+run-name: Docker Publish by ${{ github.actor }}
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: docker-publish-workspace-runner-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workspace-runner:
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+    uses: actions/workflows/.forgejo/workflows/docker-publish.yml@main
+    with:
+      builds: '[{"platform":"linux/amd64","runner":"aio"}]'
+      dockerfile_mode: repository
+      dockerfile: ./docker/forgejo-workspace-runner.Dockerfile
+      targets: '[{"target":"workspace-runner","image_suffix":"-workspace-runner","builder_name_prefix":"desk-foreman-workspace-runner"}]'
+      inline_cache_tag: latest-amd64
+      manifest_tag: ${{ github.ref == 'refs/heads/main' && 'latest' || github.ref_name }}
+      publish_latest: "false"
