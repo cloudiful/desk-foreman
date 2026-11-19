@@ -34,11 +34,18 @@ pub async fn application_capabilities(
         token.token_limits(),
         state.config.server_limits.clone(),
     );
+    let facts = crate::authz::application_facts(
+        &format!("application:{}", application.application_id),
+        &application.default_scopes,
+        &token.scopes,
+        &state.config.server_scopes,
+    );
+    let scopes = crate::authz::scope_decisions(state.authz.as_ref(), &facts);
     let runner_available = state.runner.list_sessions().await.is_ok();
     Ok(Json(crate::db::types::ApplicationCapabilitiesResponse {
         application_id: application.application_id,
         application_name: application.name,
-        scopes: policy.scopes,
+        scopes,
         max_timeout_ms: policy.limits.max_timeout_ms,
         max_output_bytes: policy.limits.max_output_bytes,
         max_file_bytes: policy.limits.max_file_bytes,

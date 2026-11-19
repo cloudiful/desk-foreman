@@ -19,7 +19,7 @@ pub async fn test_state_with_admin(
     login_name: &str,
     password: &str,
 ) -> AppState {
-    let mut base = super::helpers::test_state(pool.clone());
+    let mut base = super::helpers::test_state(pool.clone()).await;
     base.task_runtime = Arc::clone(&runtime);
     let mut config = (*base.config).clone();
     config.workspace_root = PathBuf::from(workspace_root);
@@ -33,6 +33,7 @@ pub async fn test_state_with_admin(
         db: pool,
         git_capability_signing_key: base.git_capability_signing_key.clone(),
         task_runtime: Arc::clone(&base.task_runtime),
+        authz: Arc::clone(&base.authz),
     };
     desk_foreman::db::bootstrap_admin(&state.db, &state.config)
         .await

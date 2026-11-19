@@ -28,7 +28,7 @@ async fn cancel_binding_sessions_best_effort(
 async fn principal_failure_prevents_legacy_cleanup() {
     let runner = FakeRunnerService::new();
     runner.sessions.lock().await.push(binding_session(1, 42));
-    let state = fake_state(runner.clone());
+    let state = fake_state(runner.clone()).await;
     let outcome =
         cancel_binding_sessions_with_principal(&state, 42, async { anyhow::bail!("offline") })
             .await;
@@ -45,7 +45,7 @@ async fn cancellation_only_touches_sessions_for_target_binding() {
         sessions.push(binding_session(1, 42));
         sessions.push(binding_session(2, 99));
     }
-    let state = fake_state(runner.clone());
+    let state = fake_state(runner.clone()).await;
     let outcome = cancel_binding_sessions_best_effort(&state, 42).await;
     assert!(outcome.attempted);
     assert!(outcome.succeeded);
@@ -59,7 +59,7 @@ async fn cancellation_only_touches_sessions_for_target_binding() {
 #[tokio::test]
 async fn cancellation_succeeds_when_no_sessions_exist() {
     let runner = FakeRunnerService::new();
-    let state = fake_state(runner.clone());
+    let state = fake_state(runner.clone()).await;
     let outcome = cancel_binding_sessions_best_effort(&state, 42).await;
     assert!(outcome.attempted);
     assert!(outcome.succeeded);
@@ -115,7 +115,7 @@ async fn cancellation_records_failure_when_listing_sessions_fails() {
     });
     let state = AppState {
         runner,
-        ..fake_state(inner)
+        ..fake_state(inner).await
     };
     let outcome = cancel_binding_sessions_best_effort(&state, 42).await;
     assert!(outcome.attempted);
@@ -183,7 +183,7 @@ async fn cancellation_fails_when_session_cancel_errors() {
     });
     let state = AppState {
         runner,
-        ..fake_state(inner)
+        ..fake_state(inner).await
     };
     // Cancel fails, so the session remains and quiescence verification
     // must also fail: the caller must treat this as a takeover failure.
@@ -260,7 +260,7 @@ async fn cancellation_fails_when_sessions_remain_after_cancel() {
     });
     let state = AppState {
         runner,
-        ..fake_state(inner)
+        ..fake_state(inner).await
     };
     let outcome = cancel_binding_sessions_best_effort(&state, 42).await;
     assert!(outcome.attempted);
@@ -330,7 +330,7 @@ async fn cancellation_fails_when_container_cleanup_fails() {
     });
     let state = AppState {
         runner,
-        ..fake_state(inner)
+        ..fake_state(inner).await
     };
     // Sessions cancel and verify empty, but container stop fails: the
     // takeover must still fail closed (Docker exec may survive).

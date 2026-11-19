@@ -33,7 +33,7 @@ async fn assigned_manager_pulls_and_other_manager_cannot() {
     .await;
 
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -86,7 +86,7 @@ async fn concurrent_polls_claim_the_job_once() {
     .await;
 
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -212,7 +212,7 @@ async fn expired_claimed_and_uncertain_rows_are_never_pulled() {
     .await;
 
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })

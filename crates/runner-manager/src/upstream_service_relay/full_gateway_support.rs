@@ -73,7 +73,7 @@ pub(crate) mod support {
     }
 
     /// Build DF router state backed by the isolated pool.
-    pub fn test_state(pool: PgPool) -> AppState {
+    pub async fn test_state(pool: PgPool) -> AppState {
         let runner: Arc<dyn RunnerService> = Arc::new(NoopRunner);
         let broker_pool = pool.clone();
         AppState {
@@ -115,6 +115,11 @@ pub(crate) mod support {
             runner_broker: RunnerBroker::new(broker_pool),
             db: pool.clone(),
             task_runtime: Arc::new(desk_foreman::db::task_runtime::TaskRuntime::new(pool)),
+            authz: Arc::new(
+                desk_foreman::authz::build()
+                    .await
+                    .expect("test authorization engine"),
+            ),
         }
     }
 

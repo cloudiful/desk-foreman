@@ -220,11 +220,11 @@ impl RunnerService for FakeRunnerService {
     }
 }
 
-fn app_state(root: PathBuf) -> AppState {
-    app_state_with_runner(root, FakeRunnerService::new() as Arc<dyn RunnerService>)
+async fn app_state(root: PathBuf) -> AppState {
+    app_state_with_runner(root, FakeRunnerService::new() as Arc<dyn RunnerService>).await
 }
 
-fn app_state_with_runner(root: PathBuf, runner: Arc<dyn RunnerService>) -> AppState {
+async fn app_state_with_runner(root: PathBuf, runner: Arc<dyn RunnerService>) -> AppState {
     AppState {
         config: Arc::new(AppConfig {
             bind_addr: "127.0.0.1:0".to_string(),
@@ -275,6 +275,11 @@ fn app_state_with_runner(root: PathBuf, runner: Arc<dyn RunnerService>) -> AppSt
                 .connect_lazy("postgres://example.invalid/test")
                 .expect("lazy pool"),
         )),
+        authz: Arc::new(
+            crate::authz::build()
+                .await
+                .expect("test authorization engine"),
+        ),
     }
 }
 
@@ -375,6 +380,10 @@ fn test_actor(root: &Path, user_id: i64) -> ActorContext {
             ALL_SCOPES.iter().map(|scope| (*scope).to_string()),
             ResourceLimits::unrestricted(true),
         ),
+        workspace_facts: crate::authz::fixture_facts(
+            &format!("user:{user_id}"),
+            cloudiful_authz::PrincipalKind::Human,
+        ),
         lease_owner: None,
     }
 }
@@ -388,6 +397,10 @@ fn resource_workspace_actor(root: &Path, lease_owner: Option<&str>) -> ActorCont
     actor.user = None;
     actor.external_user_id = Some(RESOURCE_ACTOR_SUBJECT.to_string());
     actor.principal_id = format!("application:1:{RESOURCE_ACTOR_SUBJECT}:artifact:abc");
+    actor.workspace_facts = crate::authz::fixture_facts(
+        &actor.principal_id,
+        cloudiful_authz::PrincipalKind::Application,
+    );
     actor.workspace_binding = Some(WorkspaceBindingResponse {
         workspace_binding_id: 1,
         application_id: 1,
@@ -415,7 +428,7 @@ fn resource_workspace_actor(root: &Path, lease_owner: Option<&str>) -> ActorCont
 async fn resource_workspace_reads_are_lease_free_and_writes_stay_lease_gated() {
     let temp = tempdir().expect("tempdir");
     std::fs::write(temp.path().join("notes.txt"), "alpha\n").expect("seed");
-    let state = app_state(temp.path().to_path_buf());
+    let state = app_state(temp.path().to_path_buf()).await;
     let actor = resource_workspace_actor(temp.path(), None);
     let params = parse_params::<crate::tools::params::ReadParams>(json!({
         "filePath": "notes.txt"

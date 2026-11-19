@@ -41,7 +41,7 @@ async fn consistent_success_and_confirmed_stop_persist() {
     .await;
 
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -113,7 +113,7 @@ async fn duplicate_terminal_replay_is_idempotent_and_conflict_is_refused() {
     .await;
 
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })

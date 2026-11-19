@@ -94,9 +94,9 @@ async fn wait_for_audit(pool: &PgPool, expected: i64) {
     }
 }
 
-fn state_with_pool(root: &Path, pool: PgPool) -> crate::AppState {
+async fn state_with_pool(root: &Path, pool: PgPool) -> crate::AppState {
     let runner = FakeRunnerService::new() as Arc<dyn RunnerService>;
-    let mut state = app_state_with_runner(root.to_path_buf(), runner);
+    let mut state = app_state_with_runner(root.to_path_buf(), runner).await;
     state.db = pool.clone();
     state.task_runtime =
         std::sync::Arc::new(crate::db::task_runtime::TaskRuntime::new(pool.clone()));
@@ -107,6 +107,8 @@ fn state_with_pool(root: &Path, pool: PgPool) -> crate::AppState {
 fn patch_actor(root: &Path) -> ActorContext {
     let mut actor = resource_workspace_actor(root, Some(LEASE_OWNER));
     actor.principal_id = PRINCIPAL.to_string();
+    actor.workspace_facts =
+        crate::authz::fixture_facts(PRINCIPAL, cloudiful_authz::PrincipalKind::Application);
     actor.workspace_binding_id = BINDING_ID;
     if let Some(binding) = actor.workspace_binding.as_mut() {
         binding.workspace_binding_id = BINDING_ID;
@@ -135,7 +137,7 @@ async fn post_write_commit_failure_reports_all_effects_and_no_audit() -> anyhow:
     cleanup(&pool).await?;
     seed(&pool).await?;
     let temp = tempdir()?;
-    let state = state_with_pool(temp.path(), pool.clone());
+    let state = state_with_pool(temp.path(), pool.clone()).await;
     let actor = patch_actor(temp.path());
 
     let output = shared::apply_patch_with_commit_failure(
@@ -188,7 +190,7 @@ async fn noop_fence_failure_reports_no_writes_and_no_audit() -> anyhow::Result<(
     seed(&pool).await?;
     let temp = tempdir()?;
     std::fs::write(temp.path().join("noop.txt"), "same\n")?;
-    let state = state_with_pool(temp.path(), pool.clone());
+    let state = state_with_pool(temp.path(), pool.clone()).await;
     let actor = patch_actor(temp.path());
 
     let output = shared::apply_patch_with_commit_failure(
@@ -240,7 +242,7 @@ async fn real_commit_returns_applied_and_waits_for_scoped_audit() -> anyhow::Res
     cleanup(&pool).await?;
     seed(&pool).await?;
     let temp = tempdir()?;
-    let state = state_with_pool(temp.path(), pool.clone());
+    let state = state_with_pool(temp.path(), pool.clone()).await;
     let actor = patch_actor(temp.path());
 
     let output = shared::apply_patch(
@@ -277,7 +279,7 @@ async fn missing_binding_denies_before_writes_and_audits_nothing() -> anyhow::Re
     let pool = database_pool().await?;
     cleanup(&pool).await?;
     let temp = tempdir()?;
-    let state = state_with_pool(temp.path(), pool.clone());
+    let state = state_with_pool(temp.path(), pool.clone()).await;
     let actor = patch_actor(temp.path());
 
     let error = shared::apply_patch(

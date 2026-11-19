@@ -194,7 +194,7 @@ impl Rig {
         };
         let binding_id = artifact_binding(&db.pool, app_id).await;
         let temp = tempfile::tempdir().expect("tempdir");
-        let state = test_state(db.pool.clone());
+        let state = test_state(db.pool.clone()).await;
         let (base, handle) = spawn_df(state).await;
 
         let task_id = Uuid::new_v4();

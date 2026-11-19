@@ -57,7 +57,7 @@ async fn protected_absolute_patch_path_is_not_echoed() {
         "patchText": "*** Begin Patch\n*** Add File: /private/.env\n+content\n*** End Patch"
     }))
     .expect("params");
-    let output = shared::apply_patch(&app_state(temp.path().to_path_buf()), &actor, &params)
+    let output = shared::apply_patch(&app_state(temp.path().to_path_buf()).await, &actor, &params)
         .await
         .expect("domain rejection");
     let PatchResultOutput::Rejected(rejected) = output else {
@@ -69,7 +69,7 @@ async fn protected_absolute_patch_path_is_not_echoed() {
 async fn patch_rejection(temp: &tempfile::TempDir, patch: &str) -> PatchDiagnosticOutput {
     let actor = test_actor(temp.path(), 10);
     let params: ApplyPatchParams = parse_params(json!({ "patchText": patch })).expect("params");
-    let output = shared::apply_patch(&app_state(temp.path().to_path_buf()), &actor, &params)
+    let output = shared::apply_patch(&app_state(temp.path().to_path_buf()).await, &actor, &params)
         .await
         .expect("domain rejection");
     let PatchResultOutput::Rejected(rejected) = output else {
@@ -185,7 +185,7 @@ async fn shared_apply_patch_returns_structured_change_details() {
     }))
     .expect("params");
 
-    let output = shared::apply_patch(&app_state(temp.path().to_path_buf()), &actor, &params)
+    let output = shared::apply_patch(&app_state(temp.path().to_path_buf()).await, &actor, &params)
         .await
         .expect("apply patch");
 
@@ -301,7 +301,7 @@ async fn readonly_tools_return_structured_content_with_expected_keys() {
 #[tokio::test]
 async fn shared_exec_command_returns_shell_output() {
     let temp = tempdir().expect("tempdir");
-    let state = app_state(temp.path().to_path_buf());
+    let state = app_state(temp.path().to_path_buf()).await;
     let actor = test_actor(temp.path(), 10);
     let params: ShellParams = parse_params(json!({
         "command": "printf 'hello'"
@@ -320,7 +320,7 @@ async fn shared_exec_command_returns_shell_output() {
 #[tokio::test]
 async fn shared_shell_allows_git_commands() {
     let temp = tempdir().expect("tempdir");
-    let state = app_state(temp.path().to_path_buf());
+    let state = app_state(temp.path().to_path_buf()).await;
     let actor = test_actor(temp.path(), 10);
     let params: ShellParams = parse_params(json!({
         "command": "git status --short"
@@ -337,7 +337,7 @@ async fn shared_shell_allows_git_commands() {
 #[tokio::test]
 async fn shared_shell_rejects_sensitive_paths_and_dangerous_commands() {
     let temp = tempdir().expect("tempdir");
-    let state = app_state(temp.path().to_path_buf());
+    let state = app_state(temp.path().to_path_buf()).await;
     let actor = test_actor(temp.path(), 10);
 
     let sensitive = shared::shell(
@@ -362,7 +362,7 @@ async fn shared_shell_rejects_sensitive_paths_and_dangerous_commands() {
 #[tokio::test]
 async fn shared_write_stdin_rejects_foreign_session() {
     let temp = tempdir().expect("tempdir");
-    let state = app_state(temp.path().to_path_buf());
+    let state = app_state(temp.path().to_path_buf()).await;
     let owner = test_actor(temp.path(), 10);
     let intruder = test_actor(temp.path(), 11);
     let exec_params: ShellParams = parse_params(json!({
@@ -407,7 +407,7 @@ async fn shared_read_file_returns_typed_output() {
     }))
     .expect("params");
 
-    let state = app_state(temp.path().to_path_buf());
+    let state = app_state(temp.path().to_path_buf()).await;
     let output = shared::read(&state, &actor, &params).expect("read");
 
     assert_eq!(output.path, "notes.txt");
@@ -424,7 +424,7 @@ async fn missing_read_path_is_a_repairable_tool_error() {
     }))
     .expect("params");
 
-    let error = shared::read(&app_state(temp.path().to_path_buf()), &actor, &params)
+    let error = shared::read(&app_state(temp.path().to_path_buf()).await, &actor, &params)
         .expect_err("missing path should fail");
     assert!(matches!(&error, ToolError::NotFound(_)));
 
@@ -453,7 +453,7 @@ fn forbidden_tool_errors_are_visible_without_being_retriable() {
 #[tokio::test]
 async fn shared_search_files_returns_structured_output() {
     let temp = tempdir().expect("tempdir");
-    let state = app_state(temp.path().to_path_buf());
+    let state = app_state(temp.path().to_path_buf()).await;
     let actor = test_actor(temp.path(), 10);
 
     std::fs::write(temp.path().join("search.txt"), "alpha\nbeta\n").expect("write");
@@ -492,7 +492,8 @@ async fn grep_mixed_stdout_stderr_is_isolated() {
     let state = app_state_with_runner(
         temp.path().to_path_buf(),
         Arc::new(StaticCommandRunner(output)),
-    );
+    )
+    .await;
     let search = shared::grep(
         &state,
         &actor,
@@ -527,7 +528,8 @@ async fn grep_empty_no_match_returns_empty() {
     let state = app_state_with_runner(
         temp.path().to_path_buf(),
         Arc::new(StaticCommandRunner(output)),
-    );
+    )
+    .await;
     let search = shared::grep(
         &state,
         &actor,
@@ -562,7 +564,8 @@ async fn grep_non_one_failure_reports_meaningful_error() {
     let state = app_state_with_runner(
         temp.path().to_path_buf(),
         Arc::new(StaticCommandRunner(output)),
-    );
+    )
+    .await;
     let error = shared::grep(
         &state,
         &actor,
@@ -610,7 +613,8 @@ async fn glob_stderr_is_not_treated_as_path() {
     let state = app_state_with_runner(
         temp.path().to_path_buf(),
         Arc::new(StaticCommandRunner(output)),
-    );
+    )
+    .await;
     let result = shared::glob(
         &state,
         &actor,
@@ -636,7 +640,7 @@ async fn patch_context_not_found_is_a_domain_result() {
     let temp = tempdir().expect("tempdir");
     std::fs::write(temp.path().join("a.txt"), "hello\nworld\n").expect("seed");
     let actor = test_actor(temp.path(), 10);
-    let state = app_state(temp.path().to_path_buf());
+    let state = app_state(temp.path().to_path_buf()).await;
     let params: ApplyPatchParams = parse_params(json!({
         "patchText": "*** Begin Patch\n*** Update File: a.txt\n@@\n-missing context\n+new\n*** End Patch"
     }))
@@ -680,7 +684,7 @@ async fn patch_applied_result_keeps_operation_effect_and_status() {
     std::fs::write(temp.path().join("first.txt"), "one\n").expect("seed");
     std::fs::write(temp.path().join("second.txt"), "two\n").expect("seed");
     let actor = test_actor(temp.path(), 10);
-    let state = app_state(temp.path().to_path_buf());
+    let state = app_state(temp.path().to_path_buf()).await;
     let params: ApplyPatchParams = parse_params(json!({
         "patchText": "*** Begin Patch\n*** Update File: first.txt\n@@\n-one\n+updated\n*** Update File: second.txt\n@@\n-two\n+changed\n*** End Patch"
     }))
@@ -1256,7 +1260,7 @@ async fn grep_file_path_uses_parent_as_workdir() {
     std::fs::write(temp.path().join("src/lib.rs"), "market\n").expect("seed");
     let actor = test_actor(temp.path(), 10);
     let runner = CapturingCommandRunner::new(rg_match_output("lib.rs", "market", 1));
-    let state = app_state_with_runner(temp.path().to_path_buf(), runner.clone());
+    let state = app_state_with_runner(temp.path().to_path_buf(), runner.clone()).await;
 
     let search = shared::grep(
         &state,
@@ -1297,7 +1301,7 @@ async fn grep_directory_path_keeps_directory_as_workdir() {
     std::fs::write(temp.path().join("src/lib.rs"), "market\n").expect("seed");
     let actor = test_actor(temp.path(), 10);
     let runner = CapturingCommandRunner::new(rg_match_output("lib.rs", "market", 1));
-    let state = app_state_with_runner(temp.path().to_path_buf(), runner.clone());
+    let state = app_state_with_runner(temp.path().to_path_buf(), runner.clone()).await;
 
     let search = shared::grep(
         &state,
@@ -1330,7 +1334,7 @@ async fn grep_missing_path_returns_not_found() {
     let temp = tempdir().expect("tempdir");
     let actor = test_actor(temp.path(), 10);
     let runner = CapturingCommandRunner::new(rg_match_output("missing.txt", "market", 1));
-    let state = app_state_with_runner(temp.path().to_path_buf(), runner);
+    let state = app_state_with_runner(temp.path().to_path_buf(), runner).await;
 
     let error = shared::grep(
         &state,

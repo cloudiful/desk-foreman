@@ -31,7 +31,7 @@ async fn ordinary_lease_api_runs_durable_cleanup() -> anyhow::Result<()> {
     principal_admission::admit(&pool, 17, &owner, "container").await?;
     let runner = support::FakeRunnerService::new();
     runner.fail_principal.store(true, Ordering::SeqCst);
-    let mut state = support::fake_state(runner.clone());
+    let mut state = support::fake_state(runner.clone()).await;
     state.db = pool.clone();
     assert!(matches!(
         acquire_binding_lease(&state, 817402, "new", 60).await,
@@ -111,7 +111,7 @@ async fn guarded_lifecycle_fails_closed_then_retries() -> anyhow::Result<()> {
     .await?;
     let runner = support::FakeRunnerService::new();
     runner.fail_principal.store(true, Ordering::SeqCst);
-    let mut state = support::fake_state(runner.clone());
+    let mut state = support::fake_state(runner.clone()).await;
     state.db = pool.clone();
     let mut config = (*state.config).clone();
     config.workspace_root = temp.path().into();

@@ -36,6 +36,10 @@ pub struct ActorContext {
     pub workspace_binding_id: i64,
     pub workspace_root: PathBuf,
     pub policy: crate::policy::AccessPolicy,
+    /// Trusted identity, role, credential, and server facts for the shared
+    /// authorization engine. The flat `policy` view stays a compatibility and
+    /// limits view; it is not the enforcement source.
+    pub(crate) workspace_facts: crate::authz::WorkspaceFacts,
     /// Lease owner carried from the MCP request (e.g. an AI conversation id).
     /// Write access to resource-owned workspaces requires holding the binding's
     /// write lease with this owner.
@@ -119,9 +123,10 @@ pub fn actor_from_web_user(state: &AppState, user: UserRecord) -> Result<ActorCo
     let workspace_root = resolve_user_workspace(&state.config.workspace_root, &user)
         .context("failed to resolve user workspace")
         .map_err(AppError::internal)?;
+    let principal_id = format!("user:{}", user.user_id);
     Ok(ActorContext {
         mode: ActorMode::InternalUser,
-        principal_id: format!("user:{}", user.user_id),
+        principal_id: principal_id.clone(),
         workspace_binding_id: user.user_id,
         user: Some(user),
         application: None,
@@ -131,6 +136,11 @@ pub fn actor_from_web_user(state: &AppState, user: UserRecord) -> Result<ActorCo
         policy: crate::policy::AccessPolicy::new(
             state.config.server_scopes.clone(),
             state.config.server_limits.clone(),
+        ),
+        workspace_facts: crate::authz::internal_user_facts(
+            &principal_id,
+            None,
+            &state.config.server_scopes,
         ),
         lease_owner: None,
     })
@@ -156,12 +166,19 @@ pub fn actor_from_application_binding(
         token.token_limits(),
         state.config.server_limits.clone(),
     );
+    let principal_id = format!(
+        "application:{}:{}:{}",
+        application.application_id, external_user_id, workspace_binding.workspace_key
+    );
+    let workspace_facts = crate::authz::application_facts(
+        &principal_id,
+        &application.default_scopes,
+        &token.scopes,
+        &state.config.server_scopes,
+    );
     Ok(ActorContext {
         mode: ActorMode::ApplicationSubject,
-        principal_id: format!(
-            "application:{}:{}:{}",
-            application.application_id, external_user_id, workspace_binding.workspace_key
-        ),
+        principal_id,
         workspace_binding_id: workspace_binding.workspace_binding_id,
         user: None,
         application: Some(application),
@@ -169,6 +186,7 @@ pub fn actor_from_application_binding(
         external_user_id: Some(external_user_id),
         workspace_root,
         policy,
+        workspace_facts,
         lease_owner,
     })
 }
@@ -205,6 +223,11 @@ pub(crate) fn actor_from_mcp_actor(
                     network_enabled: token.network_enabled,
                 },
                 state.config.server_limits.clone(),
+            );
+            actor.workspace_facts = crate::authz::internal_user_facts(
+                &actor.principal_id,
+                Some(&token.scopes),
+                &state.config.server_scopes,
             );
             Ok(actor)
         }
@@ -300,6 +323,10 @@ mod tests {
                     .iter()
                     .map(|scope| (*scope).to_string()),
                 crate::policy::ResourceLimits::unrestricted(false),
+            ),
+            workspace_facts: crate::authz::fixture_facts(
+                "application:1:user:artifact:abc",
+                cloudiful_authz::PrincipalKind::Application,
             ),
             lease_owner,
         }

@@ -21,6 +21,7 @@ use super::{
     shared::{map_db_conflict, record_admin_audit},
     users::require_admin,
 };
+use crate::authz::ControlAction;
 
 #[utoipa::path(
     get,
@@ -38,7 +39,7 @@ pub async fn list_applications(
     jar: CookieJar,
     ValidatedQuery(params): ValidatedQuery<ListApplicationsParams>,
 ) -> Result<Json<Page<ApplicationResponse>>, AppError> {
-    require_admin(&state, &jar).await?;
+    require_admin(&state, &jar, ControlAction::Application).await?;
     Ok(Json(
         crate::db::queries::list_applications(&state.db, &params).await?,
     ))
@@ -61,7 +62,7 @@ pub async fn create_application(
     jar: CookieJar,
     ValidatedJson(request): ValidatedJson<CreateApplicationRequest>,
 ) -> Result<(StatusCode, Json<ApplicationResponse>), AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::Application).await?;
     let application = crate::db::queries::create_application(&state.db, &request)
         .await
         .map_err(map_db_conflict)?;
@@ -97,7 +98,7 @@ pub async fn update_application(
     Path(application_id): Path<i64>,
     ValidatedJson(request): ValidatedJson<UpdateApplicationRequest>,
 ) -> Result<Json<ApplicationResponse>, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::Application).await?;
     let Some(application) =
         crate::db::queries::update_application(&state.db, application_id, &request)
             .await
@@ -133,7 +134,7 @@ pub async fn list_application_tokens(
     jar: CookieJar,
     ValidatedQuery(params): ValidatedQuery<ListApplicationTokensParams>,
 ) -> Result<Json<Page<ApplicationTokenResponse>>, AppError> {
-    require_admin(&state, &jar).await?;
+    require_admin(&state, &jar, ControlAction::Token).await?;
     Ok(Json(
         crate::db::queries::list_application_tokens(&state.db, &params).await?,
     ))
@@ -156,7 +157,7 @@ pub async fn create_application_token(
     jar: CookieJar,
     ValidatedJson(request): ValidatedJson<CreateApplicationTokenRequest>,
 ) -> Result<(StatusCode, Json<CreateApplicationTokenResponse>), AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::Token).await?;
     let Some(_) =
         crate::db::queries::find_application_by_id(&state.db, request.application_id).await?
     else {
@@ -196,7 +197,7 @@ pub async fn delete_application_token(
     jar: CookieJar,
     Path(token_id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::Token).await?;
     let Some(token) = crate::db::queries::find_application_token_by_id(&state.db, token_id).await?
     else {
         return Err(AppError::not_found("application token not found"));
@@ -230,7 +231,7 @@ pub async fn update_application_token(
     Path(token_id): Path<i64>,
     ValidatedJson(request): ValidatedJson<UpdateApplicationTokenRequest>,
 ) -> Result<Json<ApplicationTokenResponse>, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::Token).await?;
     let Some(token) =
         crate::db::queries::update_application_token(&state.db, token_id, &request).await?
     else {

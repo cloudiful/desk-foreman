@@ -20,6 +20,7 @@ use crate::{
         admin::shared::{record_admin_audit, require_admin},
         validation::{ValidatedJson, ValidatedQuery},
     },
+    authz::ControlAction,
     db::{
         types::{ListWorkspaceGitUpstreamsParams, Page, WorkspaceGitUpstreamResponse},
         workspace_git_upstreams::{
@@ -55,7 +56,7 @@ pub async fn list_workspace_git_upstreams(
     Path(binding_id): Path<i64>,
     ValidatedQuery(params): ValidatedQuery<ListWorkspaceGitUpstreamsParams>,
 ) -> Result<Json<Page<WorkspaceGitUpstreamResponse>>, AppError> {
-    require_admin(&state, &jar).await?;
+    require_admin(&state, &jar, ControlAction::GitUpstream).await?;
     let page = crate::db::queries::list_workspace_git_upstreams(
         &state.db,
         binding_id,
@@ -89,7 +90,7 @@ pub async fn create_workspace_git_upstream(
     Path(binding_id): Path<i64>,
     ValidatedJson(request): ValidatedJson<CreateWorkspaceGitUpstreamRequest>,
 ) -> Result<(StatusCode, Json<WorkspaceGitUpstreamResponse>), AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::GitUpstream).await?;
     let upstream = insert_upstream(
         &state.db,
         state.config.credential_protector.as_ref(),
@@ -135,7 +136,7 @@ pub async fn update_workspace_git_upstream(
     Path((binding_id, upstream_id)): Path<(i64, i64)>,
     ValidatedJson(request): ValidatedJson<UpdateWorkspaceGitUpstreamRequest>,
 ) -> Result<Json<WorkspaceGitUpstreamResponse>, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::GitUpstream).await?;
     let upstream = modify_upstream(
         &state.db,
         state.config.credential_protector.as_ref(),
@@ -179,7 +180,7 @@ pub async fn delete_workspace_git_upstream(
     jar: CookieJar,
     Path((binding_id, upstream_id)): Path<(i64, i64)>,
 ) -> Result<StatusCode, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::GitUpstream).await?;
     remove_upstream(&state.db, binding_id, upstream_id)
         .await
         .map_err(map_error)?;
@@ -216,7 +217,7 @@ pub async fn enable_workspace_git_upstream(
     jar: CookieJar,
     Path((binding_id, upstream_id)): Path<(i64, i64)>,
 ) -> Result<Json<WorkspaceGitUpstreamResponse>, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::GitUpstream).await?;
     let upstream = set_workspace_git_upstream_enabled(&state.db, binding_id, upstream_id, true)
         .await
         .map_err(map_error)?;
@@ -245,7 +246,7 @@ pub async fn disable_workspace_git_upstream(
     jar: CookieJar,
     Path((binding_id, upstream_id)): Path<(i64, i64)>,
 ) -> Result<Json<WorkspaceGitUpstreamResponse>, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::GitUpstream).await?;
     let upstream = set_workspace_git_upstream_enabled(&state.db, binding_id, upstream_id, false)
         .await
         .map_err(map_error)?;

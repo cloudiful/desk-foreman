@@ -10,6 +10,7 @@ use crate::{
     AppState,
     api::validation::{ValidatedJson, ValidatedQuery},
     auth,
+    authz::ControlAction,
     db::types::{
         CreateUserRequest, ListUsersParams, Page, ResetPasswordRequest, UpdateUserRequest,
         UserResponse,
@@ -38,7 +39,7 @@ pub async fn list_users(
     jar: CookieJar,
     ValidatedQuery(params): ValidatedQuery<ListUsersParams>,
 ) -> Result<Json<Page<UserResponse>>, AppError> {
-    require_admin(&state, &jar).await?;
+    require_admin(&state, &jar, ControlAction::User).await?;
     let (items, total) = crate::db::queries::list_users(&state.db, &params).await?;
     Ok(Json(Page {
         items,
@@ -65,7 +66,7 @@ pub async fn create_user(
     jar: CookieJar,
     ValidatedJson(request): ValidatedJson<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserResponse>), AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::User).await?;
 
     let password_hash = auth::hash_password(&request.password)?;
     let user = crate::db::queries::create_user(&state.db, &request, &password_hash)
@@ -115,7 +116,7 @@ pub async fn update_user(
     Path(user_id): Path<i64>,
     ValidatedJson(request): ValidatedJson<UpdateUserRequest>,
 ) -> Result<Json<UserResponse>, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::User).await?;
     let Some(user) = crate::db::queries::update_user(&state.db, user_id, &request)
         .await
         .map_err(map_db_conflict)?
@@ -158,7 +159,7 @@ pub async fn reset_user_password(
     Path(user_id): Path<i64>,
     ValidatedJson(request): ValidatedJson<ResetPasswordRequest>,
 ) -> Result<StatusCode, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::User).await?;
     let password_hash = auth::hash_password(&request.password)?;
     if !crate::db::queries::reset_user_password(&state.db, user_id, &password_hash).await? {
         return Err(AppError::not_found("user not found"));
@@ -195,7 +196,7 @@ pub async fn delete_user(
     jar: CookieJar,
     Path(user_id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::User).await?;
     if !crate::db::queries::deactivate_user(&state.db, user_id).await? {
         return Err(AppError::not_found("user not found"));
     }

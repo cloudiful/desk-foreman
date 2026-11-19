@@ -24,6 +24,7 @@ mod principal_tests;
 use native_task_guard::lock_binding_for_transition;
 
 use super::{shared::record_admin_audit, users::require_admin};
+use crate::authz::ControlAction;
 
 /// Refusal for a transition that a durable native task forbids.
 ///
@@ -49,7 +50,7 @@ pub async fn list_workspace_bindings(
     jar: CookieJar,
     ValidatedQuery(params): ValidatedQuery<ListWorkspaceBindingsParams>,
 ) -> Result<Json<Page<WorkspaceBindingResponse>>, AppError> {
-    require_admin(&state, &jar).await?;
+    require_admin(&state, &jar, ControlAction::Binding).await?;
     Ok(Json(
         crate::db::queries::list_workspace_bindings(&state.db, &params).await?,
     ))
@@ -72,7 +73,7 @@ pub async fn get_workspace_binding(
     jar: CookieJar,
     Path(binding_id): Path<i64>,
 ) -> Result<Json<WorkspaceBindingResponse>, AppError> {
-    require_admin(&state, &jar).await?;
+    require_admin(&state, &jar, ControlAction::Binding).await?;
     let Some(binding) =
         crate::db::queries::find_workspace_binding_by_id(&state.db, binding_id).await?
     else {
@@ -117,7 +118,7 @@ async fn transition_workspace_binding(
     binding_id: i64,
     lifecycle_state: &str,
 ) -> Result<Json<WorkspaceBindingResponse>, AppError> {
-    let admin = require_admin(state, jar).await?;
+    let admin = require_admin(state, jar, ControlAction::Binding).await?;
     // Lock the binding row, then read the native-task guard inside the same
     // transaction: archiving or restoring a workspace a task owns would
     // change the ground under that task's writer.
@@ -176,7 +177,7 @@ pub async fn acquire_workspace_binding_lease(
     Path(binding_id): Path<i64>,
     ValidatedJson(request): ValidatedJson<WorkspaceLeaseRequest>,
 ) -> Result<Json<WorkspaceBindingResponse>, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::Lease).await?;
     let binding =
         acquire_binding_lease(&state, binding_id, &request.owner, request.ttl_seconds).await?;
     record_admin_audit(
@@ -205,7 +206,7 @@ pub async fn release_workspace_binding_lease(
     Path(binding_id): Path<i64>,
     ValidatedJson(request): ValidatedJson<WorkspaceLeaseReleaseRequest>,
 ) -> Result<Json<WorkspaceBindingResponse>, AppError> {
-    let admin = require_admin(&state, &jar).await?;
+    let admin = require_admin(&state, &jar, ControlAction::Lease).await?;
     let binding = release_binding_lease(&state, binding_id, &request.owner).await?;
     record_admin_audit(
         &state,

@@ -44,9 +44,11 @@ async fn admin_target_actor(
     user_id: i64,
 ) -> Result<ActorContext, AppError> {
     let caller = current_tool_actor(state, jar, headers).await?;
-    if !caller.is_admin() {
-        return Err(AppError::forbidden("admin access required"));
-    }
+    super::admin::shared::ensure_control_action(
+        state,
+        &caller,
+        crate::authz::ControlAction::Workspace,
+    )?;
     let Some(user) = queries::find_user_by_id(&state.db, user_id).await? else {
         return Err(AppError::not_found("user not found"));
     };

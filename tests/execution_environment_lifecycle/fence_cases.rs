@@ -19,7 +19,7 @@ async fn wrong_tenant_cannot_read_or_mutate() {
     let (_, other_token) = create_app_with_token(&db.pool, "tenant-other").await;
     let (_, mgr_token) = create_manager(&db.pool, "tenant-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -54,7 +54,7 @@ async fn stale_generation_and_proof_are_refused() {
     let (_, app_token) = create_app_with_token(&db.pool, "stale-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "stale-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -127,7 +127,7 @@ async fn conflicting_token_and_wrong_ack_are_refused() {
     let (_, app_token) = create_app_with_token(&db.pool, "token-app").await;
     let (_, mgr_token) = create_manager(&db.pool, "token-mgr").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })
@@ -176,7 +176,7 @@ async fn unknown_fields_and_missing_auth_are_denied() {
     let db = LifecycleDb::setup().await;
     let (_, app_token) = create_app_with_token(&db.pool, "fields-app").await;
     let (base, handle) = spawn_http({
-        let mut state = test_state(db.pool.clone());
+        let mut state = test_state(db.pool.clone()).await;
         state.task_runtime = db.task_runtime.clone();
         state
     })

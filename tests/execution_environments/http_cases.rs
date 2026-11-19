@@ -12,7 +12,7 @@ use super::http::{http_get, http_post, spawn_http};
 #[tokio::test]
 async fn unauthenticated_callers_are_denied() {
     let db = IsolatedDb::setup().await;
-    let state = test_state(db.pool.clone());
+    let state = test_state(db.pool.clone()).await;
     let (base, handle) = spawn_http(state).await;
 
     let (status, _) = http_post(
@@ -44,7 +44,7 @@ async fn unauthenticated_callers_are_denied() {
 async fn request_application_spoofing_does_not_route() {
     let db = IsolatedDb::setup().await;
     let (app_id, token) = create_app_with_token(&db.pool, "spoof-app").await;
-    let state = test_state(db.pool.clone());
+    let state = test_state(db.pool.clone()).await;
     let (base, handle) = spawn_http(state).await;
 
     let (status, _) = http_post(
@@ -81,7 +81,7 @@ async fn request_application_spoofing_does_not_route() {
 async fn mount_and_volume_fields_are_not_supplied() {
     let db = IsolatedDb::setup().await;
     let (_, token) = create_app_with_token(&db.pool, "mount-guard").await;
-    let state = test_state(db.pool.clone());
+    let state = test_state(db.pool.clone()).await;
     let (base, handle) = spawn_http(state).await;
 
     for extra in [
@@ -111,7 +111,7 @@ async fn http_ensure_and_invalidate_follow_fencing_semantics() {
     let db = IsolatedDb::setup().await;
     let (_, token) = create_app_with_token(&db.pool, "http-fence").await;
     let (_, other_token) = create_app_with_token(&db.pool, "http-fence-other").await;
-    let state = test_state(db.pool.clone());
+    let state = test_state(db.pool.clone()).await;
     let (base, handle) = spawn_http(state).await;
 
     let (status, env) = http_post(
@@ -184,7 +184,7 @@ async fn http_ensure_and_invalidate_follow_fencing_semantics() {
 async fn capabilities_keep_ready_false_and_openapi_covers_routes() {
     let db = IsolatedDb::setup().await;
     let (_, token) = create_app_with_token(&db.pool, "caps-app").await;
-    let state = test_state(db.pool.clone());
+    let state = test_state(db.pool.clone()).await;
     let (base, handle) = spawn_http(state).await;
 
     let (status, body) = http_get(
