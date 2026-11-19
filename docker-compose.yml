@@ -19,7 +19,7 @@ services:
     depends_on:
       - postgres
     ports:
-      - "8080:80"
+      - "8080:3000"
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://desk_foreman:change-me-local-only@postgres:5432/desk_foreman}
       DF_CREDENTIAL_MASTER_KEY: ${DF_CREDENTIAL_MASTER_KEY:-}

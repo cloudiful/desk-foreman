@@ -14,38 +14,90 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-publish:
+  app:
     if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
-    uses: actions/workflows/.forgejo/workflows/docker-publish.yml@v0.6.2
+    uses: actions/workflows/.forgejo/workflows/docker-publish.yml@main
     with:
-      builds: >-
-        [{"platform":"linux/amd64","runner":"aio"}]
-      before_build_command: rm -rf ci-image-input
-      build_command: >-
-        cargo build --release -p desk-foreman --bin desk-foreman --bin export-openapi
-        &&
-        cargo build --release -p desk-foreman-runner-manager --bin desk-foreman-runner-manager
+      builds: '[{"platform":"linux/amd64","runner":"aio"}]'
+      dockerfile_mode: builtin
+      builder_name_prefix: desk-foreman-runtime
+      build_command: cargo build --release -p desk-foreman --bin desk-foreman --bin export-openapi
       binary_mappings: >-
         [{"source":"target/release/desk-foreman","destination":"desk-foreman"},
-        {"source":"target/release/export-openapi","destination":"export-openapi"},
-        {"source":"target/release/desk-foreman-runner-manager","destination":"desk-foreman-runner-manager"}]
+        {"source":"target/release/export-openapi","destination":"export-openapi","include_in_image":false}]
       after_build_command: |
-        mkdir -p ci-image-input/frontend-dist
-        cd frontend
-        ../ci-image-input/export-openapi openapi.json
-        bun install --no-save
+        set -euo pipefail
+        "${RUST_OUTPUT_DIRECTORY:?}/export-openapi" frontend/openapi.json
+        sccache --show-stats
+      frontend_build_command: |
+        set -euo pipefail
         bun run gen:client
         bun run build
         test -f dist/index.html
-        cp -R dist/. ../ci-image-input/frontend-dist/
-        cd ..
-        sccache --show-stats
-      dockerfile: ./forgejo.Dockerfile
-      targets: >-
-        [{"target":"runtime","builder_name_prefix":"desk-foreman-runtime"},
-        {"target":"runner-manager","image_suffix":"-runner-manager","builder_name_prefix":"desk-foreman-runner-manager"},
-        {"target":"workspace-runner","image_suffix":"-workspace-runner","builder_name_prefix":"desk-foreman-workspace-runner"}]
+      runtime_user: '10001:10001'
+      runtime_user_name: desk-foreman
+      runtime_tools: '["docker-cli"]'
+      runtime_packages: '["bash"]'
+      runtime_directories: '[{"path":"/workspace","owner":"10001:10001"},{"path":"/var/lib/desk-foreman","owner":"10001:10001"}]'
+      runtime_expose: '3000'
+      runtime_env: |
+        MCP_BIND_ADDR=0.0.0.0:3000
+        WORKSPACE_ROOT=/workspace
+        DEFAULT_SHELL=/bin/bash
+        SESSION_IDLE_TTL_SEC=1800
+        WEB_SESSION_TTL_SEC=604800
+        WEB_COOKIE_NAME=desk_foreman_session
+        WEB_COOKIE_SECURE=false
+        MAX_OUTPUT_BYTES=262144
+        PATCH_SURFACE_MODE=function_compat
+        FRONTEND_DIST=/app/frontend/dist
+        HOME=/home/desk-foreman
       inline_cache_tag: latest-amd64
       manifest_tag: ${{ github.ref == 'refs/heads/main' && 'latest' || github.ref_name }}
       publish_latest: "false"
-      push: true
+
+  runner-manager:
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+    uses: actions/workflows/.forgejo/workflows/docker-publish.yml@main
+    with:
+      builds: '[{"platform":"linux/amd64","runner":"aio"}]'
+      dockerfile_mode: builtin
+      builder_name_prefix: desk-foreman-runner-manager
+      image_repo: zot.cloud1ful.com/${{ github.repository }}-runner-manager
+      build_command: cargo build --release -p desk-foreman-runner-manager --bin desk-foreman-runner-manager
+      binary_mappings: '[{"source":"target/release/desk-foreman-runner-manager","destination":"desk-foreman-runner-manager"}]'
+      frontend_enabled: false
+      runtime_user: '10001:10001'
+      runtime_user_name: desk-foreman
+      runtime_tools: '["docker-cli"]'
+      runtime_packages: '["bash"]'
+      runtime_directories: '[{"path":"/workspace","owner":"10001:10001"},{"path":"/var/lib/desk-foreman","owner":"10001:10001"}]'
+      runtime_expose: '3001'
+      runtime_env: |
+        RUNNER_MANAGER_BIND_ADDR=0.0.0.0:3001
+        WORKSPACE_ROOT=/workspace
+        RUNNER_WORKDIR=/workspace
+        RUNNER_NETWORK_ENABLED=false
+        RUNNER_MAX_OUTPUT_BYTES=262144
+        RUNNER_MAX_SESSIONS=32
+        RUNNER_PIDS_LIMIT=256
+        RUNNER_MEMORY_LIMIT=1g
+        RUNNER_CPU_LIMIT=2
+        RUNNER_IDLE_TTL_SEC=1800
+        DOCKER_CLI=docker
+        HOME=/home/desk-foreman
+      inline_cache_tag: latest-amd64
+      manifest_tag: ${{ github.ref == 'refs/heads/main' && 'latest' || github.ref_name }}
+      publish_latest: "false"
+
+  workspace-runner:
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+    uses: actions/workflows/.forgejo/workflows/docker-publish.yml@main
+    with:
+      builds: '[{"platform":"linux/amd64","runner":"aio"}]'
+      dockerfile_mode: repository
+      dockerfile: ./docker/forgejo-workspace-runner.Dockerfile
+      targets: '[{"target":"workspace-runner","image_suffix":"-workspace-runner","builder_name_prefix":"desk-foreman-workspace-runner"}]'
+      inline_cache_tag: latest-amd64
+      manifest_tag: ${{ github.ref == 'refs/heads/main' && 'latest' || github.ref_name }}
+      publish_latest: "false"
