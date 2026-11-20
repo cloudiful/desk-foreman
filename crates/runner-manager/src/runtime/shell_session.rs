@@ -97,6 +97,8 @@ pub(super) struct SessionState {
     pub(super) output_dropped: bool,
     pub(super) timed_out: bool,
     pub(super) cancelled: bool,
+    retained: Option<super::shell_output::RetainedOutput>,
+    retained_error: bool,
 }
 
 pub(super) struct ShellSession {
@@ -122,6 +124,7 @@ impl ShellSession {
         mut child: Child,
         max_output_bytes: usize,
         output_is_combined: bool,
+        retain_output: bool,
     ) -> Self {
         // Capture before the move into the mutex: after `try_wait` reaps,
         // `child.id()` becomes `None` and the orphan group would be lost.
@@ -147,6 +150,17 @@ impl ShellSession {
                 output_dropped: false,
                 timed_out: false,
                 cancelled: false,
+                retained: retain_output.then(|| {
+                    let mut output = super::shell_output::RetainedOutput::new(
+                        id,
+                        max_output_bytes.saturating_mul(8).min(1024 * 1024),
+                    );
+                    if output_is_combined {
+                        output.reader_complete(true);
+                    }
+                    output
+                }),
+                retained_error: false,
             }),
             max_output_bytes,
             output_is_combined,
@@ -170,22 +184,52 @@ impl ShellSession {
                 }
                 Ok::<(), std::io::Error>(())
             };
-            if let Err(error) = task.await {
-                session
-                    .push_output(
-                        format!("\n[desk-foreman read error: {error}]\n").as_bytes(),
-                        true,
-                    )
-                    .await;
+            match task.await {
+                Ok(()) => {
+                    if let Some(output) = session.state.lock().await.retained.as_mut() {
+                        output.reader_complete(stderr);
+                    }
+                }
+                Err(error) => {
+                    let retained = {
+                        let mut state = session.state.lock().await;
+                        if state.retained.is_some() {
+                            state.retained_error = true;
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    if retained {
+                        tracing::warn!(session_id = session.id, %error, "retained output reader failed");
+                    } else {
+                        session
+                            .push_output(
+                                format!("\n[desk-foreman read error: {error}]\n").as_bytes(),
+                                true,
+                            )
+                            .await;
+                    }
+                }
             }
         });
     }
 
-    pub(super) fn spawn_timeout_watchdog(session: Arc<Self>, timeout: Duration) {
-        tokio::spawn(async move {
-            sleep(timeout).await;
-            let _ = session.kill_timed_out().await;
-        });
+    pub(super) fn spawn_timeout_watchdog(session: Arc<Self>, timeout: Duration, retained: bool) {
+        if retained {
+            let session = Arc::downgrade(&session);
+            tokio::spawn(async move {
+                sleep(timeout).await;
+                if let Some(session) = session.upgrade() {
+                    let _ = session.kill_timed_out().await;
+                }
+            });
+        } else {
+            tokio::spawn(async move {
+                sleep(timeout).await;
+                let _ = session.kill_timed_out().await;
+            });
+        }
     }
 
     pub(super) async fn interact(
@@ -214,6 +258,13 @@ impl ShellSession {
 
     pub(super) async fn push_output(&self, bytes: &[u8], stderr: bool) {
         let mut state = self.state.lock().await;
+        if let Some(output) = state.retained.as_mut() {
+            if output.push(stderr, bytes).is_err() {
+                state.retained_error = true;
+            }
+            state.last_activity = Instant::now();
+            return;
+        }
         if stderr {
             state.stderr_bytes = state.stderr_bytes.saturating_add(bytes.len());
             state.stderr_buffer.extend_from_slice(bytes);
@@ -244,6 +295,67 @@ impl ShellSession {
             state.output_dropped = true;
         }
         state.last_activity = Instant::now();
+    }
+
+    pub(super) async fn observe_retained(
+        &self,
+    ) -> anyhow::Result<runner_protocol::RetainedSessionStatus> {
+        let mut child = self.child.lock().await;
+        let exit = child.try_wait().context("failed to check child status")?;
+        let mut state = self.state.lock().await;
+        let output = state.retained.as_mut().context("not a retained session")?;
+        if let Some(exit) = exit {
+            output.terminal(runner_protocol::RetainedSessionState::Exited, exit.code())?;
+        }
+        Ok(output.status())
+    }
+
+    pub(super) async fn retained_status(
+        &self,
+    ) -> anyhow::Result<runner_protocol::RetainedSessionStatus> {
+        let status = self.observe_retained().await?;
+        anyhow::ensure!(
+            !self.state.lock().await.retained_error,
+            "retained output reader failed"
+        );
+        Ok(status)
+    }
+
+    pub(super) async fn retained_input(&self, chars: &str) -> anyhow::Result<()> {
+        anyhow::ensure!(!chars.is_empty(), "empty session input");
+        let mut child = self.child.lock().await;
+        let exit = child.try_wait().context("failed to check child status")?;
+        let mut state = self.state.lock().await;
+        let output = state.retained.as_mut().context("not a retained session")?;
+        if let Some(exit) = exit {
+            output.terminal(runner_protocol::RetainedSessionState::Exited, exit.code())?;
+        }
+        anyhow::ensure!(
+            output.status().state == runner_protocol::RetainedSessionState::Running,
+            "session is terminal"
+        );
+        anyhow::ensure!(!state.retained_error, "retained output reader failed");
+        state.last_activity = Instant::now();
+        drop(state);
+        drop(child);
+        let mut writer = self.writer.lock().await;
+        write_input(self.id, &mut **writer, chars).await?;
+        Ok(())
+    }
+
+    pub(super) async fn retained_output(
+        &self,
+        cursor: Option<&str>,
+        max_bytes: usize,
+    ) -> anyhow::Result<runner_protocol::SessionOutputChunk> {
+        self.retained_status().await?;
+        let state = self.state.lock().await;
+        anyhow::ensure!(!state.retained_error, "retained output reader failed");
+        state
+            .retained
+            .as_ref()
+            .context("not a retained session")?
+            .read(cursor, max_bytes)
     }
 
     pub(super) async fn last_activity(&self) -> Instant {
@@ -280,45 +392,80 @@ impl ShellSession {
     }
 
     pub(super) async fn kill_timed_out(&self) -> anyhow::Result<()> {
-        {
-            let pgid = self.pgid;
-            let mut child = self.child.lock().await;
-            // Always group-kill via the stored PGID, even when the parent
-            // already exited: orphans keep the PGID after reparenting.
-            super::process_termination::terminate_child_with_timeout(
-                &mut child,
-                pgid,
-                super::process_termination::SESSION_TERMINATE_WAIT,
-            )
+        let pgid = self.pgid;
+        let mut child = self.child.lock().await;
+        if self
+            .state
+            .lock()
             .await
-            .context("failed to kill timed out session")?;
+            .retained
+            .as_ref()
+            .is_some_and(|output| {
+                output.status().state != runner_protocol::RetainedSessionState::Running
+            })
+        {
+            return Ok(());
         }
-        // Mark only after successful termination so a failed kill keeps
-        // reporting `running` instead of lying about `timed_out`.
-        self.state.lock().await.timed_out = true;
+        let already_exited = child.try_wait().context("failed to check child status")?;
+        super::process_termination::terminate_child_with_timeout(
+            &mut child,
+            pgid,
+            super::process_termination::SESSION_TERMINATE_WAIT,
+        )
+        .await
+        .context("failed to kill timed out session")?;
+        let mut state = self.state.lock().await;
+        if let Some(exit) = already_exited {
+            if let Some(output) = state.retained.as_mut() {
+                output.terminal(runner_protocol::RetainedSessionState::Exited, exit.code())?;
+            } else {
+                state.timed_out = true;
+            }
+        } else {
+            state.timed_out = true;
+            if let Some(output) = state.retained.as_mut() {
+                output.terminal(runner_protocol::RetainedSessionState::TimedOut, None)?;
+            }
+        }
         Ok(())
     }
 
     pub(super) async fn cancel(&self) -> anyhow::Result<()> {
-        {
-            let pgid = self.pgid;
-            let mut child = self.child.lock().await;
-            // Always group-kill via the stored PGID, even when the parent
-            // already exited: orphans keep the PGID after reparenting.
-            // `terminate_child_with_timeout` skips the direct SIGKILL+wait
-            // internally when already reaped, but never skips the group.
-            super::process_termination::terminate_child_with_timeout(
-                &mut child,
-                pgid,
-                super::process_termination::SESSION_TERMINATE_WAIT,
-            )
+        let pgid = self.pgid;
+        let mut child = self.child.lock().await;
+        if self
+            .state
+            .lock()
             .await
-            .context("failed to cancel session")?;
+            .retained
+            .as_ref()
+            .is_some_and(|output| {
+                output.status().state != runner_protocol::RetainedSessionState::Running
+            })
+        {
+            return Ok(());
         }
-        // Mark only after the group is dead and reaped; a failed
-        // termination retains `running` so retries and quiescence checks
-        // cannot mistake a live session for `cancelled`.
-        self.state.lock().await.cancelled = true;
+        let already_exited = child.try_wait().context("failed to check child status")?;
+        super::process_termination::terminate_child_with_timeout(
+            &mut child,
+            pgid,
+            super::process_termination::SESSION_TERMINATE_WAIT,
+        )
+        .await
+        .context("failed to cancel session")?;
+        let mut state = self.state.lock().await;
+        if let Some(exit) = already_exited {
+            if let Some(output) = state.retained.as_mut() {
+                output.terminal(runner_protocol::RetainedSessionState::Exited, exit.code())?;
+            } else {
+                state.cancelled = true;
+            }
+        } else {
+            state.cancelled = true;
+            if let Some(output) = state.retained.as_mut() {
+                output.terminal(runner_protocol::RetainedSessionState::Cancelled, None)?;
+            }
+        }
         Ok(())
     }
 

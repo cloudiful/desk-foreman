@@ -128,6 +128,24 @@ fn job(kind: &str, payload: serde_json::Value) -> RunnerJob {
 }
 
 #[test]
+fn job_activity_retained_flattened_identity_roundtrip() {
+    let owner = RunnerOwner::WorkspaceBinding {
+        workspace_binding_id: 5,
+    };
+    let mut payload = exec_payload(owner.clone());
+    payload["session_key"] = json!("principal");
+    payload["execution_key"] = json!("execution-a");
+    let request: runner_protocol::ExecSessionRequest = serde_json::from_value(payload).unwrap();
+    let value = serde_json::to_value(&request).unwrap();
+    assert_eq!(value["session_key"], "principal");
+    assert_eq!(value["execution_key"], "execution-a");
+    assert_eq!(
+        job_activity_owner("exec_shell_session", &value),
+        Some(owner)
+    );
+}
+
+#[test]
 fn job_activity_owner_maps_only_binding_exec_and_run_kinds() {
     let binding = RunnerOwner::WorkspaceBinding {
         workspace_binding_id: 5,
@@ -140,6 +158,10 @@ fn job_activity_owner_maps_only_binding_exec_and_run_kinds() {
     assert_eq!(
         job_activity_owner("exec_shell", &exec_payload(binding.clone())),
         Some(binding.clone())
+    );
+    assert_eq!(
+        job_activity_owner("exec_shell_session", &exec_payload(principal.clone())),
+        Some(principal.clone())
     );
     assert_eq!(
         job_activity_owner("run_command", &command_payload(principal.clone())),

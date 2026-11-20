@@ -44,6 +44,7 @@ pub struct AppState {
     pub config: Arc<AppConfig>,
     pub runner: Arc<dyn RunnerService>,
     pub runner_broker: Arc<RunnerBroker>,
+    pub executions: Arc<tools::execution::ExecutionRegistry>,
     pub db: sqlx::PgPool,
     pub git_capability_signing_key: ring::hmac::Key,
     /// The durable task runtime of the environment jobs.
@@ -77,6 +78,7 @@ pub async fn run() -> anyhow::Result<()> {
         config: Arc::clone(&config),
         runner,
         runner_broker,
+        executions: Arc::new(tools::execution::ExecutionRegistry::default()),
         db,
         git_capability_signing_key,
         task_runtime,

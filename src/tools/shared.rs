@@ -59,14 +59,29 @@ pub struct CancelSessionOutput {
 }
 
 async fn prepare_workspace_git(state: &AppState, actor: &ActorContext) {
+    if prepare_workspace_git_on(state, actor, None).await.is_err() {
+        tracing::warn!(
+            "workspace Git preparation failed; native Git stays disabled for this dispatch"
+        );
+    }
+}
+
+pub(crate) async fn prepare_workspace_git_on(
+    state: &AppState,
+    actor: &ActorContext,
+    manager: Option<i64>,
+) -> Result<(), ToolError> {
     let Some(binding) = actor.workspace_binding.as_ref() else {
-        return;
+        return Ok(());
     };
     let (capability, upstreams, expires_at) = match build_workspace_git(state, actor, binding).await
     {
         Ok(Some(prepared)) => prepared,
         Ok(None) => (None, Vec::new(), 0),
         Err(message) => {
+            if manager.is_some() {
+                return Err(tool_internal(anyhow::anyhow!(message)));
+            }
             tracing::warn!("{message}; clearing native Git authorization for this dispatch");
             (None, Vec::new(), 0)
         }
@@ -80,11 +95,33 @@ async fn prepare_workspace_git(state: &AppState, actor: &ActorContext) {
         expires_at,
         upstreams,
     };
-    if request.is_valid() && state.runner.prepare_workspace_git(request).await.is_err() {
-        tracing::warn!(
-            "workspace Git preparation failed; native Git stays disabled for this dispatch"
-        );
+    if !request.is_valid() {
+        if manager.is_some() {
+            return Err(tool_internal(anyhow::anyhow!(
+                "invalid workspace Git preparation"
+            )));
+        }
+        return Ok(());
     }
+    let needs_capability = request.capability.is_some();
+    let result = match manager {
+        Some(id) => state
+            .runner
+            .prepare_workspace_git_for_manager(id, request)
+            .await
+            .map_err(tool_internal)?,
+        None => state
+            .runner
+            .prepare_workspace_git(request)
+            .await
+            .map_err(tool_internal)?,
+    };
+    if manager.is_some() && needs_capability && !result.prepared {
+        return Err(tool_internal(anyhow::anyhow!(
+            "workspace Git preparation incomplete"
+        )));
+    }
+    Ok(())
 }
 
 type PreparedWorkspaceGit = (Option<GitCapabilitySecret>, Vec<WorkspaceGitRemote>, i64);
@@ -163,27 +200,12 @@ fn workspace_tools(actor: &ActorContext) -> Result<WorkspaceFileTools, ToolError
     WorkspaceFileTools::new(&actor.workspace_root).map_err(map_workspace_sdk_error)
 }
 
-pub async fn shell(
+pub(crate) fn shell_preflight(
     state: &AppState,
     actor: &ActorContext,
     params: &ShellParams,
-) -> Result<ShellToolOutput, ToolError> {
-    let started = Instant::now();
+) -> Result<ExecRequest, ToolError> {
     ensure_scope(state, actor, crate::policy::WORKSPACE_SHELL)?;
-    let owner = actor.runner_owner();
-    if let Some(limit) = actor.policy.limits.max_sessions {
-        let active = state
-            .runner
-            .list_sessions()
-            .await
-            .map_err(tool_internal)?
-            .into_iter()
-            .filter(|session| session.owner == owner)
-            .count();
-        if active >= limit {
-            return Err(ToolError::Forbidden("session limit reached".to_string()));
-        }
-    }
     validate_shell_command(&params.command)?;
     if let Some(workdir) = &params.workdir {
         validate_workspace_path(workdir)?;
@@ -194,32 +216,66 @@ pub async fn shell(
         .and_then(|application| application.default_shell.clone())
         .unwrap_or_else(|| state.config.default_shell.clone());
     validate_shell_binary(&shell)?;
+    Ok(ExecRequest {
+        owner: actor.runner_owner(),
+        session_key: Some(actor.principal_id.clone()),
+        workspace_root: actor.workspace_root.clone(),
+        cmd: params.command.clone(),
+        workdir: params.workdir.clone(),
+        shell,
+        login: false,
+        tty: false,
+        timeout_ms: Some(
+            params
+                .timeout
+                .unwrap_or(DEFAULT_SHELL_TIMEOUT_MS)
+                .min(actor.policy.limits.max_timeout_ms.unwrap_or(u64::MAX)),
+        ),
+        yield_time_ms: Some(1000),
+        max_output_tokens: params.max_output_tokens,
+        max_output_bytes: actor.policy.limits.max_output_bytes,
+        network_enabled: actor.policy.limits.network_enabled,
+    })
+}
+
+pub(crate) async fn shell_session_admission(
+    state: &AppState,
+    actor: &ActorContext,
+    manager: Option<i64>,
+) -> Result<(), ToolError> {
+    ensure_scope(state, actor, crate::policy::WORKSPACE_SHELL)?;
+    let owner = actor.runner_owner();
+    if let Some(limit) = actor.policy.limits.max_sessions {
+        let active = match manager {
+            Some(id) => state.runner.list_sessions_for_manager(id).await,
+            None => state.runner.list_sessions().await,
+        }
+        .map_err(tool_internal)?
+        .into_iter()
+        .filter(|session| session.owner == owner)
+        .count();
+        if active >= limit {
+            return Err(ToolError::Forbidden("session limit reached".to_string()));
+        }
+    }
+    Ok(())
+}
+
+pub async fn shell(
+    state: &AppState,
+    actor: &ActorContext,
+    params: &ShellParams,
+) -> Result<ShellToolOutput, ToolError> {
+    let started = Instant::now();
+    shell_session_admission(state, actor, None).await?;
+    let request = shell_preflight(state, actor, params)?;
     // Admit under the row lock immediately before dispatch and hold the
     // fence across it, so a concurrent takeover cannot commit in between.
     let fence = admit_workspace_write(state, actor).await?;
     prepare_workspace_git(state, actor).await;
     let output = state
         .runner
-        .exec_shell(ExecRequest {
-            owner: owner.clone(),
-            session_key: Some(actor.principal_id.clone()),
-            workspace_root: actor.workspace_root.clone(),
-            cmd: params.command.clone(),
-            workdir: params.workdir.clone(),
-            shell,
-            login: false,
-            tty: false,
-            timeout_ms: Some(
-                params
-                    .timeout
-                    .unwrap_or(DEFAULT_SHELL_TIMEOUT_MS)
-                    .min(actor.policy.limits.max_timeout_ms.unwrap_or(u64::MAX)),
-            ),
-            yield_time_ms: Some(1000),
-            max_output_tokens: params.max_output_tokens,
-            max_output_bytes: actor.policy.limits.max_output_bytes,
-            network_enabled: actor.policy.limits.network_enabled,
-        })
+        .exec_shell(request)
         .await
         .map_err(classify_shell_error)?;
     fence.commit().await?;

@@ -234,6 +234,84 @@ pub struct InputRequest {
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct ExecSessionRequest {
+    pub execution_key: String,
+    #[serde(flatten)]
+    pub request: ExecRequest,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct ExecSessionResponse {
+    pub session_id: u64,
+    pub chunk: SessionOutputChunk,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct SessionLookupRequest {
+    pub execution_key: String,
+    pub owner: RunnerOwner,
+    pub session_key: Option<String>,
+    pub session_id: u64,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct SessionOutputRequest {
+    pub execution_key: String,
+    pub owner: RunnerOwner,
+    pub session_key: Option<String>,
+    pub session_id: u64,
+    pub cursor: Option<String>,
+    pub max_bytes: usize,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct SessionInputRequest {
+    pub execution_key: String,
+    pub owner: RunnerOwner,
+    pub session_key: Option<String>,
+    pub session_id: u64,
+    pub chars: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetainedSessionState {
+    Running,
+    Exited,
+    Cancelled,
+    TimedOut,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct RetainedSessionStatus {
+    pub state: RetainedSessionState,
+    pub exit_code: Option<i32>,
+    pub output_complete: bool,
+    pub stdout_bytes: u64,
+    pub stderr_bytes: u64,
+    pub dropped_bytes: u64,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct SessionStatusResponse {
+    pub status: Option<RetainedSessionStatus>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct SessionOutputChunk {
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub next_cursor: String,
+    pub eof: bool,
+    pub output_complete: bool,
+    pub trimmed: bool,
+    pub truncated: bool,
+    pub dropped_bytes: u64,
+    pub stdout_bytes: u64,
+    pub stderr_bytes: u64,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct CancelSessionRequest {
     pub owner: RunnerOwner,
     pub session_key: Option<String>,

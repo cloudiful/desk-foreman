@@ -40,7 +40,7 @@ const CONFIG_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 /// Cleanup/stop/list/environment/native/Git kinds are deliberately excluded.
 fn job_activity_owner(kind: &str, payload: &serde_json::Value) -> Option<RunnerOwner> {
     let owner = match kind {
-        "exec_shell" => {
+        "exec_shell" | "exec_shell_session" => {
             serde_json::from_value::<ExecRequest>(payload.clone())
                 .ok()?
                 .owner

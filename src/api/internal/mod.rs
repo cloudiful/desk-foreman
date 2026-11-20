@@ -25,6 +25,7 @@ pub(super) mod runner_principal_admission;
 pub(super) mod shared;
 pub(super) mod workspace_git;
 pub(super) mod workspace_principal;
+pub(super) mod workspace_tools;
 
 pub(super) use application::application_capabilities;
 /// Every relayed method, bound onto the gateway's single route.
@@ -58,6 +59,7 @@ pub(super) use runner_manager_task_exports::upload_native_task_export_handler;
 
 pub(super) fn router() -> axum::Router<crate::AppState> {
     axum::Router::new()
+        .merge(workspace_tools::router())
         .route("/api/internal/principal-workspace-capabilities", axum::routing::get(workspace_principal::principal_workspace_capabilities))
         .route("/api/internal/resource-workspaces/{resource_kind}/{resource_id}/workspace-sessions/stop", axum::routing::post(workspace_principal::stop_workspace_principal))
         .route(

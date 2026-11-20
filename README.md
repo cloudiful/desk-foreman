@@ -12,6 +12,8 @@ This workspace also includes `desk-foreman-workspace-sdk`, a reusable Rust crate
 
 `desk-foreman` itself remains the full deployable product with HTTP, MCP, auth, database, admin, and runner integration layers on top of that SDK.
 
+Application-authenticated HTTP workspace tools and explicit execution lifecycle are documented in [Workspace executions](docs/workspace-executions.md).
+
 ## Tools
 
 - `shell({ command, workdir?, timeout?, max_output_tokens? })`

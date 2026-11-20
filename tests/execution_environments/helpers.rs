@@ -155,6 +155,7 @@ pub async fn test_state(pool: PgPool) -> AppState {
     let runner: Arc<dyn RunnerService> = Arc::new(NoopRunner);
     let broker_pool = pool.clone();
     AppState {
+        executions: Arc::new(desk_foreman::tools::execution::ExecutionRegistry::default()),
         config: Arc::new(AppConfig {
             bind_addr: "127.0.0.1:0".to_string(),
             mcp_allowed_hosts: Vec::new(),

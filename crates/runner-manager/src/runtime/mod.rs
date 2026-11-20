@@ -16,6 +16,8 @@ pub(crate) mod process_termination;
 mod reporter;
 pub(crate) mod session_gate;
 mod shell_manager;
+#[allow(dead_code)]
+mod shell_output;
 mod shell_session;
 mod shell_spawn;
 #[cfg(test)]

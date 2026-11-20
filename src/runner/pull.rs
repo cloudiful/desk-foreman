@@ -316,6 +316,91 @@ impl PullRunnerService {
 }
 
 impl RunnerService for PullRunnerService {
+    fn list_sessions_for_manager<'a>(
+        &'a self,
+        manager_id: i64,
+    ) -> RunnerFuture<'a, anyhow::Result<Vec<RunnerSessionStatus>>> {
+        Box::pin(async move {
+            anyhow::ensure!(manager_id > 0, "invalid manager id");
+            self.broker
+                .submit_to_manager(manager_id, "list_sessions", &())
+                .await
+        })
+    }
+
+    fn prepare_workspace_git_for_manager<'a>(
+        &'a self,
+        manager_id: i64,
+        request: PrepareWorkspaceGitRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<PrepareWorkspaceGitResult>> {
+        Box::pin(async move {
+            anyhow::ensure!(manager_id > 0, "invalid manager id");
+            self.broker
+                .submit_to_manager(manager_id, "prepare_workspace_git", &request)
+                .await
+        })
+    }
+
+    fn exec_shell_session_for_manager<'a>(
+        &'a self,
+        manager_id: i64,
+        request: runner_protocol::ExecSessionRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::ExecSessionResponse>> {
+        Box::pin(async move {
+            anyhow::ensure!(manager_id > 0, "invalid manager id");
+            self.broker
+                .submit_to_manager(manager_id, "exec_shell_session", &request)
+                .await
+        })
+    }
+    fn session_status_for_manager<'a>(
+        &'a self,
+        manager_id: i64,
+        request: runner_protocol::SessionLookupRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::SessionStatusResponse>> {
+        Box::pin(async move {
+            anyhow::ensure!(manager_id > 0, "invalid manager id");
+            self.broker
+                .submit_to_manager(manager_id, "session_status", &request)
+                .await
+        })
+    }
+    fn session_output_for_manager<'a>(
+        &'a self,
+        manager_id: i64,
+        request: runner_protocol::SessionOutputRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::SessionOutputChunk>> {
+        Box::pin(async move {
+            anyhow::ensure!(manager_id > 0, "invalid manager id");
+            self.broker
+                .submit_to_manager(manager_id, "session_output", &request)
+                .await
+        })
+    }
+    fn session_input_for_manager<'a>(
+        &'a self,
+        manager_id: i64,
+        request: runner_protocol::SessionInputRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            anyhow::ensure!(manager_id > 0, "invalid manager id");
+            self.broker
+                .submit_to_manager(manager_id, "session_input", &request)
+                .await
+        })
+    }
+    fn session_cancel_for_manager<'a>(
+        &'a self,
+        manager_id: i64,
+        request: runner_protocol::SessionLookupRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::RetainedSessionStatus>> {
+        Box::pin(async move {
+            anyhow::ensure!(manager_id > 0, "invalid manager id");
+            self.broker
+                .submit_to_manager(manager_id, "session_cancel", &request)
+                .await
+        })
+    }
     fn exec_shell<'a>(
         &'a self,
         request: ExecRequest,
