@@ -34,6 +34,86 @@ impl WorkspaceActivity {
 }
 
 pub trait RunnerService: Send + Sync {
+    fn list_sessions_for_manager<'a>(
+        &'a self,
+        _manager_id: i64,
+    ) -> RunnerFuture<'a, anyhow::Result<Vec<RunnerSessionStatus>>> {
+        Box::pin(async { anyhow::bail!("manager-targeted session listing unsupported") })
+    }
+
+    fn prepare_workspace_git_for_manager<'a>(
+        &'a self,
+        _manager_id: i64,
+        _request: PrepareWorkspaceGitRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<PrepareWorkspaceGitResult>> {
+        Box::pin(async { anyhow::bail!("manager-targeted workspace Git preparation unsupported") })
+    }
+
+    fn exec_shell_session<'a>(
+        &'a self,
+        _request: runner_protocol::ExecSessionRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::ExecSessionResponse>> {
+        Box::pin(async { anyhow::bail!("retained sessions unsupported") })
+    }
+    fn session_status<'a>(
+        &'a self,
+        _request: runner_protocol::SessionLookupRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::SessionStatusResponse>> {
+        Box::pin(async { anyhow::bail!("retained sessions unsupported") })
+    }
+    fn session_output<'a>(
+        &'a self,
+        _request: runner_protocol::SessionOutputRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::SessionOutputChunk>> {
+        Box::pin(async { anyhow::bail!("retained sessions unsupported") })
+    }
+    fn session_input<'a>(
+        &'a self,
+        _request: runner_protocol::SessionInputRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<()>> {
+        Box::pin(async { anyhow::bail!("retained sessions unsupported") })
+    }
+    fn session_cancel<'a>(
+        &'a self,
+        _request: runner_protocol::SessionLookupRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::RetainedSessionStatus>> {
+        Box::pin(async { anyhow::bail!("retained sessions unsupported") })
+    }
+    fn exec_shell_session_for_manager<'a>(
+        &'a self,
+        _manager_id: i64,
+        _request: runner_protocol::ExecSessionRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::ExecSessionResponse>> {
+        Box::pin(async { anyhow::bail!("manager-targeted retained sessions unsupported") })
+    }
+    fn session_status_for_manager<'a>(
+        &'a self,
+        _manager_id: i64,
+        _request: runner_protocol::SessionLookupRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::SessionStatusResponse>> {
+        Box::pin(async { anyhow::bail!("manager-targeted retained sessions unsupported") })
+    }
+    fn session_output_for_manager<'a>(
+        &'a self,
+        _manager_id: i64,
+        _request: runner_protocol::SessionOutputRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::SessionOutputChunk>> {
+        Box::pin(async { anyhow::bail!("manager-targeted retained sessions unsupported") })
+    }
+    fn session_input_for_manager<'a>(
+        &'a self,
+        _manager_id: i64,
+        _request: runner_protocol::SessionInputRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<()>> {
+        Box::pin(async { anyhow::bail!("manager-targeted retained sessions unsupported") })
+    }
+    fn session_cancel_for_manager<'a>(
+        &'a self,
+        _manager_id: i64,
+        _request: runner_protocol::SessionLookupRequest,
+    ) -> RunnerFuture<'a, anyhow::Result<runner_protocol::RetainedSessionStatus>> {
+        Box::pin(async { anyhow::bail!("manager-targeted retained sessions unsupported") })
+    }
     fn exec_shell<'a>(
         &'a self,
         request: ExecRequest,
@@ -203,6 +283,31 @@ mod tests {
         ) -> RunnerFuture<'a, anyhow::Result<EnsureExecutionEnvironmentAck>> {
             Box::pin(async { anyhow::bail!("unsupported") })
         }
+    }
+
+    #[tokio::test]
+    async fn retained_session_defaults_fail_closed() {
+        let lookup = runner_protocol::SessionLookupRequest {
+            execution_key: "execution".into(),
+            owner: RunnerOwner::InternalUser { user_id: 1 },
+            session_key: None,
+            session_id: 2,
+        };
+        assert!(DefaultService.list_sessions_for_manager(1).await.is_err());
+        assert!(DefaultService.session_status(lookup.clone()).await.is_err());
+        assert!(DefaultService.session_cancel(lookup.clone()).await.is_err());
+        assert!(
+            DefaultService
+                .session_status_for_manager(1, lookup.clone())
+                .await
+                .is_err()
+        );
+        assert!(
+            DefaultService
+                .session_cancel_for_manager(1, lookup)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

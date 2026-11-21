@@ -28,6 +28,17 @@ pub(crate) const APPLICATION_BEARER_SCHEME: &str = "application_bearer";
 #[derive(OpenApi)]
 #[openapi(
     paths(
+        super::internal::workspace_tools::handlers::shell,
+        super::internal::workspace_tools::handlers::write_stdin,
+        super::internal::workspace_tools::handlers::apply_patch,
+        super::internal::workspace_tools::handlers::read,
+        super::internal::workspace_tools::handlers::glob,
+        super::internal::workspace_tools::handlers::grep,
+        super::internal::workspace_tools::handlers::stat,
+        super::internal::workspace_tools::handlers::status,
+        super::internal::workspace_tools::handlers::output,
+        super::internal::workspace_tools::handlers::final_result,
+        super::internal::workspace_tools::handlers::cancel,
         super::authn::login,
         super::authn::logout,
         super::authn::me,
@@ -136,6 +147,14 @@ pub(crate) const APPLICATION_BEARER_SCHEME: &str = "application_bearer";
     ),
     components(
         schemas(
+            super::internal::workspace_tools::types::StartRequest,
+            super::internal::workspace_tools::types::InputRequest,
+            super::internal::workspace_tools::types::OutputQuery,
+            super::internal::workspace_tools::types::StartResponse,
+            super::internal::workspace_tools::types::StartFailure,
+            super::internal::workspace_tools::types::StartServiceUnavailable,
+            crate::tools::execution::Descriptor,
+            crate::tools::execution::Output,
             AuthLoginRequest,
              AuthMeResponse,
              ChangePasswordRequest,

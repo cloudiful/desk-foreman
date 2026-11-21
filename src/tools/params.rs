@@ -100,6 +100,7 @@ pub struct ReadParams {
         example = 10
     )]
     #[validate(range(min = 1))]
+    #[schema(minimum = 1)]
     pub offset: Option<usize>,
     #[serde(default)]
     #[schemars(
@@ -107,6 +108,7 @@ pub struct ReadParams {
         example = 2000
     )]
     #[validate(range(min = 1, max = 2000))]
+    #[schema(minimum = 1, maximum = 2000)]
     pub limit: Option<usize>,
 }
 

@@ -27,6 +27,7 @@ pub async fn test_state_with_admin(
     config.bootstrap_admin_password = Some(password.to_string());
     config.bootstrap_admin_display_name = Some("Native Task Admin".to_string());
     let state = AppState {
+        executions: Arc::new(desk_foreman::tools::execution::ExecutionRegistry::default()),
         config: Arc::new(config),
         runner: Arc::clone(&base.runner),
         runner_broker: Arc::clone(&base.runner_broker),

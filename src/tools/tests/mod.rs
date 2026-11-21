@@ -226,6 +226,7 @@ async fn app_state(root: PathBuf) -> AppState {
 
 async fn app_state_with_runner(root: PathBuf, runner: Arc<dyn RunnerService>) -> AppState {
     AppState {
+        executions: Arc::new(crate::tools::execution::ExecutionRegistry::default()),
         config: Arc::new(AppConfig {
             bind_addr: "127.0.0.1:0".to_string(),
             mcp_allowed_hosts: Vec::new(),

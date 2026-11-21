@@ -4,7 +4,62 @@
 //! Split from `openapi_security_tests.rs` so no file exceeds the size budget:
 //! the flat `(path, method, operation id)` table is data, not logic.
 
-pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 38] = [
+pub(super) const APPLICATION_BEARER_OPERATIONS: [(&str, &str, &str); 49] = [
+    (
+        "/api/internal/workspace-tools/shell",
+        "post",
+        "workspace_tools_shell",
+    ),
+    (
+        "/api/internal/workspace-tools/write-stdin",
+        "post",
+        "workspace_tools_write_stdin",
+    ),
+    (
+        "/api/internal/workspace-tools/apply-patch",
+        "post",
+        "workspace_tools_apply_patch",
+    ),
+    (
+        "/api/internal/workspace-tools/read",
+        "post",
+        "workspace_tools_read",
+    ),
+    (
+        "/api/internal/workspace-tools/glob",
+        "post",
+        "workspace_tools_glob",
+    ),
+    (
+        "/api/internal/workspace-tools/grep",
+        "post",
+        "workspace_tools_grep",
+    ),
+    (
+        "/api/internal/workspace-tools/stat",
+        "post",
+        "workspace_tools_stat",
+    ),
+    (
+        "/api/internal/workspace-tools/executions/{execution_id}",
+        "get",
+        "workspace_tools_status",
+    ),
+    (
+        "/api/internal/workspace-tools/executions/{execution_id}/output",
+        "get",
+        "workspace_tools_output",
+    ),
+    (
+        "/api/internal/workspace-tools/executions/{execution_id}/final",
+        "get",
+        "workspace_tools_final",
+    ),
+    (
+        "/api/internal/workspace-tools/executions/{execution_id}/cancel",
+        "post",
+        "workspace_tools_cancel",
+    ),
     (
         "/api/internal/principal-workspace-capabilities",
         "get",

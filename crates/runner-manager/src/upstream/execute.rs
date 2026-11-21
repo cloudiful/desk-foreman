@@ -30,6 +30,53 @@ pub(super) async fn execute_job_inner(
     payload: Value,
 ) -> anyhow::Result<Value> {
     match kind {
+        "exec_shell_session" => {
+            let mut request =
+                serde_json::from_value::<runner_protocol::ExecSessionRequest>(payload)?;
+            anyhow::ensure!(
+                !request.execution_key.is_empty() && request.execution_key.len() <= 128,
+                "invalid execution key"
+            );
+            let _permit = gate.acquire(config).await;
+            let limits = config.read().await.clone();
+            apply_retained_limits(&mut request.request, &limits)?;
+            Ok(serde_json::to_value(
+                runner.exec_shell_session(request).await?,
+            )?)
+        }
+        "session_status" => Ok(serde_json::to_value(
+            runner
+                .session_status(serde_json::from_value(payload)?)
+                .await?,
+        )?),
+        "session_output" => {
+            let mut request: runner_protocol::SessionOutputRequest =
+                serde_json::from_value(payload)?;
+            if request.max_bytes == 0 {
+                bail!("invalid output cap");
+            }
+            request.max_bytes = request
+                .max_bytes
+                .min(config.read().await.max_output_bytes)
+                .min(1024 * 1024);
+            if request.max_bytes == 0 {
+                bail!("invalid output cap");
+            }
+            Ok(serde_json::to_value(runner.session_output(request).await?)?)
+        }
+        "session_input" => {
+            let request: runner_protocol::SessionInputRequest = serde_json::from_value(payload)?;
+            if request.chars.is_empty() {
+                bail!("empty session input");
+            }
+            runner.session_input(request).await?;
+            Ok(Value::Null)
+        }
+        "session_cancel" => Ok(serde_json::to_value(
+            runner
+                .session_cancel(serde_json::from_value(payload)?)
+                .await?,
+        )?),
         "exec_shell" => {
             let mut request = serde_json::from_value::<ExecRequest>(payload)?;
             let _permit = gate.acquire(config).await;
@@ -123,6 +170,16 @@ pub(super) async fn execute_job_inner(
         }
         _ => bail!("unknown runner job kind: {kind}"),
     }
+}
+
+fn apply_retained_limits(
+    request: &mut ExecRequest,
+    config: &RunnerManagerConfig,
+) -> anyhow::Result<()> {
+    request
+        .timeout_ms
+        .get_or_insert(120_000_u64.min(config.max_timeout_ms));
+    apply_limits(request, config)
 }
 
 fn apply_limits<T>(request: &mut T, config: &RunnerManagerConfig) -> anyhow::Result<()>
@@ -262,6 +319,23 @@ mod tests {
             max_output_bytes: None,
             network_enabled: false,
         }
+    }
+
+    #[test]
+    fn retained_job_limits_default_and_validate() {
+        let mut config = config();
+        config.max_timeout_ms = 300_000;
+        let mut defaulted = request();
+        super::apply_retained_limits(&mut defaulted, &config).unwrap();
+        assert_eq!(defaulted.timeout_ms, Some(120_000));
+        assert_eq!(defaulted.max_output_bytes, Some(100));
+        let mut excessive = defaulted.clone();
+        excessive.timeout_ms = Some(300_001);
+        assert!(super::apply_retained_limits(&mut excessive, &config).is_err());
+        config.max_timeout_ms = 500;
+        let mut limited = request();
+        super::apply_retained_limits(&mut limited, &config).unwrap();
+        assert_eq!(limited.timeout_ms, Some(500));
     }
 
     struct PrincipalRunner(std::sync::atomic::AtomicUsize);
