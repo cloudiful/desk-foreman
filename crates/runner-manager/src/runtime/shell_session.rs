@@ -29,7 +29,74 @@ pub(super) struct InputFailure {
     source: std::io::Error,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SessionInputStage {
+    SessionLookup,
+    Empty,
+    ChildStatus,
+    NotRetained,
+    Terminal,
+    ReaderFailed,
+    Write,
+    Flush,
+    Unknown,
+}
+
+impl SessionInputStage {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::SessionLookup => "session_lookup",
+            Self::Empty => "empty",
+            Self::ChildStatus => "child_status",
+            Self::NotRetained => "not_retained",
+            Self::Terminal => "terminal",
+            Self::ReaderFailed => "reader_failed",
+            Self::Write => "write",
+            Self::Flush => "flush",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub(super) fn write_attempted(self) -> bool {
+        matches!(self, Self::Write | Self::Flush)
+    }
+}
+
+impl From<InputFailureStage> for SessionInputStage {
+    fn from(stage: InputFailureStage) -> Self {
+        match stage {
+            InputFailureStage::Write => Self::Write,
+            InputFailureStage::Flush => Self::Flush,
+        }
+    }
+}
+
+/// A retained-input failure with its fixed stage; the original error keeps its
+/// Display and source chain for the job response.
+pub(super) struct SessionInputFailure {
+    stage: SessionInputStage,
+    error: anyhow::Error,
+}
+
+impl SessionInputFailure {
+    fn new(stage: SessionInputStage, error: anyhow::Error) -> Self {
+        Self { stage, error }
+    }
+
+    pub(super) fn stage(&self) -> SessionInputStage {
+        self.stage
+    }
+
+    pub(super) fn into_error(self) -> anyhow::Error {
+        self.error
+    }
+}
+
 impl InputFailure {
+    fn stage(&self) -> InputFailureStage {
+        self.stage
+    }
+
     fn action(&self) -> &'static str {
         match self.stage {
             InputFailureStage::Write => "write to",
@@ -321,25 +388,50 @@ impl ShellSession {
         Ok(status)
     }
 
-    pub(super) async fn retained_input(&self, chars: &str) -> anyhow::Result<()> {
-        anyhow::ensure!(!chars.is_empty(), "empty session input");
-        let mut child = self.child.lock().await;
-        let exit = child.try_wait().context("failed to check child status")?;
-        let mut state = self.state.lock().await;
-        let output = state.retained.as_mut().context("not a retained session")?;
-        if let Some(exit) = exit {
-            output.terminal(runner_protocol::RetainedSessionState::Exited, exit.code())?;
+    pub(super) async fn retained_input(&self, chars: &str) -> Result<(), SessionInputFailure> {
+        if chars.is_empty() {
+            return Err(SessionInputFailure::new(
+                SessionInputStage::Empty,
+                anyhow::anyhow!("empty session input"),
+            ));
         }
-        anyhow::ensure!(
-            output.status().state == runner_protocol::RetainedSessionState::Running,
-            "session is terminal"
-        );
-        anyhow::ensure!(!state.retained_error, "retained output reader failed");
+        let mut child = self.child.lock().await;
+        let exit = child
+            .try_wait()
+            .context("failed to check child status")
+            .map_err(|error| SessionInputFailure::new(SessionInputStage::ChildStatus, error))?;
+        let mut state = self.state.lock().await;
+        let output = state
+            .retained
+            .as_mut()
+            .context("not a retained session")
+            .map_err(|error| SessionInputFailure::new(SessionInputStage::NotRetained, error))?;
+        if let Some(exit) = exit {
+            output
+                .terminal(runner_protocol::RetainedSessionState::Exited, exit.code())
+                .map_err(|error| SessionInputFailure::new(SessionInputStage::Unknown, error))?;
+        }
+        if output.status().state != runner_protocol::RetainedSessionState::Running {
+            return Err(SessionInputFailure::new(
+                SessionInputStage::Terminal,
+                anyhow::anyhow!("session is terminal"),
+            ));
+        }
+        if state.retained_error {
+            return Err(SessionInputFailure::new(
+                SessionInputStage::ReaderFailed,
+                anyhow::anyhow!("retained output reader failed"),
+            ));
+        }
         state.last_activity = Instant::now();
         drop(state);
         drop(child);
         let mut writer = self.writer.lock().await;
-        write_input(self.id, &mut **writer, chars).await?;
+        write_input(self.id, &mut **writer, chars)
+            .await
+            .map_err(|failure| {
+                SessionInputFailure::new(failure.stage().into(), anyhow::Error::new(failure))
+            })?;
         Ok(())
     }
 
@@ -611,7 +703,9 @@ mod tests {
 
     use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-    use super::{InputFailureStage, is_input_failure, write_input};
+    use super::{
+        InputFailureStage, SessionInputFailure, SessionInputStage, is_input_failure, write_input,
+    };
 
     struct FailingWriter {
         fail_write: bool,
@@ -707,5 +801,79 @@ mod tests {
     #[test]
     fn non_input_failures_are_not_classified_as_input_failures() {
         assert!(!is_input_failure(&anyhow::anyhow!("unknown session_id 9")));
+    }
+
+    #[test]
+    fn session_input_stages_are_fixed_and_only_write_or_flush_attempted() {
+        for (stage, name, attempted) in [
+            (SessionInputStage::SessionLookup, "session_lookup", false),
+            (SessionInputStage::Empty, "empty", false),
+            (SessionInputStage::ChildStatus, "child_status", false),
+            (SessionInputStage::NotRetained, "not_retained", false),
+            (SessionInputStage::Terminal, "terminal", false),
+            (SessionInputStage::ReaderFailed, "reader_failed", false),
+            (SessionInputStage::Write, "write", true),
+            (SessionInputStage::Flush, "flush", true),
+            (SessionInputStage::Unknown, "unknown", false),
+        ] {
+            assert_eq!(stage.as_str(), name);
+            assert_eq!(stage.write_attempted(), attempted, "{name}");
+        }
+        assert_eq!(
+            SessionInputStage::from(InputFailureStage::Write),
+            SessionInputStage::Write
+        );
+        assert_eq!(
+            SessionInputStage::from(InputFailureStage::Flush),
+            SessionInputStage::Flush
+        );
+    }
+
+    #[tokio::test]
+    async fn typed_input_failure_keeps_the_original_error_and_stage() {
+        for fail_write in [true, false] {
+            let mut writer = FailingWriter {
+                fail_write,
+                fail_flush: !fail_write,
+            };
+            let failure = write_input(7, &mut writer, "sentinel-input")
+                .await
+                .expect_err("write must fail");
+            let original = format!("{:#}", anyhow::Error::new(failure));
+            let mut writer = FailingWriter {
+                fail_write,
+                fail_flush: !fail_write,
+            };
+            let failure = write_input(7, &mut writer, "sentinel-input")
+                .await
+                .expect_err("write must fail");
+            let stage = SessionInputStage::from(failure.stage());
+            let error = SessionInputFailure::new(stage, anyhow::Error::new(failure)).into_error();
+            assert_eq!(
+                stage,
+                if fail_write {
+                    SessionInputStage::Write
+                } else {
+                    SessionInputStage::Flush
+                }
+            );
+            assert!(stage.write_attempted());
+            assert_eq!(format!("{error:#}"), original);
+            assert!(format!("{error:#}").contains("session_id 7"));
+            assert!(!format!("{error:#}").contains("sentinel-input"));
+        }
+    }
+
+    #[test]
+    fn prewrite_failure_preserves_the_source_chain() {
+        let original = anyhow::Error::new(std::io::Error::other("sentinel-source"))
+            .context("failed to check child status");
+        let rendered = format!("{original:#}");
+        let failure = SessionInputFailure::new(SessionInputStage::ChildStatus, original);
+        assert_eq!(failure.stage(), SessionInputStage::ChildStatus);
+        assert!(!failure.stage().write_attempted());
+        let error = failure.into_error();
+        assert_eq!(format!("{error:#}"), rendered);
+        assert!(format!("{error:#}").contains("sentinel-source"));
     }
 }
