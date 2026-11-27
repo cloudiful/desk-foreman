@@ -22,9 +22,18 @@ use super::{
     RunnerBackend,
     backend::RunnerOperationLease,
     session_gate::{SessionGate, SessionPermit},
-    shell_session::{self, ShellSession},
+    shell_session::{self, SessionInputStage, ShellSession},
     shell_spawn::{build_command, build_pty_command, open_pty},
 };
+
+fn warn_session_input_failure(stage: SessionInputStage, started: Instant) {
+    tracing::warn!(
+        stage = stage.as_str(),
+        elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        write_attempted = stage.write_attempted(),
+        "workspace session input failed"
+    );
+}
 
 fn retained_identity_matches(
     retained: bool,
@@ -307,16 +316,32 @@ impl ShellManager {
     }
 
     pub async fn session_input(&self, request: SessionInputRequest) -> anyhow::Result<()> {
-        let managed = self
+        let started = Instant::now();
+        let managed = match self
             .retained_lookup(
                 &request.owner,
                 &request.session_key,
                 &request.execution_key,
                 request.session_id,
             )
-            .await?;
+            .await
+        {
+            Ok(managed) => managed,
+            Err(error) => {
+                warn_session_input_failure(SessionInputStage::SessionLookup, started);
+                return Err(error);
+            }
+        };
         self.runner.touch_activity(&request.owner);
-        managed.session.retained_input(&request.chars).await
+        match managed.session.retained_input(&request.chars).await {
+            Ok(()) => Ok(()),
+            Err(failure) => {
+                let stage = failure.stage();
+                let error = failure.into_error();
+                warn_session_input_failure(stage, started);
+                Err(error)
+            }
+        }
     }
 
     pub async fn session_cancel(
@@ -751,5 +776,135 @@ mod retained_lifecycle_tests {
             retained_evictions(256, vec![(1, recent)], now, true),
             vec![1]
         );
+    }
+}
+
+#[cfg(test)]
+mod session_input_diagnostics {
+    use std::{
+        collections::HashMap,
+        fmt,
+        sync::{Arc, Mutex},
+        time::Instant,
+    };
+
+    use tracing::{
+        Event, Metadata, Subscriber,
+        field::{Field, Visit},
+        span,
+    };
+
+    use super::{SessionInputStage, warn_session_input_failure};
+
+    #[derive(Clone, Default)]
+    struct Capture(Arc<Mutex<Vec<(String, String)>>>);
+
+    impl Capture {
+        fn fields(&self) -> HashMap<String, String> {
+            std::mem::take(&mut *self.0.lock().expect("capture lock"))
+                .into_iter()
+                .collect()
+        }
+    }
+
+    struct Visitor(Vec<(String, String)>);
+
+    impl Visit for Visitor {
+        fn record_str(&mut self, field: &Field, value: &str) {
+            self.0.push((field.name().to_owned(), value.to_owned()));
+        }
+
+        fn record_bool(&mut self, field: &Field, value: bool) {
+            self.0.push((field.name().to_owned(), value.to_string()));
+        }
+
+        fn record_u64(&mut self, field: &Field, value: u64) {
+            self.0.push((field.name().to_owned(), value.to_string()));
+        }
+
+        fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+            self.0.push((field.name().to_owned(), format!("{value:?}")));
+        }
+    }
+
+    impl Subscriber for Capture {
+        fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
+            true
+        }
+
+        fn new_span(&self, _span: &span::Attributes<'_>) -> span::Id {
+            span::Id::from_u64(1)
+        }
+
+        fn record(&self, _span: &span::Id, _values: &span::Record<'_>) {}
+
+        fn record_follows_from(&self, _span: &span::Id, _follows: &span::Id) {}
+
+        fn event(&self, event: &Event<'_>) {
+            let mut visitor = Visitor(Vec::new());
+            event.record(&mut visitor);
+            self.0.lock().expect("capture lock").extend(visitor.0);
+        }
+
+        fn enter(&self, _span: &span::Id) {}
+
+        fn exit(&self, _span: &span::Id) {}
+    }
+
+    fn capture(stage: SessionInputStage) -> HashMap<String, String> {
+        let capture = Capture::default();
+        tracing::subscriber::with_default(capture.clone(), || {
+            warn_session_input_failure(stage, Instant::now())
+        });
+        capture.fields()
+    }
+
+    #[test]
+    fn manager_event_reports_stage_and_write_attempted_only() {
+        for (stage, name, attempted) in [
+            (SessionInputStage::SessionLookup, "session_lookup", "false"),
+            (SessionInputStage::Empty, "empty", "false"),
+            (SessionInputStage::ChildStatus, "child_status", "false"),
+            (SessionInputStage::NotRetained, "not_retained", "false"),
+            (SessionInputStage::Terminal, "terminal", "false"),
+            (SessionInputStage::ReaderFailed, "reader_failed", "false"),
+            (SessionInputStage::Write, "write", "true"),
+            (SessionInputStage::Flush, "flush", "true"),
+            (SessionInputStage::Unknown, "unknown", "false"),
+        ] {
+            let fields = capture(stage);
+            assert_eq!(fields.get("stage").map(String::as_str), Some(name));
+            assert_eq!(
+                fields.get("write_attempted").map(String::as_str),
+                Some(attempted)
+            );
+            assert!(fields.contains_key("elapsed_ms"), "{fields:?}");
+            assert_eq!(
+                fields.get("message").map(String::as_str),
+                Some("workspace session input failed")
+            );
+            assert_eq!(fields.len(), 4, "{fields:?}");
+        }
+    }
+
+    #[test]
+    fn manager_event_cannot_carry_payload_or_identifier_sentinels() {
+        let fields = capture(SessionInputStage::Write);
+        let rendered = format!("{fields:?}");
+        for sentinel in [
+            "sentinel-session-id",
+            "sentinel-input",
+            "sentinel-execution",
+            "sentinel-principal",
+            "https://sentinel.example",
+        ] {
+            assert!(
+                !rendered.contains(sentinel),
+                "{sentinel} leaked: {rendered}"
+            );
+        }
+        for name in ["session_id", "execution_id", "chars", "principal", "error"] {
+            assert!(!fields.contains_key(name), "{name} leaked: {fields:?}");
+        }
     }
 }

@@ -12,6 +12,8 @@ use crate::{
         },
     },
 };
+use std::time::Instant;
+
 use base64::{
     Engine,
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
@@ -197,6 +199,55 @@ fn request(actor: &ActorContext, handle: &str, session_id: u64) -> SessionLookup
 }
 fn retryable() -> ToolError {
     ToolError::Internal(anyhow::anyhow!("runner temporarily unavailable"))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum InputStage {
+    Validation,
+    Lookup,
+    State,
+    SessionMissing,
+    FenceAdmit,
+    ManagerDispatch,
+    FenceCommit,
+}
+
+impl InputStage {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Validation => "validation",
+            Self::Lookup => "lookup",
+            Self::State => "state",
+            Self::SessionMissing => "session_missing",
+            Self::FenceAdmit => "fence_admit",
+            Self::ManagerDispatch => "manager_dispatch",
+            Self::FenceCommit => "fence_commit",
+        }
+    }
+
+    pub(super) fn dispatch_attempted(self) -> bool {
+        matches!(self, Self::ManagerDispatch | Self::FenceCommit)
+    }
+}
+
+struct InputFailure {
+    stage: InputStage,
+    error: ToolError,
+}
+
+impl InputFailure {
+    fn new(stage: InputStage, error: ToolError) -> Self {
+        Self { stage, error }
+    }
+}
+
+pub(super) fn warn_input_failure(stage: InputStage, started: Instant) {
+    tracing::warn!(
+        stage = stage.as_str(),
+        elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        dispatch_attempted = stage.dispatch_attempted(),
+        "workspace execution input failed"
+    );
 }
 
 fn missing(error: &anyhow::Error, session: u64) -> bool {
@@ -466,17 +517,47 @@ pub async fn input(
     handle: &str,
     chars: String,
 ) -> Result<(), ToolError> {
+    let started = Instant::now();
+    match input_stages(state, actor, handle, chars).await {
+        Ok(()) => Ok(()),
+        Err(failure) => {
+            warn_input_failure(failure.stage, started);
+            Err(failure.error)
+        }
+    }
+}
+
+async fn input_stages(
+    state: &AppState,
+    actor: &ActorContext,
+    handle: &str,
+    chars: String,
+) -> Result<(), InputFailure> {
     if chars.is_empty() {
-        return Err(ToolError::InvalidInput("empty session input".into()));
+        return Err(InputFailure::new(
+            InputStage::Validation,
+            ToolError::InvalidInput("empty session input".into()),
+        ));
     }
-    let gate = lookup(state, actor, handle)?.op_gate;
+    let gate = lookup(state, actor, handle)
+        .map_err(|error| InputFailure::new(InputStage::Lookup, error))?
+        .op_gate;
     let _guard = gate.lock().await;
-    let entry = lookup(state, actor, handle)?;
+    let entry = lookup(state, actor, handle)
+        .map_err(|error| InputFailure::new(InputStage::Lookup, error))?;
     if !matches!(entry.state, ExecutionState::Running) {
-        return Err(ToolError::Forbidden("execution is not running".into()));
+        return Err(InputFailure::new(
+            InputStage::State,
+            ToolError::Forbidden("execution is not running".into()),
+        ));
     }
-    let session = entry.session.ok_or_else(retryable)?;
-    let fence = admit_workspace_write(state, actor).await?;
+    let session = entry
+        .session
+        .ok_or_else(retryable)
+        .map_err(|error| InputFailure::new(InputStage::SessionMissing, error))?;
+    let fence = admit_workspace_write(state, actor)
+        .await
+        .map_err(|error| InputFailure::new(InputStage::FenceAdmit, error))?;
     let input_hash = sha256_hex(&chars);
     let input_bytes = chars.len();
     let mut dispatched = DispatchedWriteGuard {
@@ -498,8 +579,11 @@ pub async fn input(
             },
         )
         .await
-        .map_err(|_| retryable())?;
-    fence.commit().await?;
+        .map_err(|_| InputFailure::new(InputStage::ManagerDispatch, retryable()))?;
+    fence
+        .commit()
+        .await
+        .map_err(|error| InputFailure::new(InputStage::FenceCommit, error))?;
     dispatched.armed = false;
     spawn_tool_audit(
         state,
