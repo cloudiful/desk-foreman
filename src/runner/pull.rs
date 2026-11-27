@@ -27,6 +27,10 @@ use crate::{
 #[path = "principal_cleanup.rs"]
 mod principal_cleanup;
 
+#[cfg(test)]
+#[path = "pull_result_tests.rs"]
+mod pull_result_tests;
+
 struct QueuedJob {
     job: RunnerJob,
     target_manager_id: Option<i64>,
@@ -295,6 +299,7 @@ impl RunnerBroker {
             .expect("pending runner job checked above");
         let value = match (result.ok, result.result, result.error) {
             (true, Some(value), _) => Ok(value),
+            (true, None, None) => Ok(Value::Null),
             (false, _, Some(error)) => Err(anyhow::anyhow!(error)),
             _ => Err(anyhow::anyhow!(
                 "runner manager returned an invalid job result"
