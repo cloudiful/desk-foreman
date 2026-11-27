@@ -13,6 +13,10 @@ use axum::{
 
 use crate::AppState;
 
+pub use internal::workspace_tools::types::{
+    IdentityHeaders, StartFailure, StartGenericFailure, StartServiceUnavailable,
+};
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .merge(git_gateway::router())

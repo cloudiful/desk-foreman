@@ -1,9 +1,11 @@
 //! Manager validation and active-operation concurrency cases.
 
-use desk_foreman::db::queries::{EnqueueOutcome, enqueue_execution_environment_job};
+use desk_foreman::db::queries::{
+    EnqueueExecutionEnvironmentJob, EnqueueOutcome, enqueue_execution_environment_job,
+};
 
+use super::app_token::create_app_with_token;
 use super::fixtures::{count_jobs, create_environment, create_manager, future_deadline};
-use super::helpers::create_app_with_token;
 use super::support::JobDb;
 
 #[tokio::test]
@@ -15,13 +17,15 @@ async fn missing_or_disabled_manager_is_rejected() {
 
     let disabled_outcome = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        disabled,
-        "ensure",
-        0,
-        "disabled-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: disabled,
+            job_kind: "ensure",
+            target_generation: 0,
+            token: "disabled-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("disabled manager enqueue");
@@ -32,13 +36,15 @@ async fn missing_or_disabled_manager_is_rejected() {
 
     let missing_outcome = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        9_999_999,
-        "ensure",
-        0,
-        "missing-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: 9_999_999,
+            job_kind: "ensure",
+            target_generation: 0,
+            token: "missing-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("missing manager enqueue");
@@ -64,13 +70,15 @@ async fn concurrent_ensure_across_generations_creates_one_active_row() {
         handles.push(tokio::spawn(async move {
             enqueue_execution_environment_job(
                 &pool,
-                app,
-                env,
-                manager,
-                "ensure",
-                generation,
-                &format!("ensure-race-{generation}"),
-                future_deadline(),
+                EnqueueExecutionEnvironmentJob {
+                    application_id: app,
+                    environment_id: env,
+                    assigned_manager_id: manager,
+                    job_kind: "ensure",
+                    target_generation: generation,
+                    token: &format!("ensure-race-{generation}"),
+                    deadline_at: future_deadline(),
+                },
             )
             .await
         }));
@@ -111,13 +119,15 @@ async fn active_ensure_and_stop_records_coexist_but_each_kind_is_singular() {
 
     let ensure = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "ensure",
-        0,
-        "coexist-ensure",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 0,
+            token: "coexist-ensure",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("ensure");
@@ -125,13 +135,15 @@ async fn active_ensure_and_stop_records_coexist_but_each_kind_is_singular() {
 
     let stop = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "stop",
-        0,
-        "coexist-stop",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "stop",
+            target_generation: 0,
+            token: "coexist-stop",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("stop");
@@ -142,13 +154,15 @@ async fn active_ensure_and_stop_records_coexist_but_each_kind_is_singular() {
 
     let second_stop = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "stop",
-        1,
-        "coexist-stop-2",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "stop",
+            target_generation: 1,
+            token: "coexist-stop-2",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("second stop");

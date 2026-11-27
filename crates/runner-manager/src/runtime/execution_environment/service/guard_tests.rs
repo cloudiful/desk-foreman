@@ -7,7 +7,7 @@
 //! injectable uid source, not by chowning files to another account.
 
 #[cfg(test)]
-mod guard_tests {
+mod guard_cases {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
@@ -206,7 +206,7 @@ mod guard_tests {
         let cases: [(&str, u32, &str); 3] = [
             (&format!("{ENV_NAME}=abc\n"), 0o644, "permissive"),
             (&format!("{ENV_NAME}=abc\n"), CREDENTIAL_MODE, "right"),
-            (&"OTHER=abc\n", CREDENTIAL_MODE, "wrong name"),
+            ("OTHER=abc\n", CREDENTIAL_MODE, "wrong name"),
         ];
         for (contents, mode, _label) in cases {
             fs::write(&path, contents).expect("seed");

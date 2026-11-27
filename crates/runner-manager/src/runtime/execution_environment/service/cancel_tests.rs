@@ -5,7 +5,7 @@
 //! first poll, and that a repeated cancel wakes nothing twice.
 
 #[cfg(test)]
-mod cancel_tests {
+mod cancel_cases {
     use super::super::cancel::ServiceCancelRegistry;
 
     #[test]

@@ -5,7 +5,7 @@
 //! ever dialed, and that every other shape fails closed.
 
 #[cfg(test)]
-mod target_tests {
+mod target_cases {
     use super::super::target::private_agent_ip;
 
     fn inspect(networks: serde_json::Value) -> serde_json::Value {

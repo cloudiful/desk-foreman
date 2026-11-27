@@ -5,7 +5,8 @@
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use desk_foreman::db::queries::{
-    EnqueueOutcome, EnsureOutcome, enqueue_execution_environment_job, ensure_execution_environment,
+    EnqueueExecutionEnvironmentJob, EnqueueOutcome, EnsureOutcome,
+    enqueue_execution_environment_job, ensure_execution_environment,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -56,13 +57,15 @@ pub async fn seed_ensure(
 ) -> Uuid {
     match enqueue_execution_environment_job(
         pool,
-        application_id,
-        environment_id,
-        manager_id,
-        "ensure",
-        0,
-        token,
-        deadline,
+        EnqueueExecutionEnvironmentJob {
+            application_id,
+            environment_id,
+            assigned_manager_id: manager_id,
+            job_kind: "ensure",
+            target_generation: 0,
+            token,
+            deadline_at: deadline,
+        },
     )
     .await
     .expect("enqueue ensure")

@@ -1,16 +1,29 @@
 use std::path::{Path, PathBuf};
 
-pub(super) fn write_fake_docker(
-    dir: &Path,
-    log: &Path,
-    inspect: &Path,
-    stopped_inspect: &Path,
-    other_names: &Path,
-    mode: &Path,
-    marker: &Path,
-    barrier: &Path,
-    container_name: &str,
-) -> PathBuf {
+pub(super) struct FakeDocker<'a> {
+    pub(super) dir: &'a Path,
+    pub(super) log: &'a Path,
+    pub(super) inspect: &'a Path,
+    pub(super) stopped_inspect: &'a Path,
+    pub(super) other_names: &'a Path,
+    pub(super) mode: &'a Path,
+    pub(super) marker: &'a Path,
+    pub(super) barrier: &'a Path,
+    pub(super) container_name: &'a str,
+}
+
+pub(super) fn write_fake_docker(fake: FakeDocker<'_>) -> PathBuf {
+    let FakeDocker {
+        dir,
+        log,
+        inspect,
+        stopped_inspect,
+        other_names,
+        mode,
+        marker,
+        barrier,
+        container_name,
+    } = fake;
     let quote = |path: &Path| shell_quote(path.to_str().expect("utf-8 fake path"));
     let script = format!(
         "#!/bin/bash\necho \"$@\" >> {}\nmode=$(cat {})\ncheck_barrier() {{ if [ \"$mode\" = require-stop-barrier ] && ! grep -Eq '\"stopped_generation\":[1-9]' {}; then echo 'barrier missing' >&2; exit 1; fi; }}\ncase \"$1\" in\n  volume) exit 0 ;;\n  ps) check_barrier; cat {}; if [ -f {} ]; then echo {}; fi; exit 0 ;;\n  inspect) check_barrier; if [ \"$2\" = {} ] && [ -f {} ]; then cat {}; exit 0; fi; if [ \"$2\" != {} ] && grep -Fxq \"$2\" {}; then cat {}; exit 0; fi; echo 'Error: No such container' >&2; exit 1 ;;\n  run) if [ \"$mode\" = fail-run ]; then exit 1; fi; touch {}; if [ \"$mode\" = timeout-after-create ]; then sleep 1; fi; if [ \"$mode\" = slow-run ]; then sleep 0.3; fi; exit 0 ;;\n  exec) if [ \"$mode\" = fail-task-probe ] && [[ \"$@\" == *'/workspace'* ]]; then exit 1; fi; exit 0 ;;\n  stop) check_barrier; if [ \"$mode\" = stop-stuck ]; then exit 1; fi; cp {} {}; exit 0 ;;\n  rm) check_barrier; if [ \"$mode\" = stop-stuck ]; then exit 1; fi; rm -f {}; exit 0 ;;\n  *) exit 0 ;;\nesac\n",

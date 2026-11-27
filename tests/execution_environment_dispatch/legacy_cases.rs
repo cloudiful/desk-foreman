@@ -11,8 +11,10 @@ use serde_json::json;
 
 use desk_foreman::runner::{PullRunnerService, RunnerService};
 
-use super::helpers::test_state;
-use super::http::{http_get, http_post, spawn_http};
+use super::app_state::test_state;
+use super::http_get::http_get;
+use super::http_post::http_post;
+use super::http_server::spawn_http;
 use super::support::{DispatchDb, create_manager_with_token};
 
 const NEXT: &str = "/api/internal/runner-manager/jobs/next";

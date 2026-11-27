@@ -251,7 +251,7 @@ pub async fn acquire_binding_lease(
     )
     .await?
     {
-        crate::db::queries::PrincipalLeaseOutcome::Updated(binding) => Ok(binding),
+        crate::db::queries::PrincipalLeaseOutcome::Updated(binding) => Ok(*binding),
         crate::db::queries::PrincipalLeaseOutcome::NotFound => {
             Err(AppError::not_found("workspace binding not found"))
         }
@@ -293,7 +293,7 @@ pub async fn release_binding_lease(
     )
     .await?
     {
-        crate::db::queries::PrincipalLeaseOutcome::Updated(binding) => Ok(binding),
+        crate::db::queries::PrincipalLeaseOutcome::Updated(binding) => Ok(*binding),
         crate::db::queries::PrincipalLeaseOutcome::NotFound => {
             Err(AppError::not_found("workspace binding not found"))
         }

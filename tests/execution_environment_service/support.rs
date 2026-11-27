@@ -14,8 +14,9 @@ use sqlx::PgPool;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
-use super::helpers::{IsolatedDb, create_app_with_token};
-use super::http::spawn_http;
+use super::app_token::create_app_with_token;
+use super::http_server::spawn_http;
+use super::isolated_db::IsolatedDb;
 
 /// A raw HTTP response, kept as text so binary relay bodies survive.
 #[derive(Clone, Debug)]
@@ -120,17 +121,14 @@ pub async fn call(
 fn decode_chunked(raw: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut rest = raw;
-    loop {
-        let Some(line_end) = rest.windows(2).position(|window| window == b"\r\n") else {
-            break;
-        };
-        let size = match std::str::from_utf8(&rest[..line_end])
+    while let Some(line_end) = rest.windows(2).position(|window| window == b"\r\n") {
+        let Some(size) = std::str::from_utf8(&rest[..line_end])
             .ok()
             .and_then(|line| {
                 usize::from_str_radix(line.split(';').next().unwrap_or("").trim(), 16).ok()
-            }) {
-            Some(size) => size,
-            None => break,
+            })
+        else {
+            break;
         };
         let start = line_end + 2;
         if size == 0 {
@@ -252,7 +250,7 @@ impl ServiceFixture {
             "ready",
         )
         .await;
-        let state = super::helpers::test_state(database.pool.clone()).await;
+        let state = super::app_state::test_state(database.pool.clone()).await;
         let (base, _handle) = spawn_http(state).await;
         Self {
             database,

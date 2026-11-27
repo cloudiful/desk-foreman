@@ -546,89 +546,6 @@ fn retained_evictions(
     remove
 }
 
-#[cfg(test)]
-mod retained_lifecycle_tests {
-    #[test]
-    fn retained_lifecycle_restart_identity_does_not_alias() {
-        let principal = Some("principal".to_owned());
-        let execution = Some("execution-b".to_owned());
-        let owner = runner_protocol::RunnerOwner::InternalUser { user_id: 1 };
-        let other = runner_protocol::RunnerOwner::InternalUser { user_id: 2 };
-        assert!(super::retained_identity_matches(
-            true,
-            &owner,
-            &principal,
-            &execution,
-            &owner,
-            &principal,
-            "execution-b"
-        ));
-        assert!(!super::retained_identity_matches(
-            true,
-            &owner,
-            &principal,
-            &execution,
-            &owner,
-            &principal,
-            "execution-a"
-        ));
-        assert!(!super::retained_identity_matches(
-            true,
-            &owner,
-            &principal,
-            &execution,
-            &other,
-            &principal,
-            "execution-b"
-        ));
-        assert!(!super::retained_identity_matches(
-            false,
-            &owner,
-            &principal,
-            &execution,
-            &owner,
-            &principal,
-            "execution-b"
-        ));
-    }
-    use super::*;
-
-    #[test]
-    fn retained_lifecycle_read_expiry_boundary_protects_active() {
-        let now = Instant::now();
-        let before = now - Duration::from_secs(300) + Duration::from_nanos(1);
-        let boundary = now - Duration::from_secs(300);
-        assert_eq!(
-            retained_evictions(3, vec![(1, before), (2, boundary)], now, false),
-            vec![2]
-        );
-        assert!(retained_evictions(1, vec![], now, false).is_empty());
-    }
-
-    #[test]
-    fn retained_lifecycle_eviction_protects_active_and_orders_terminal() {
-        let now = Instant::now();
-        let old = now - Duration::from_secs(301);
-        let recent = now - Duration::from_secs(1);
-        assert_eq!(
-            retained_evictions(256, vec![(1, recent), (2, old)], now, true),
-            vec![2]
-        );
-        assert_eq!(
-            retained_evictions(256, vec![], now, true),
-            Vec::<u64>::new()
-        );
-        assert_eq!(
-            retained_evictions(256, vec![(1, recent)], now, false),
-            Vec::<u64>::new()
-        );
-        assert_eq!(
-            retained_evictions(256, vec![(1, recent)], now, true),
-            vec![1]
-        );
-    }
-}
-
 struct ManagedSession {
     owner: RunnerOwner,
     session_key: Option<String>,
@@ -751,5 +668,88 @@ impl ShellSession {
             Self::spawn_reader(Arc::clone(&session), stderr, true);
             Ok(session)
         }
+    }
+}
+
+#[cfg(test)]
+mod retained_lifecycle_tests {
+    #[test]
+    fn retained_lifecycle_restart_identity_does_not_alias() {
+        let principal = Some("principal".to_owned());
+        let execution = Some("execution-b".to_owned());
+        let owner = runner_protocol::RunnerOwner::InternalUser { user_id: 1 };
+        let other = runner_protocol::RunnerOwner::InternalUser { user_id: 2 };
+        assert!(super::retained_identity_matches(
+            true,
+            &owner,
+            &principal,
+            &execution,
+            &owner,
+            &principal,
+            "execution-b"
+        ));
+        assert!(!super::retained_identity_matches(
+            true,
+            &owner,
+            &principal,
+            &execution,
+            &owner,
+            &principal,
+            "execution-a"
+        ));
+        assert!(!super::retained_identity_matches(
+            true,
+            &owner,
+            &principal,
+            &execution,
+            &other,
+            &principal,
+            "execution-b"
+        ));
+        assert!(!super::retained_identity_matches(
+            false,
+            &owner,
+            &principal,
+            &execution,
+            &owner,
+            &principal,
+            "execution-b"
+        ));
+    }
+    use super::*;
+
+    #[test]
+    fn retained_lifecycle_read_expiry_boundary_protects_active() {
+        let now = Instant::now();
+        let before = now - Duration::from_secs(300) + Duration::from_nanos(1);
+        let boundary = now - Duration::from_secs(300);
+        assert_eq!(
+            retained_evictions(3, vec![(1, before), (2, boundary)], now, false),
+            vec![2]
+        );
+        assert!(retained_evictions(1, vec![], now, false).is_empty());
+    }
+
+    #[test]
+    fn retained_lifecycle_eviction_protects_active_and_orders_terminal() {
+        let now = Instant::now();
+        let old = now - Duration::from_secs(301);
+        let recent = now - Duration::from_secs(1);
+        assert_eq!(
+            retained_evictions(256, vec![(1, recent), (2, old)], now, true),
+            vec![2]
+        );
+        assert_eq!(
+            retained_evictions(256, vec![], now, true),
+            Vec::<u64>::new()
+        );
+        assert_eq!(
+            retained_evictions(256, vec![(1, recent)], now, false),
+            Vec::<u64>::new()
+        );
+        assert_eq!(
+            retained_evictions(256, vec![(1, recent)], now, true),
+            vec![1]
+        );
     }
 }

@@ -7,8 +7,11 @@
 //! `DF_ENV_TEST_DATABASE_URL`, reusing the execution-environment harness
 //! through `#[path]`.
 
-#[path = "execution_environments/helpers.rs"]
-mod helpers;
+#[path = "execution_environments/test_database_url.rs"]
+mod test_database_url;
+
+#[path = "execution_environments/app_token.rs"]
+mod app_token;
 
 #[path = "execution_environment_jobs/support.rs"]
 mod support;

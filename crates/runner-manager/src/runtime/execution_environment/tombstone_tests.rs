@@ -5,7 +5,7 @@
 //! No Docker and no live daemon.
 
 #[cfg(test)]
-mod tombstone_tests {
+mod tombstone_cases {
     use std::path::Path;
 
     use super::super::test_support as support;

@@ -1,13 +1,16 @@
 //! Pull (claim) cases for durable assigned-manager jobs (issue 742 P2).
 
 use desk_foreman::db::queries::{
-    CompleteOutcome, claim_execution_environment_job, complete_execution_environment_job,
+    CompleteExecutionEnvironmentJob, CompleteOutcome, claim_execution_environment_job,
+    complete_execution_environment_job,
 };
 
-use super::helpers::{create_app_with_token, test_state};
-use super::http::{http_get, spawn_http};
+use super::app_state::test_state;
+use super::app_token::create_app_with_token;
+use super::http_get::http_get;
+use super::http_server::spawn_http;
 use super::support::{
-    DispatchDb, create_environment, create_manager_with_token, future_deadline, job_state,
+    DispatchDb, SeedJob, create_environment, create_manager_with_token, future_deadline, job_state,
     past_deadline, seed_job,
 };
 
@@ -22,13 +25,15 @@ async fn assigned_manager_pulls_and_other_manager_cannot() {
     let env = create_environment(&db.pool, app, "pull-user").await;
     let job_id = seed_job(
         &db.pool,
-        app,
-        env,
-        manager_a,
-        "ensure",
-        2,
-        "pull-token",
-        future_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: env,
+            manager_id: manager_a,
+            kind: "ensure",
+            generation: 2,
+            token: "pull-token",
+            deadline: future_deadline(),
+        },
     )
     .await;
 
@@ -75,13 +80,15 @@ async fn concurrent_polls_claim_the_job_once() {
     let env = create_environment(&db.pool, app, "race-user").await;
     let job_id = seed_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "ensure",
-        0,
-        "race-token",
-        future_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: env,
+            manager_id: manager,
+            kind: "ensure",
+            generation: 0,
+            token: "race-token",
+            deadline: future_deadline(),
+        },
     )
     .await;
 
@@ -124,26 +131,30 @@ async fn expired_claimed_and_uncertain_rows_are_never_pulled() {
     let expired_env = create_environment(&db.pool, app, "skip-expired").await;
     let expired = seed_job(
         &db.pool,
-        app,
-        expired_env,
-        manager,
-        "ensure",
-        0,
-        "skip-expired-token",
-        past_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: expired_env,
+            manager_id: manager,
+            kind: "ensure",
+            generation: 0,
+            token: "skip-expired-token",
+            deadline: past_deadline(),
+        },
     )
     .await;
 
     let claimed_env = create_environment(&db.pool, app, "skip-claimed").await;
     let claimed = seed_job(
         &db.pool,
-        app,
-        claimed_env,
-        manager,
-        "ensure",
-        0,
-        "skip-claimed-token",
-        future_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: claimed_env,
+            manager_id: manager,
+            kind: "ensure",
+            generation: 0,
+            token: "skip-claimed-token",
+            deadline: future_deadline(),
+        },
     )
     .await;
     claim_execution_environment_job(
@@ -160,13 +171,15 @@ async fn expired_claimed_and_uncertain_rows_are_never_pulled() {
     let uncertain_env = create_environment(&db.pool, app, "skip-uncertain").await;
     let uncertain = seed_job(
         &db.pool,
-        app,
-        uncertain_env,
-        manager,
-        "ensure",
-        0,
-        "skip-uncertain-token",
-        future_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: uncertain_env,
+            manager_id: manager,
+            kind: "ensure",
+            generation: 0,
+            token: "skip-uncertain-token",
+            deadline: future_deadline(),
+        },
     )
     .await;
     claim_execution_environment_job(
@@ -182,14 +195,16 @@ async fn expired_claimed_and_uncertain_rows_are_never_pulled() {
     match complete_execution_environment_job(
         &db.pool,
         &db.task_runtime,
-        app,
-        uncertain_env,
-        "skip-uncertain-token",
-        uncertain,
-        manager,
-        "uncertain",
-        None,
-        Some("transport stalled"),
+        CompleteExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: uncertain_env,
+            token: "skip-uncertain-token",
+            job_id: uncertain,
+            manager_id: manager,
+            state: "uncertain",
+            result: None,
+            error_summary: Some("transport stalled"),
+        },
     )
     .await
     .expect("complete uncertain")
@@ -201,13 +216,15 @@ async fn expired_claimed_and_uncertain_rows_are_never_pulled() {
     let ready_env = create_environment(&db.pool, app, "skip-ready").await;
     let ready = seed_job(
         &db.pool,
-        app,
-        ready_env,
-        manager,
-        "ensure",
-        0,
-        "skip-ready-token",
-        future_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: ready_env,
+            manager_id: manager,
+            kind: "ensure",
+            generation: 0,
+            token: "skip-ready-token",
+            deadline: future_deadline(),
+        },
     )
     .await;
 

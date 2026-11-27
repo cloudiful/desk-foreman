@@ -121,7 +121,7 @@ impl ShellSession {
     pub(super) fn new(
         id: u64,
         writer: Box<dyn AsyncWrite + Send + Unpin>,
-        mut child: Child,
+        child: Child,
         max_output_bytes: usize,
         output_is_combined: bool,
         retain_output: bool,

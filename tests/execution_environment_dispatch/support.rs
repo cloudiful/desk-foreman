@@ -11,13 +11,15 @@ use std::time::Duration;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use desk_foreman::db::task_runtime::TaskRuntime;
 use desk_foreman::db::{
-    queries::{EnqueueOutcome, EnsureOutcome, ensure_execution_environment},
+    queries::{
+        EnqueueExecutionEnvironmentJob, EnqueueOutcome, EnsureOutcome, ensure_execution_environment,
+    },
     types::CreateRunnerManagerRequest,
 };
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
-use super::helpers::test_database_url;
+use super::test_database_url::test_database_url;
 
 fn replace_database_name(base_url: &str, db_name: &str) -> String {
     let (prefix, suffix) = match base_url.rfind('?') {
@@ -132,26 +134,30 @@ pub async fn create_environment(pool: &PgPool, application_id: i64, identity: &s
     }
 }
 
+/// One durable job to seed for a dispatch case.
+pub struct SeedJob<'a> {
+    pub application_id: i64,
+    pub environment_id: Uuid,
+    pub manager_id: i64,
+    pub kind: &'a str,
+    pub generation: i64,
+    pub token: &'a str,
+    pub deadline: DateTime<Utc>,
+}
+
 /// Enqueue one durable job and return its stable row UUID.
-pub async fn seed_job(
-    pool: &PgPool,
-    application_id: i64,
-    environment_id: Uuid,
-    manager_id: i64,
-    kind: &str,
-    generation: i64,
-    token: &str,
-    deadline: DateTime<Utc>,
-) -> Uuid {
+pub async fn seed_job(pool: &PgPool, job: SeedJob<'_>) -> Uuid {
     match desk_foreman::db::queries::enqueue_execution_environment_job(
         pool,
-        application_id,
-        environment_id,
-        manager_id,
-        kind,
-        generation,
-        token,
-        deadline,
+        EnqueueExecutionEnvironmentJob {
+            application_id: job.application_id,
+            environment_id: job.environment_id,
+            assigned_manager_id: job.manager_id,
+            job_kind: job.kind,
+            target_generation: job.generation,
+            token: job.token,
+            deadline_at: job.deadline,
+        },
     )
     .await
     .expect("enqueue environment job")

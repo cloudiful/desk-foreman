@@ -110,13 +110,15 @@ async fn serve_service_request(
     relay_service_request(
         state.runner_broker.service_relay(),
         &state.db,
-        application_id,
-        environment_id,
-        presented_generation,
-        scope_auth.as_ref(),
-        method.as_str(),
-        bounds,
-        body,
+        super::relay::RelayServiceRequest {
+            application_id,
+            environment_id,
+            presented_generation,
+            scope_auth: scope_auth.as_ref(),
+            method: method.as_str(),
+            bounds,
+            body,
+        },
     )
     .await
 }

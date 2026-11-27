@@ -91,7 +91,7 @@ pub(crate) async fn send_to_agent(
     body: Vec<u8>,
     cancel: &watch::Receiver<bool>,
 ) -> Result<AgentReply, AgentError> {
-    send_to_agent_with_limits(
+    send_to_agent_with_limits(AgentSendRequest {
         admitted,
         method,
         path,
@@ -99,9 +99,20 @@ pub(crate) async fn send_to_agent(
         allowed_headers,
         body,
         cancel,
-        &PROD_LIMITS,
-    )
+        limits: &PROD_LIMITS,
+    })
     .await
+}
+
+pub(crate) struct AgentSendRequest<'a> {
+    pub(crate) admitted: &'a AdmittedService,
+    pub(crate) method: &'a str,
+    pub(crate) path: &'a str,
+    pub(crate) query: Option<&'a str>,
+    pub(crate) allowed_headers: &'a [String],
+    pub(crate) body: Vec<u8>,
+    pub(crate) cancel: &'a watch::Receiver<bool>,
+    pub(crate) limits: &'a HttpLimits,
 }
 
 /// [`send_to_agent`] with caller-supplied bounds.
@@ -109,15 +120,18 @@ pub(crate) async fn send_to_agent(
 /// Test-only entry in practice: fast timeout and overflow tests inject tiny
 /// limits here while production always passes [`PROD_LIMITS`].
 pub(crate) async fn send_to_agent_with_limits(
-    admitted: &AdmittedService,
-    method: &str,
-    path: &str,
-    query: Option<&str>,
-    allowed_headers: &[String],
-    body: Vec<u8>,
-    cancel: &watch::Receiver<bool>,
-    limits: &HttpLimits,
+    request: AgentSendRequest<'_>,
 ) -> Result<AgentReply, AgentError> {
+    let AgentSendRequest {
+        admitted,
+        method,
+        path,
+        query,
+        allowed_headers,
+        body,
+        cancel,
+        limits,
+    } = request;
     // Owned copies: the streamed body outlives this call, so the async
     // body must not borrow the caller's limits.
     let HttpLimits {

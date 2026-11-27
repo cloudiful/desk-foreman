@@ -95,19 +95,35 @@ pub(super) async fn find_export_by_job(
     .await?)
 }
 
+pub(super) struct InsertExport<'a> {
+    pub(super) job_id: Uuid,
+    pub(super) task_id: Uuid,
+    pub(super) environment_id: Uuid,
+    pub(super) application_id: i64,
+    pub(super) workspace_binding_id: i64,
+    pub(super) manager_id: i64,
+    pub(super) candidate_generation: i64,
+    pub(super) stop_job_id: Uuid,
+    pub(super) selection_sha256: &'a str,
+    pub(super) file_count: u32,
+}
+
 pub(super) async fn insert_export(
     tx: &mut Transaction<'_, Postgres>,
-    job_id: Uuid,
-    task_id: Uuid,
-    environment_id: Uuid,
-    application_id: i64,
-    workspace_binding_id: i64,
-    manager_id: i64,
-    candidate_generation: i64,
-    stop_job_id: Uuid,
-    selection_sha256: &str,
-    file_count: u32,
+    export: InsertExport<'_>,
 ) -> anyhow::Result<Option<TaskExportHeader>> {
+    let InsertExport {
+        job_id,
+        task_id,
+        environment_id,
+        application_id,
+        workspace_binding_id,
+        manager_id,
+        candidate_generation,
+        stop_job_id,
+        selection_sha256,
+        file_count,
+    } = export;
     Ok(sqlx::query_file_as!(
         TaskExportHeader,
         "src/sql/execution_environments/tasks/exports/insert_export.sql",

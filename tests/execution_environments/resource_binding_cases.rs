@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use desk_foreman::db::{execution_environments::find_native_task, queries};
 
-use super::http::http_post;
+use super::http_post::http_post;
 use super::resource_binding_fixtures::{
     BindingFixture, RESOURCE_MARKER, assert_lease_free, instant,
 };
@@ -180,7 +180,7 @@ async fn archived_binding_is_rejected_and_never_resurrected() {
 
     let stored = fixture.row(binding_id).await;
     assert_eq!(stored.lifecycle_state, "archived");
-    assert_eq!(stored.is_active, false);
+    assert!(!stored.is_active);
     assert_lease_free(&stored);
 
     fixture.teardown().await;

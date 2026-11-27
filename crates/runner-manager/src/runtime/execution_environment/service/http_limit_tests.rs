@@ -6,14 +6,16 @@
 //! always passes the fixed bounds recorded below.
 
 #[cfg(test)]
-mod http_limit_tests {
+mod http_limit_cases {
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::Duration;
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::watch;
 
-    use super::super::http::{AgentError, HttpLimits, PROD_LIMITS, send_to_agent_with_limits};
+    use super::super::http::{
+        AgentError, AgentSendRequest, HttpLimits, PROD_LIMITS, send_to_agent_with_limits,
+    };
     use super::super::relay::AdmittedService;
 
     fn limits() -> HttpLimits {
@@ -97,16 +99,16 @@ mod http_limit_tests {
         let admitted = admitted(port, cancel);
         let started = std::time::Instant::now();
         assert_eq!(
-            send_to_agent_with_limits(
-                &admitted,
-                "GET",
-                "v1/models",
-                None,
-                &[],
-                Vec::new(),
-                &admitted.cancel,
-                &limits(),
-            )
+            send_to_agent_with_limits(AgentSendRequest {
+                admitted: &admitted,
+                method: "GET",
+                path: "v1/models",
+                query: None,
+                allowed_headers: &[],
+                body: Vec::new(),
+                cancel: &admitted.cancel,
+                limits: &limits(),
+            },)
             .await
             .err(),
             Some(AgentError::Timeout)
@@ -123,16 +125,16 @@ mod http_limit_tests {
         let (port, agent) = stalling_agent("drip").await;
         let (_cancel_tx, cancel) = watch::channel(false);
         let admitted = admitted(port, cancel);
-        let reply = send_to_agent_with_limits(
-            &admitted,
-            "GET",
-            "v1/stream",
-            None,
-            &[],
-            Vec::new(),
-            &admitted.cancel,
-            &limits(),
-        )
+        let reply = send_to_agent_with_limits(AgentSendRequest {
+            admitted: &admitted,
+            method: "GET",
+            path: "v1/stream",
+            query: None,
+            allowed_headers: &[],
+            body: Vec::new(),
+            cancel: &admitted.cancel,
+            limits: &limits(),
+        })
         .await
         .expect("the head arrives before the stall");
         let mut body = reply.body;
@@ -149,16 +151,16 @@ mod http_limit_tests {
         let (port, agent) = stalling_agent("flood").await;
         let (_cancel_tx, cancel) = watch::channel(false);
         let admitted = admitted(port, cancel);
-        let reply = send_to_agent_with_limits(
-            &admitted,
-            "GET",
-            "v1/blob",
-            None,
-            &[],
-            Vec::new(),
-            &admitted.cancel,
-            &limits(),
-        )
+        let reply = send_to_agent_with_limits(AgentSendRequest {
+            admitted: &admitted,
+            method: "GET",
+            path: "v1/blob",
+            query: None,
+            allowed_headers: &[],
+            body: Vec::new(),
+            cancel: &admitted.cancel,
+            limits: &limits(),
+        })
         .await
         .expect("the head arrives before the flood");
         let mut body = reply.body;

@@ -146,9 +146,7 @@ pub(crate) async fn forward(
     let deadline = Instant::now() + config.stream_timeout;
     let upstream = response
         .bytes_stream()
-        .map(|item| {
-            item.map_err(|_| io::Error::new(io::ErrorKind::Other, "upstream stream failed"))
-        })
+        .map(|item| item.map_err(|_| io::Error::other("upstream stream failed")))
         .take_until(sleep_until(deadline));
     builder
         .body(Body::from_stream(counted_response_stream(
@@ -187,7 +185,7 @@ fn forwarded_response_headers(headers: &HeaderMap) -> Vec<(HeaderName, HeaderVal
 fn counted_request_body(body: Body, max: usize) -> reqwest::Body {
     let stream = body
         .into_data_stream()
-        .map(|item| item.map_err(|_| io::Error::new(io::ErrorKind::Other, "request body failed")));
+        .map(|item| item.map_err(|_| io::Error::other("request body failed")));
     let counted = stream::unfold(
         (Box::pin(stream), 0usize),
         move |(mut inner, seen)| async move {
@@ -197,10 +195,7 @@ fn counted_request_body(body: Body, max: usize) -> reqwest::Body {
                     let next = seen.saturating_add(bytes.len());
                     if next > max {
                         Some((
-                            Err(io::Error::new(
-                                io::ErrorKind::Other,
-                                "request body too large",
-                            )),
+                            Err(io::Error::other("request body too large")),
                             (inner, next),
                         ))
                     } else {
@@ -230,10 +225,7 @@ where
                     let next = seen.saturating_add(bytes.len());
                     if next > max {
                         Some((
-                            Err(io::Error::new(
-                                io::ErrorKind::Other,
-                                "response body too large",
-                            )),
+                            Err(io::Error::other("response body too large")),
                             (inner, next),
                         ))
                     } else {

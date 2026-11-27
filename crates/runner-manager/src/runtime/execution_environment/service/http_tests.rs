@@ -6,7 +6,7 @@
 //! private addresses, which never include loopback.
 
 #[cfg(test)]
-mod http_tests {
+mod http_cases {
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};

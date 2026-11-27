@@ -21,6 +21,7 @@ cloudiful-secret-crypto = { git = "https://forgejo.cloud1ful.com/crates/secret-c
 axum = { version = "0.8.9", features = ["http1", "json", "tokio", "tracing", "ws"] }
 axum-extra = { version = "0.12.6", features = ["cookie"] }
 chrono = { version = "0.4.45", features = ["serde"] }
+constant_time_eq = "0.6.2"
 futures-util = "0.3.34"
 pty-process = { version = "0.5.4", features = ["async"] }
 rand = "0.10.3"
@@ -90,3 +91,4 @@ uuid.workspace = true
 validator.workspace = true
 runner-protocol.workspace = true
 desk-foreman-workspace-sdk.workspace = true
+constant_time_eq.workspace = true

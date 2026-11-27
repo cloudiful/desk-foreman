@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use runner_protocol::RunnerOwner;
 
-use super::http::http_get;
+use super::http_get::http_get;
 
 pub(super) const NEXT: &str = "/api/internal/runner-manager/jobs/next";
 pub(super) const RESULT: &str = "/api/internal/runner-manager/jobs/result";

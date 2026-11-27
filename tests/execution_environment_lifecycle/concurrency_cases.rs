@@ -1,8 +1,9 @@
 //! Concurrency cases (issue 742 P3): concurrent admitted intents leave exactly
 //! one durable operation and monotonic counters.
 
-use super::helpers::{create_app_with_token, test_state};
-use super::http::spawn_http;
+use super::app_state::test_state;
+use super::app_token::create_app_with_token;
+use super::http_server::spawn_http;
 use super::requests::{provision, replace, status, stop, wire_job_id};
 use super::support::{
     LifecycleDb, bring_manager_online, create_environment, create_manager, ensure_ack, poll_job,

@@ -15,8 +15,9 @@
 //! repaired behavior, the repeated multi-cycle loop, and the per-candidate
 //! in-flight/replay guards the repair must not weaken.
 
-use super::helpers::{create_app_with_token, test_state};
-use super::http::spawn_http;
+use super::app_state::test_state;
+use super::app_token::create_app_with_token;
+use super::http_server::spawn_http;
 use super::requests::{provision, replace, status, stop, wire_job_id};
 use super::support::{
     LifecycleDb, bring_manager_online, create_environment, create_manager, ensure_ack, poll_job,
@@ -149,7 +150,7 @@ async fn replacement_cycle_repeats_after_a_second_confirmed_stop() {
     let (code, desc) = stop(&base, &app_token, env, 1, "rv-cycle-stop-2").await;
     assert_eq!(code, 200, "second stop must be admitted: {desc}");
     let stop_job = desc["operation"]["job_id"].as_str().unwrap().to_string();
-    let job = poll_job(&base, &mgr_token).await;
+    poll_job(&base, &mgr_token).await;
     report_ok(
         &base,
         &mgr_token,
@@ -212,7 +213,7 @@ async fn current_candidate_stop_guards_survive_the_repair() {
         "an in-flight stop must refuse a second intent: {body}"
     );
 
-    let job = poll_job(&base, &mgr_token).await;
+    poll_job(&base, &mgr_token).await;
     report_ok(
         &base,
         &mgr_token,

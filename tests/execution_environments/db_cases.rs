@@ -9,7 +9,8 @@ use desk_foreman::db::queries::{
     invalidate_execution_environment,
 };
 
-use super::helpers::{IsolatedDb, create_app_with_token};
+use super::app_token::create_app_with_token;
+use super::isolated_db::IsolatedDb;
 
 #[tokio::test]
 async fn ensure_is_idempotent_for_repeated_calls() {

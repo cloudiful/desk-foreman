@@ -113,18 +113,34 @@ pub(crate) fn ensure_native_task_labels_match(
 /// directory derived for the requested task's workspace binding, so a
 /// container created against another binding, against a previous shared-root
 /// checkout, or against an unexpected path is refused instead of reused.
+pub(crate) struct NativeTaskContainerExpectation<'a> {
+    pub(crate) info: &'a EnvContainerInfo,
+    pub(crate) owner: &'a RunnerOwner,
+    pub(crate) manager_id: &'a str,
+    pub(crate) expected_image: &'a str,
+    pub(crate) task: &'a NativeTaskRuntimeIdentity,
+    pub(crate) state_volume: &'a str,
+    pub(crate) state_mount_target: &'a str,
+    pub(crate) task_source: &'a Path,
+    pub(crate) uid: u32,
+    pub(crate) gid: u32,
+}
+
 pub(crate) fn ensure_native_task_container_matches(
-    info: &EnvContainerInfo,
-    owner: &RunnerOwner,
-    manager_id: &str,
-    expected_image: &str,
-    task: &NativeTaskRuntimeIdentity,
-    state_volume: &str,
-    state_mount_target: &str,
-    task_source: &Path,
-    uid: u32,
-    gid: u32,
+    expected: NativeTaskContainerExpectation<'_>,
 ) -> anyhow::Result<()> {
+    let NativeTaskContainerExpectation {
+        info,
+        owner,
+        manager_id,
+        expected_image,
+        task,
+        state_volume,
+        state_mount_target,
+        task_source,
+        uid,
+        gid,
+    } = expected;
     ensure_native_task_labels_match(info, owner, manager_id, task)?;
     let expected_directory = native_task_workspace_directory(task.workspace_binding_id);
     if info.image.as_deref() != Some(expected_image)

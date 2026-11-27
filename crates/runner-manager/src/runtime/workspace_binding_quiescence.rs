@@ -121,32 +121,30 @@ impl DockerRunnerBackend {
             };
             let canonical_target = target_owner.container_name();
 
-            if let Some(expected_own) = expected_own {
-                if metadata.owner_key.as_deref() == Some(expected_own.owner.stable_key().as_str()) {
-                    let exact = name == expected_own.name
-                        && metadata.container_id.as_deref()
-                            == Some(expected_own.container_id.as_str())
-                        && metadata.matches_owner(
-                            &expected_own.owner,
-                            &expected_own.name,
-                            &self.manager_id,
-                        );
-                    if exact {
-                        continue;
-                    }
-                    bail!("expected own service container identity does not match");
+            if let Some(expected_own) = expected_own
+                && metadata.owner_key.as_deref() == Some(expected_own.owner.stable_key().as_str())
+            {
+                let exact = name == expected_own.name
+                    && metadata.container_id.as_deref() == Some(expected_own.container_id.as_str())
+                    && metadata.matches_owner(
+                        &expected_own.owner,
+                        &expected_own.name,
+                        &self.manager_id,
+                    );
+                if exact {
+                    continue;
                 }
+                bail!("expected own service container identity does not match");
             }
 
             if name == canonical_target && parsed_owner.as_ref() != Some(&target_owner) {
                 bail!("workspace binding container identity is unverifiable");
             }
-            if let Some(named) = &named_owner {
-                if named.workspace_binding_id() == Some(workspace_binding_id)
-                    && parsed_owner.as_ref() != Some(named)
-                {
-                    bail!("workspace binding container identity is unverifiable");
-                }
+            if let Some(named) = &named_owner
+                && named.workspace_binding_id() == Some(workspace_binding_id)
+                && parsed_owner.as_ref() != Some(named)
+            {
+                bail!("workspace binding container identity is unverifiable");
             }
 
             let candidate_owner = parsed_owner.filter(|owner| {

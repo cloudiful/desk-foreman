@@ -5,7 +5,7 @@
 //! inconsistent shape.
 
 #[cfg(test)]
-mod resolution_tests {
+mod resolution_cases {
     use chrono::Utc;
     use runner_protocol::{
         EnsureExecutionEnvironmentAck, RunnerJobResult, RunnerOwner, StopExecutionEnvironmentAck,

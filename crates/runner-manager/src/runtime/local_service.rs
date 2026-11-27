@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use desk_foreman::runner::{RunnerFuture, RunnerService, WorkspaceActivity};
 use runner_protocol::{
@@ -30,7 +29,6 @@ mod workspace_scope_prepare_tests;
 pub struct LocalRunnerService {
     backend: Arc<dyn RunnerBackend>,
     shell: Arc<ShellManager>,
-    config: SharedRunnerManagerConfig,
     fences: OwnerFences,
     binding_fences: OwnerFences,
 }
@@ -41,7 +39,6 @@ impl LocalRunnerService {
         Arc::new(Self {
             backend,
             shell,
-            config,
             fences: OwnerFences::default(),
             binding_fences: OwnerFences::default(),
         })

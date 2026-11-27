@@ -83,17 +83,17 @@ impl FakeDocker {
         );
         std::fs::write(&inspect_path, running.to_string()).expect("running inspect data");
         std::fs::write(&stopped_inspect_path, exited.to_string()).expect("stopped inspect data");
-        let script = fake_docker_script(
-            &log_path,
-            &mode_path,
-            &inspect_path,
-            &stopped_inspect_path,
-            &other_names_path,
-            &marker_path,
-            &barrier_path,
-            &container_name,
-            &native_task_workspace_directory(identity.workspace_binding_id),
-        );
+        let script = fake_docker_script(FakeDockerTaskScript {
+            log: &log_path,
+            mode: &mode_path,
+            inspect: &inspect_path,
+            stopped_inspect: &stopped_inspect_path,
+            other_names: &other_names_path,
+            marker: &marker_path,
+            barrier: &barrier_path,
+            container_name: &container_name,
+            task_probe_workdir: &native_task_workspace_directory(identity.workspace_binding_id),
+        });
         write_executable(dir, "docker-task-fake", &script);
         Self {
             log_path,
@@ -285,17 +285,30 @@ impl ManagerRig {
     }
 }
 
-fn fake_docker_script(
-    log: &Path,
-    mode: &Path,
-    inspect: &Path,
-    stopped_inspect: &Path,
-    other_names: &Path,
-    marker: &Path,
-    barrier: &Path,
-    container_name: &str,
-    task_probe_workdir: &str,
-) -> String {
+struct FakeDockerTaskScript<'a> {
+    log: &'a Path,
+    mode: &'a Path,
+    inspect: &'a Path,
+    stopped_inspect: &'a Path,
+    other_names: &'a Path,
+    marker: &'a Path,
+    barrier: &'a Path,
+    container_name: &'a str,
+    task_probe_workdir: &'a str,
+}
+
+fn fake_docker_script(script: FakeDockerTaskScript<'_>) -> String {
+    let FakeDockerTaskScript {
+        log,
+        mode,
+        inspect,
+        stopped_inspect,
+        other_names,
+        marker,
+        barrier,
+        container_name,
+        task_probe_workdir,
+    } = script;
     let quote = |path: &Path| shell_quote(path.to_str().expect("UTF-8 test path"));
     format!(
         "#!/bin/bash\necho \"$@\" >> {}\nmode=$(cat {})\ncheck_barrier() {{ if [ \"$mode\" = require-stop-barrier ] && ! grep -Eq '\"stopped_generation\":[1-9]' {}; then echo 'missing stop barrier' >&2; exit 1; fi; }}\ncase \"$1\" in\n  volume) exit 0 ;;\n  ps) check_barrier; cat {}; if [ -f {} ]; then echo {}; fi; exit 0 ;;\n  inspect) check_barrier; if [ \"$2\" = {} ] && [ -f {} ]; then cat {}; exit 0; fi; if [ \"$2\" != {} ] && grep -Fxq \"$2\" {}; then cat {}; exit 0; fi; echo 'Error: No such container' >&2; exit 1 ;;\n  run) if [ \"$mode\" = fail-run ]; then exit 1; fi; touch {}; exit 0 ;;\n  exec) if [ \"$mode\" = fail-task-probe ] && [[ \"$*\" == *\"--workdir {}\"* ]]; then exit 1; fi; exit 0 ;;\n  stop) check_barrier; if [ \"$mode\" = stop-stuck ]; then exit 1; fi; cp {} {}; exit 0 ;;\n  rm) check_barrier; if [ \"$mode\" = stop-stuck ]; then exit 1; fi; rm -f {}; exit 0 ;;\n  *) exit 0 ;;\nesac\n",

@@ -116,13 +116,7 @@ async fn run_kill_binary(program: &str, args: &[String]) -> anyhow::Result<()> {
     let status = timeout(GROUP_KILL_TIMEOUT, cmd.status())
         .await
         .context("timed out invoking kill for process group")?
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                anyhow::anyhow!("failed to spawn kill {program}: {error}")
-            } else {
-                anyhow::anyhow!("failed to spawn kill {program}: {error}")
-            }
-        })?;
+        .map_err(|error| anyhow::anyhow!("failed to spawn kill {program}: {error}"))?;
     // Exit 0: signalled. Exit 1 from procps kill is ESRCH (no such
     // process / group already gone): already quiescent, treat as success.
     if status.success() || status.code() == Some(1) {
@@ -151,23 +145,6 @@ async fn run_bash_kill(target: &str) -> anyhow::Result<()> {
     }
 }
 
-/// Terminate a session child and its process group, then reap it.
-///
-/// The caller must pass the PGID captured at spawn (`ShellSession::pgid`).
-/// `child.id()` alone is insufficient: after `try_wait` reaps an exited
-/// parent it becomes `None`, losing the orphan group identity (review 4152
-/// P1). Steps: poll `try_wait` for the direct-child state, always SIGKILL
-/// the stored group when known (even when the parent already exited, since
-/// grandchildren survive reparented with the same PGID), then skip the
-/// direct SIGKILL+wait fast path only when the parent was already reaped.
-/// Returns Err on spawn failure or when the bounded wait times out, so
-/// callers retain the session for retry instead of reporting false
-/// quiescence.
-pub async fn terminate_child(child: &mut Child) -> anyhow::Result<()> {
-    let pgid = child.id();
-    terminate_child_with_timeout(child, pgid, SESSION_TERMINATE_WAIT).await
-}
-
 pub async fn terminate_child_with_timeout(
     child: &mut Child,
     stored_pgid: Option<u32>,
@@ -182,10 +159,10 @@ pub async fn terminate_child_with_timeout(
     // Best-effort: log-and-continue; the direct kill below remains
     // authoritative for the child's own liveness when still running.
     let pgid = stored_pgid.or_else(|| child.id());
-    if let Some(pgid) = pgid {
-        if let Err(error) = kill_process_group(pgid).await {
-            tracing::warn!(pgid, error = %error, "process-group kill failed; falling back to direct kill");
-        }
+    if let Some(pgid) = pgid
+        && let Err(error) = kill_process_group(pgid).await
+    {
+        tracing::warn!(pgid, error = %error, "process-group kill failed; falling back to direct kill");
     }
     if exited {
         return Ok(());

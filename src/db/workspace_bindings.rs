@@ -107,7 +107,7 @@ pub async fn find_workspace_binding_by_resource(
 
 #[derive(Debug)]
 pub enum PrincipalLeaseOutcome {
-    Updated(WorkspaceBindingResponse),
+    Updated(Box<WorkspaceBindingResponse>),
     NotFound,
     Conflict,
     PrincipalCleanupFailed,
@@ -171,7 +171,7 @@ async fn change_lease<F: Future<Output = anyhow::Result<()>>>(
         return Ok(PrincipalLeaseOutcome::PrincipalCleanupFailed);
     }
     tx.commit().await?;
-    Ok(PrincipalLeaseOutcome::Updated(updated))
+    Ok(PrincipalLeaseOutcome::Updated(Box::new(updated)))
 }
 
 pub async fn acquire_workspace_write_lease_with_cleanup<F: Future<Output = anyhow::Result<()>>>(
@@ -203,7 +203,7 @@ pub async fn acquire_workspace_write_lease(
         })
         .await?
         {
-            PrincipalLeaseOutcome::Updated(row) => Some(row),
+            PrincipalLeaseOutcome::Updated(row) => Some(*row),
             _ => None,
         },
     )
@@ -217,7 +217,7 @@ pub async fn release_workspace_write_lease(
         match release_workspace_write_lease_with_cleanup(pool, binding_id, owner, async { Ok(()) })
             .await?
         {
-            PrincipalLeaseOutcome::Updated(row) => Some(row),
+            PrincipalLeaseOutcome::Updated(row) => Some(*row),
             _ => None,
         },
     )

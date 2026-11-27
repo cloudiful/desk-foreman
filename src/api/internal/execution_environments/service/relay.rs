@@ -35,18 +35,31 @@ use super::{
     response::relay_response,
 };
 
+pub(super) struct RelayServiceRequest<'a> {
+    pub(super) application_id: i64,
+    pub(super) environment_id: Uuid,
+    pub(super) presented_generation: i64,
+    pub(super) scope_auth: Option<&'a ScopeRelayAuth>,
+    pub(super) method: &'a str,
+    pub(super) bounds: ServiceRequestBounds,
+    pub(super) body: Body,
+}
+
 /// Relay one already-bounded request to its environment's private agent.
 pub(super) async fn relay_service_request(
     registry: &Arc<RelayRegistry>,
     pool: &PgPool,
-    application_id: i64,
-    environment_id: Uuid,
-    presented_generation: i64,
-    scope_auth: Option<&ScopeRelayAuth>,
-    method: &str,
-    bounds: ServiceRequestBounds,
-    body: Body,
+    request: RelayServiceRequest<'_>,
 ) -> Result<axum::response::Response, AppError> {
+    let RelayServiceRequest {
+        application_id,
+        environment_id,
+        presented_generation,
+        scope_auth,
+        method,
+        bounds,
+        body,
+    } = request;
     let ServiceAdmission { manager_id } = admit_service_request(
         pool,
         application_id,

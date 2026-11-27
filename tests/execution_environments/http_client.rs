@@ -5,30 +5,13 @@
 //! authenticated call because `application_actor` requires it, mirroring
 //! the lease routes; environment identity still comes from the body.
 
-use desk_foreman::AppState;
-
-/// Spawn the internal API router on an ephemeral port for HTTP tests.
-pub async fn spawn_http(state: AppState) -> (String, tokio::task::JoinHandle<()>) {
-    let router = desk_foreman::api::router().with_state(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind ephemeral port");
-    let addr = listener.local_addr().expect("local addr");
-    let handle = tokio::spawn(async move {
-        axum::serve(listener, router)
-            .await
-            .expect("serve test router");
-    });
-    (format!("http://{addr}"), handle)
-}
-
 fn parse_base(base: &str) -> (String, u16) {
     let without_scheme = base.strip_prefix("http://").expect("http base URL");
     let (host, port) = without_scheme.rsplit_once(':').expect("host:port");
     (host.to_string(), port.parse().expect("port"))
 }
 
-async fn raw_request(
+pub(super) async fn raw_request(
     base: &str,
     method: &str,
     path: &str,
@@ -75,19 +58,4 @@ async fn raw_request(
         serde_json::from_str(body_text).unwrap_or(serde_json::Value::Null)
     };
     (status, json)
-}
-
-/// Minimal HTTP/1.1 POST helper without extra client dependencies.
-pub async fn http_post(
-    base: &str,
-    path: &str,
-    token: Option<&str>,
-    body: serde_json::Value,
-) -> (u16, serde_json::Value) {
-    raw_request(base, "POST", path, token, Some(body)).await
-}
-
-/// Minimal HTTP/1.1 GET helper without extra client dependencies.
-pub async fn http_get(base: &str, path: &str, token: Option<&str>) -> (u16, serde_json::Value) {
-    raw_request(base, "GET", path, token, None).await
 }

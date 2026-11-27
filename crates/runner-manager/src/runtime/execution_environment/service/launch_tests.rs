@@ -9,7 +9,7 @@
 //! and stop stays operable either way. No live daemon.
 
 #[cfg(test)]
-mod launch_tests {
+mod launch_cases {
     use runner_protocol::{EnsureExecutionEnvironmentRequest, StopExecutionEnvironmentRequest};
 
     use std::path::Path;

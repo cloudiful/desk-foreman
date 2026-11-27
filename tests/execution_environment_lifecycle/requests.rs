@@ -3,7 +3,8 @@
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use super::http::{http_get, http_post};
+use super::http_get::http_get;
+use super::http_post::http_post;
 
 /// Wrap a raw descriptor job UUID into the reserved manager wire id.
 pub fn wire_job_id(job_id: &str) -> String {

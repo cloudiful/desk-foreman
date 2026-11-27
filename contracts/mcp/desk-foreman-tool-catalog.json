@@ -333,6 +333,7 @@
         "required": [
           "session_id",
           "state",
+          "exit_code",
           "timed_out",
           "wall_time_seconds"
         ],
@@ -613,6 +614,7 @@
         "required": [
           "path",
           "kind",
+          "content",
           "entries",
           "offset",
           "total",

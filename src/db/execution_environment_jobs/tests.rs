@@ -10,8 +10,8 @@ use chrono::Utc;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
-use super::lifecycle::complete_execution_environment_job;
-use super::store::enqueue_execution_environment_job;
+use super::lifecycle::{CompleteExecutionEnvironmentJob, complete_execution_environment_job};
+use super::store::{EnqueueExecutionEnvironmentJob, enqueue_execution_environment_job};
 use super::types::ExecutionEnvironmentJobResult;
 
 /// A pool that never connects: every pre-flight rejection must happen before a
@@ -31,13 +31,15 @@ async fn enqueue_rejects_invalid_intent_before_any_query() {
     assert!(
         enqueue_execution_environment_job(
             &pool,
-            1,
-            environment_id,
-            1,
-            "restart",
-            0,
-            "token",
-            deadline,
+            EnqueueExecutionEnvironmentJob {
+                application_id: 1,
+                environment_id,
+                assigned_manager_id: 1,
+                job_kind: "restart",
+                target_generation: 0,
+                token: "token",
+                deadline_at: deadline,
+            },
         )
         .await
         .is_err()
@@ -46,13 +48,15 @@ async fn enqueue_rejects_invalid_intent_before_any_query() {
     assert!(
         enqueue_execution_environment_job(
             &pool,
-            1,
-            environment_id,
-            1,
-            "ensure",
-            -1,
-            "token",
-            deadline,
+            EnqueueExecutionEnvironmentJob {
+                application_id: 1,
+                environment_id,
+                assigned_manager_id: 1,
+                job_kind: "ensure",
+                target_generation: -1,
+                token: "token",
+                deadline_at: deadline,
+            },
         )
         .await
         .is_err()
@@ -61,13 +65,15 @@ async fn enqueue_rejects_invalid_intent_before_any_query() {
     assert!(
         enqueue_execution_environment_job(
             &pool,
-            1,
-            environment_id,
-            1,
-            "ensure",
-            0,
-            "   ",
-            deadline,
+            EnqueueExecutionEnvironmentJob {
+                application_id: 1,
+                environment_id,
+                assigned_manager_id: 1,
+                job_kind: "ensure",
+                target_generation: 0,
+                token: "   ",
+                deadline_at: deadline,
+            },
         )
         .await
         .is_err()
@@ -81,14 +87,16 @@ async fn complete_rejects_non_terminal_state_before_any_query() {
         complete_execution_environment_job(
             &pool,
             &crate::db::task_runtime::TaskRuntime::new(pool.clone()),
-            1,
-            Uuid::new_v4(),
-            "token",
-            Uuid::new_v4(),
-            1,
-            "pending",
-            Some(ExecutionEnvironmentJobResult::stop_confirmed("exited")),
-            None,
+            CompleteExecutionEnvironmentJob {
+                application_id: 1,
+                environment_id: Uuid::new_v4(),
+                token: "token",
+                job_id: Uuid::new_v4(),
+                manager_id: 1,
+                state: "pending",
+                result: Some(ExecutionEnvironmentJobResult::stop_confirmed("exited")),
+                error_summary: None,
+            },
         )
         .await
         .is_err()

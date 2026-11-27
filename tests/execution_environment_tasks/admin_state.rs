@@ -19,7 +19,7 @@ pub async fn test_state_with_admin(
     login_name: &str,
     password: &str,
 ) -> AppState {
-    let mut base = super::helpers::test_state(pool.clone()).await;
+    let mut base = super::app_state::test_state(pool.clone()).await;
     base.task_runtime = Arc::clone(&runtime);
     let mut config = (*base.config).clone();
     config.workspace_root = PathBuf::from(workspace_root);

@@ -154,11 +154,11 @@ impl DockerRunnerBackend {
                 .as_deref()
                 .and_then(owner_from_stable_key)
                 .filter(|owner| matches!(owner, RunnerOwner::ApplicationPrincipal { .. }));
-            if let Some(owner) = &principal {
-                if !metadata.matches_principal(owner, container_name, &self.manager_id) {
-                    tracing::warn!(container = %container_name, "skipping principal container with unverified ownership");
-                    continue;
-                }
+            if let Some(owner) = &principal
+                && !metadata.matches_principal(owner, container_name, &self.manager_id)
+            {
+                tracing::warn!(container = %container_name, "skipping principal container with unverified ownership");
+                continue;
             }
             let manager_owned =
                 owner_matches && metadata.manager_id.as_deref() == Some(self.manager_id.as_str());

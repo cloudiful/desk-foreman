@@ -6,7 +6,7 @@
 //! generation, or an absent container is refused before anything dials out.
 
 #[cfg(test)]
-mod relay_tests {
+mod relay_cases {
     use super::super::super::test_support;
     use super::super::credential::ServiceCredentialStore;
     use super::super::profile::ServiceProfileConfig;

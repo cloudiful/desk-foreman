@@ -544,6 +544,8 @@ async fn read_chunked(stream: &mut TcpStream, mut buffer: Vec<u8>) -> std::io::R
     }
 }
 
+type CgiResponse = (String, Vec<(String, String)>, Vec<u8>);
+
 fn run_cgi(
     root: &Path,
     method: &str,
@@ -551,7 +553,7 @@ fn run_cgi(
     query: &str,
     headers: &HashMap<String, String>,
     body: &[u8],
-) -> std::io::Result<(String, Vec<(String, String)>, Vec<u8>)> {
+) -> std::io::Result<CgiResponse> {
     let mut command = std::process::Command::new("git");
     command
         .arg("http-backend")

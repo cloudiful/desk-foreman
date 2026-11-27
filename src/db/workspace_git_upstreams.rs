@@ -8,7 +8,7 @@
 //! the row. The plaintext secret never reaches the database: it is sealed
 //! before the write and opened only to compare an unchanged credential.
 
-use ring::constant_time::verify_slices_are_equal;
+use constant_time_eq::constant_time_eq;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::{
@@ -246,8 +246,7 @@ fn resolve_credential_action<'a>(
             .open(workspace_binding_id, upstream_id, frame)
             .map_err(map_cipher_error)?;
         let username_matches = current.credential_username.as_deref() == Some(username);
-        if username_matches && verify_slices_are_equal(stored.as_bytes(), secret.as_bytes()).is_ok()
-        {
+        if username_matches && constant_time_eq(stored.as_bytes(), secret.as_bytes()) {
             return Ok(CredentialAction::Keep);
         }
     }
@@ -446,12 +445,10 @@ fn validate_authority(
         external_user_id,
         ..
     } = authority
+        && (binding.application_id != *application_id
+            || binding.external_user_id != *external_user_id)
     {
-        if binding.application_id != *application_id
-            || binding.external_user_id != *external_user_id
-        {
-            return Err(GitUpstreamError::Forbidden);
-        }
+        return Err(GitUpstreamError::Forbidden);
     }
     if !binding.is_active || binding.lifecycle_state != "active" || binding.archived_at.is_some() {
         return Err(GitUpstreamError::BindingInactive);

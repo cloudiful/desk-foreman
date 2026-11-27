@@ -52,7 +52,7 @@ pub async fn upload_native_task_export_handler(
         .await
         {
             Ok(upload) => upload,
-            Err(response) => return response,
+            Err(response) => return *response,
         };
     match upload_native_task_export(&state.db, &state.task_runtime, manager_id, job_id, upload)
         .await

@@ -8,15 +8,16 @@
 
 use chrono::{Duration as ChronoDuration, Utc};
 use desk_foreman::db::queries::{
-    ClaimOutcome, CompleteOutcome, EnqueueOutcome, claim_execution_environment_job,
-    complete_execution_environment_job, enqueue_execution_environment_job,
-    expire_execution_environment_jobs, find_execution_environment_job_by_token,
+    ClaimOutcome, CompleteExecutionEnvironmentJob, CompleteOutcome, EnqueueExecutionEnvironmentJob,
+    EnqueueOutcome, claim_execution_environment_job, complete_execution_environment_job,
+    enqueue_execution_environment_job, expire_execution_environment_jobs,
+    find_execution_environment_job_by_token,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use super::app_token::create_app_with_token;
 use super::fixtures::{create_environment, create_manager, future_deadline, past_deadline};
-use super::helpers::create_app_with_token;
 use super::support::JobDb;
 
 /// The composite owner foreign key must reject a mismatched pair even when the
@@ -66,13 +67,15 @@ async fn token_of_another_tenant_is_never_returned_even_with_a_local_active_row(
 
     let first = enqueue_execution_environment_job(
         &db.pool,
-        app_a,
-        env_a,
-        manager,
-        "ensure",
-        0,
-        "rev-shared-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app_a,
+            environment_id: env_a,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 0,
+            token: "rev-shared-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("tenant A enqueue");
@@ -81,13 +84,15 @@ async fn token_of_another_tenant_is_never_returned_even_with_a_local_active_row(
     // Tenant B already owns an active stop row of its own.
     let local = enqueue_execution_environment_job(
         &db.pool,
-        app_b,
-        env_b,
-        manager,
-        "stop",
-        0,
-        "rev-local-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app_b,
+            environment_id: env_b,
+            assigned_manager_id: manager,
+            job_kind: "stop",
+            target_generation: 0,
+            token: "rev-local-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("tenant B local stop");
@@ -95,13 +100,15 @@ async fn token_of_another_tenant_is_never_returned_even_with_a_local_active_row(
 
     let stolen = enqueue_execution_environment_job(
         &db.pool,
-        app_b,
-        env_b,
-        manager,
-        "stop",
-        1,
-        "rev-shared-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app_b,
+            environment_id: env_b,
+            assigned_manager_id: manager,
+            job_kind: "stop",
+            target_generation: 1,
+            token: "rev-shared-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("tenant B foreign token");
@@ -134,13 +141,15 @@ async fn same_application_token_on_another_environment_does_not_resolve() {
 
     let first = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env_one,
-        manager,
-        "ensure",
-        0,
-        "rev-one-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env_one,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 0,
+            token: "rev-one-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("first environment enqueue");
@@ -148,13 +157,15 @@ async fn same_application_token_on_another_environment_does_not_resolve() {
 
     let second = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env_two,
-        manager,
-        "ensure",
-        0,
-        "rev-one-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env_two,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 0,
+            token: "rev-one-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("second environment enqueue");
@@ -184,13 +195,15 @@ async fn late_results_after_expiry_never_mutate_the_uncertain_record() {
     let deadline = Utc::now() + ChronoDuration::milliseconds(300);
     let job_id = match enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "ensure",
-        3,
-        "rev-late-token",
-        deadline,
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 3,
+            token: "rev-late-token",
+            deadline_at: deadline,
+        },
     )
     .await
     .expect("enqueue")
@@ -227,14 +240,16 @@ async fn late_results_after_expiry_never_mutate_the_uncertain_record() {
     match complete_execution_environment_job(
         &db.pool,
         &db.task_runtime,
-        app,
-        env,
-        "rev-late-token",
-        job_id,
-        manager,
-        "succeeded",
-        None,
-        None,
+        CompleteExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            token: "rev-late-token",
+            job_id,
+            manager_id: manager,
+            state: "succeeded",
+            result: None,
+            error_summary: None,
+        },
     )
     .await
     .expect("late success")
@@ -250,14 +265,16 @@ async fn late_results_after_expiry_never_mutate_the_uncertain_record() {
     match complete_execution_environment_job(
         &db.pool,
         &db.task_runtime,
-        app,
-        env,
-        "rev-late-token",
-        job_id,
-        manager,
-        "uncertain",
-        None,
-        None,
+        CompleteExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            token: "rev-late-token",
+            job_id,
+            manager_id: manager,
+            state: "uncertain",
+            result: None,
+            error_summary: None,
+        },
     )
     .await
     .expect("uncertain replay")
@@ -281,13 +298,15 @@ async fn late_results_after_expiry_never_mutate_the_uncertain_record() {
 
     let blocked = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "ensure",
-        99,
-        "rev-late-blocked",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 99,
+            token: "rev-late-blocked",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("blocked enqueue");
@@ -317,13 +336,15 @@ async fn expiry_only_touches_the_scoped_owner_environment() {
             matches!(
                 enqueue_execution_environment_job(
                     &db.pool,
-                    app,
-                    env,
-                    manager,
-                    "ensure",
-                    0,
-                    token,
-                    past_deadline(),
+                    EnqueueExecutionEnvironmentJob {
+                        application_id: app,
+                        environment_id: env,
+                        assigned_manager_id: manager,
+                        job_kind: "ensure",
+                        target_generation: 0,
+                        token,
+                        deadline_at: past_deadline(),
+                    },
                 )
                 .await
                 .expect("enqueue"),
@@ -370,13 +391,15 @@ async fn claim_refuses_an_expired_pending_job_before_any_expiry_sweep() {
         matches!(
             enqueue_execution_environment_job(
                 &db.pool,
-                app,
-                env,
-                manager,
-                "ensure",
-                0,
-                "rev-claim-deadline-token",
-                past_deadline(),
+                EnqueueExecutionEnvironmentJob {
+                    application_id: app,
+                    environment_id: env,
+                    assigned_manager_id: manager,
+                    job_kind: "ensure",
+                    target_generation: 0,
+                    token: "rev-claim-deadline-token",
+                    deadline_at: past_deadline(),
+                },
             )
             .await
             .expect("enqueue"),
@@ -410,13 +433,15 @@ async fn claim_refuses_an_expired_pending_job_before_any_expiry_sweep() {
     // The row stays an active blocker until the fail-closed sweep records it.
     let blocked = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "ensure",
-        5,
-        "rev-claim-deadline-blocked",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 5,
+            token: "rev-claim-deadline-blocked",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("blocked enqueue");

@@ -1,11 +1,12 @@
 //! Enqueue, replay and tenancy fencing cases.
 
 use desk_foreman::db::queries::{
-    EnqueueOutcome, enqueue_execution_environment_job, find_execution_environment_job_by_token,
+    EnqueueExecutionEnvironmentJob, EnqueueOutcome, enqueue_execution_environment_job,
+    find_execution_environment_job_by_token,
 };
 
+use super::app_token::create_app_with_token;
 use super::fixtures::{count_jobs, create_environment, create_manager, future_deadline};
-use super::helpers::create_app_with_token;
 use super::support::JobDb;
 
 #[tokio::test]
@@ -18,13 +19,15 @@ async fn foreign_application_pair_is_rejected_without_recording_a_row() {
 
     let foreign = enqueue_execution_environment_job(
         &db.pool,
-        app_b,
-        env,
-        manager,
-        "ensure",
-        0,
-        "tenant-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app_b,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 0,
+            token: "tenant-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("foreign enqueue");
@@ -36,13 +39,15 @@ async fn foreign_application_pair_is_rejected_without_recording_a_row() {
 
     let owned = enqueue_execution_environment_job(
         &db.pool,
-        app_a,
-        env,
-        manager,
-        "ensure",
-        0,
-        "tenant-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app_a,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 0,
+            token: "tenant-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("owned enqueue");
@@ -63,13 +68,15 @@ async fn identical_token_replay_returns_the_original_row() {
 
     let first = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "ensure",
-        2,
-        "replay-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 2,
+            token: "replay-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("first enqueue");
@@ -80,13 +87,15 @@ async fn identical_token_replay_returns_the_original_row() {
 
     let replay = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "ensure",
-        2,
-        "replay-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 2,
+            token: "replay-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("replay enqueue");
@@ -108,13 +117,15 @@ async fn conflicting_token_intent_is_refused() {
 
     let created = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "ensure",
-        0,
-        "conflict-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 0,
+            token: "conflict-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("first enqueue");
@@ -125,13 +136,15 @@ async fn conflicting_token_intent_is_refused() {
 
     let conflicting = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "ensure",
-        1,
-        "conflict-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 1,
+            token: "conflict-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("conflicting enqueue");
@@ -158,13 +171,15 @@ async fn cross_tenant_token_never_leaks_another_row() {
 
     let created = enqueue_execution_environment_job(
         &db.pool,
-        app_a,
-        env_a,
-        manager,
-        "ensure",
-        0,
-        "shared-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app_a,
+            environment_id: env_a,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 0,
+            token: "shared-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("tenant A enqueue");
@@ -172,13 +187,15 @@ async fn cross_tenant_token_never_leaks_another_row() {
 
     let stolen = enqueue_execution_environment_job(
         &db.pool,
-        app_b,
-        env_b,
-        manager,
-        "ensure",
-        0,
-        "shared-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app_b,
+            environment_id: env_b,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 0,
+            token: "shared-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("tenant B enqueue");
