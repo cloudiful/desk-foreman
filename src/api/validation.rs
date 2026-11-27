@@ -256,8 +256,7 @@ mod tests {
         let (parts, _) = request.into_parts();
 
         let rejection = axum::extract::Query::<StrictParams>::try_from_uri(&uri)
-            .err()
-            .expect("malformed limit should be rejected");
+            .expect_err("malformed limit should be rejected");
 
         // Build a subscriber that writes to an in-memory buffer so we can assert
         // the warn log includes method/path but never the query string or its values.

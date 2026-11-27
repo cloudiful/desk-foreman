@@ -46,16 +46,29 @@ pub(super) fn is_unique_violation(error: &sqlx::Error) -> bool {
 /// filtered by the owning application, so a foreign pair inserts nothing and
 /// never observes another owner's row. A same-token identical replay returns
 /// the original row; a same-owner token with a different intent rejects.
+pub struct EnqueueExecutionEnvironmentJob<'a> {
+    pub application_id: i64,
+    pub environment_id: Uuid,
+    pub assigned_manager_id: i64,
+    pub job_kind: &'a str,
+    pub target_generation: i64,
+    pub token: &'a str,
+    pub deadline_at: DateTime<Utc>,
+}
+
 pub async fn enqueue_execution_environment_job(
     pool: &PgPool,
-    application_id: i64,
-    environment_id: Uuid,
-    assigned_manager_id: i64,
-    job_kind: &str,
-    target_generation: i64,
-    token: &str,
-    deadline_at: DateTime<Utc>,
+    job: EnqueueExecutionEnvironmentJob<'_>,
 ) -> anyhow::Result<EnqueueOutcome> {
+    let EnqueueExecutionEnvironmentJob {
+        application_id,
+        environment_id,
+        assigned_manager_id,
+        job_kind,
+        target_generation,
+        token,
+        deadline_at,
+    } = job;
     if !job_kind_is_valid(job_kind) {
         anyhow::bail!("invalid environment job kind: {job_kind}");
     }

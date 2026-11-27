@@ -14,8 +14,9 @@ use serde_json::{Value, json};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
-use super::helpers::test_database_url;
-use super::http::{http_get, http_post};
+use super::http_get::http_get;
+use super::http_post::http_post;
+use super::test_database_url::test_database_url;
 
 fn replace_database_name(base_url: &str, db_name: &str) -> String {
     let (prefix, suffix) = match base_url.rfind('?') {

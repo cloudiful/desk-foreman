@@ -269,7 +269,7 @@ async fn timeout_aborts_waiter_then_prunes_targeted_queued_job() {
         target_manager_id: Some(4),
     });
     let mut tasks = tokio::task::JoinSet::new();
-    tasks.spawn(async move { receiver.await });
+    tasks.spawn(receiver);
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(10), tasks.join_next())
             .await

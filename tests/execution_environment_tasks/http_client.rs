@@ -104,17 +104,14 @@ pub async fn call(
 fn decode_chunked(raw: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut rest = raw;
-    loop {
-        let Some(line_end) = rest.windows(2).position(|window| window == b"\r\n") else {
-            break;
-        };
-        let size = match std::str::from_utf8(&rest[..line_end])
+    while let Some(line_end) = rest.windows(2).position(|window| window == b"\r\n") {
+        let Some(size) = std::str::from_utf8(&rest[..line_end])
             .ok()
             .and_then(|line| {
                 usize::from_str_radix(line.split(';').next().unwrap_or("").trim(), 16).ok()
-            }) {
-            Some(size) => size,
-            None => break,
+            })
+        else {
+            break;
         };
         let start = line_end + 2;
         if size == 0 {

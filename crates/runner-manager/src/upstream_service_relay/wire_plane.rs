@@ -125,19 +125,6 @@ pub(crate) mod plane {
                 .expect("message")
         }
 
-        /// Raw read with a bounded wait: `None` on timeout, for asserting
-        /// the peer closed the socket or went quiet.
-        pub async fn next_raw(
-            &mut self,
-        ) -> Option<
-            Result<tokio_tungstenite::tungstenite::Message, tokio_tungstenite::tungstenite::Error>,
-        > {
-            tokio::time::timeout(std::time::Duration::from_secs(10), self.ws.next())
-                .await
-                .ok()
-                .flatten()
-        }
-
         pub async fn next_text(&mut self) -> String {
             match self.next_frame().await {
                 tokio_tungstenite::tungstenite::Message::Text(text) => text.to_string(),

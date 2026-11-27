@@ -7,7 +7,7 @@
 //! its own.
 
 #[cfg(test)]
-mod http_target_tests {
+mod http_target_cases {
     use std::net::IpAddr;
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

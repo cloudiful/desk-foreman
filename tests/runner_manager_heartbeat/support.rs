@@ -21,8 +21,7 @@ use desk_foreman::db::{
 };
 
 use super::{
-    helpers::{IsolatedDb, test_state},
-    http::{http_get, spawn_http},
+    app_state::test_state, http_get::http_get, http_server::spawn_http, isolated_db::IsolatedDb,
 };
 
 pub const TOKEN: &str = "dfm_heartbeat_1176_token";

@@ -19,12 +19,13 @@ mod types;
 mod tests;
 
 pub use lifecycle::{
-    ClaimOutcome, CompleteOutcome, claim_execution_environment_job,
-    complete_execution_environment_job, expire_execution_environment_jobs,
+    ClaimOutcome, CompleteExecutionEnvironmentJob, CompleteOutcome,
+    claim_execution_environment_job, complete_execution_environment_job,
+    expire_execution_environment_jobs,
 };
 pub use store::{
-    EnqueueOutcome, enqueue_execution_environment_job, find_active_execution_environment_job,
-    find_execution_environment_job_by_token,
+    EnqueueExecutionEnvironmentJob, EnqueueOutcome, enqueue_execution_environment_job,
+    find_active_execution_environment_job, find_execution_environment_job_by_token,
 };
 pub use types::{
     EXECUTION_ENVIRONMENT_JOB_ACTIVE_STATES, EXECUTION_ENVIRONMENT_JOB_ERROR_SUMMARY_MAX_LEN,

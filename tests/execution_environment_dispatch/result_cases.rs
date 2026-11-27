@@ -2,11 +2,13 @@
 //! P2).
 
 use super::ack::{RESULT, ensure_ack, pull, result_body, stop_ack};
-use super::helpers::{create_app_with_token, test_state};
-use super::http::{http_post, spawn_http};
+use super::app_state::test_state;
+use super::app_token::create_app_with_token;
+use super::http_post::http_post;
+use super::http_server::spawn_http;
 use super::support::{
-    DispatchDb, create_environment, create_manager_with_token, future_deadline, job_result,
-    job_state, seed_job,
+    DispatchDb, SeedJob, create_environment, create_manager_with_token, future_deadline,
+    job_result, job_state, seed_job,
 };
 
 #[tokio::test]
@@ -18,25 +20,29 @@ async fn consistent_success_and_confirmed_stop_persist() {
     let ensure_env = create_environment(&db.pool, app, "ok-ensure").await;
     let ensure_id = seed_job(
         &db.pool,
-        app,
-        ensure_env,
-        manager,
-        "ensure",
-        0,
-        "ok-ensure-token",
-        future_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: ensure_env,
+            manager_id: manager,
+            kind: "ensure",
+            generation: 0,
+            token: "ok-ensure-token",
+            deadline: future_deadline(),
+        },
     )
     .await;
     let stop_env = create_environment(&db.pool, app, "ok-stop").await;
     let stop_id = seed_job(
         &db.pool,
-        app,
-        stop_env,
-        manager,
-        "stop",
-        0,
-        "ok-stop-token",
-        future_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: stop_env,
+            manager_id: manager,
+            kind: "stop",
+            generation: 0,
+            token: "ok-stop-token",
+            deadline: future_deadline(),
+        },
     )
     .await;
 
@@ -102,13 +108,15 @@ async fn duplicate_terminal_replay_is_idempotent_and_conflict_is_refused() {
     let env = create_environment(&db.pool, app, "replay-stop").await;
     let job_id = seed_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "stop",
-        0,
-        "replay-token",
-        future_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: env,
+            manager_id: manager,
+            kind: "stop",
+            generation: 0,
+            token: "replay-token",
+            deadline: future_deadline(),
+        },
     )
     .await;
 

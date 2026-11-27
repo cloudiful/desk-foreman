@@ -86,6 +86,55 @@ fn changed_credential_replaces_the_stored_frame() {
 }
 
 #[test]
+fn equal_length_different_secret_replaces_the_stored_frame() {
+    let protector = protector();
+    let frame = protector.seal(918001, 42, "super-secret").expect("seal");
+    let row = current(Some("git-user"), Some(frame));
+
+    let action = resolve_credential_action(
+        &row,
+        Some(&protector),
+        918001,
+        42,
+        &update_with(Some(("git-user", "super-secreT")), false),
+    )
+    .expect("resolve");
+
+    assert!(matches!(
+        action,
+        CredentialAction::Replace("git-user", "super-secreT")
+    ));
+}
+
+#[test]
+fn different_length_secret_replaces_the_stored_frame() {
+    let protector = protector();
+    let frame = protector.seal(918001, 42, "super-secret").expect("seal");
+    let row = current(Some("git-user"), Some(frame));
+
+    let action = resolve_credential_action(
+        &row,
+        Some(&protector),
+        918001,
+        42,
+        &update_with(Some(("git-user", "super-secret-longer")), false),
+    )
+    .expect("resolve");
+
+    assert!(matches!(
+        action,
+        CredentialAction::Replace("git-user", "super-secret-longer")
+    ));
+}
+
+#[test]
+fn empty_secrets_compare_equal_in_constant_time() {
+    assert!(constant_time_eq(b"", b""));
+    assert!(!constant_time_eq(b"", b"x"));
+    assert!(!constant_time_eq(b"x", b""));
+}
+
+#[test]
 fn explicit_clear_and_metadata_update_keep_the_stored_credential() {
     let protector = protector();
     let frame = protector.seal(918001, 42, "super-secret").expect("seal");

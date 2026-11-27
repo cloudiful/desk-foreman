@@ -121,8 +121,8 @@ mod service_relay_tests {
             r#"{"type":"request_end"}"#.to_string(),
             r#"{"type":"end"}"#.to_string(),
             r#"{"type":"cancel"}"#.to_string(),
-            format!(r#"{{"type":"response_head","status":200,"allowed_headers":[]}}"#),
-            format!(r#"{{"type":"error","code":"cancelled"}}"#),
+            r#"{"type":"response_head","status":200,"allowed_headers":[]}"#.to_string(),
+            r#"{"type":"error","code":"cancelled"}"#.to_string(),
         ] {
             assert_eq!(
                 decode_control(&raw),

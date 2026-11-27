@@ -1,7 +1,7 @@
 //! Unit tests for the durable wire namespace (issue 742 P2, `#[cfg(test)]`).
 
 #[cfg(test)]
-mod dispatch_tests {
+mod wire_namespace_tests {
     use super::super::dispatch::{
         ENV_JOB_ID_PREFIX, encode_environment_job_wire_id, is_environment_job_wire_id,
         parse_environment_job_wire_id,

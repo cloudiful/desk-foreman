@@ -248,12 +248,12 @@ pub(crate) fn ensure_generation_admissible(
     barrier: &EnvironmentBarrier,
     generation: i64,
 ) -> anyhow::Result<()> {
-    if let Some(stopped) = barrier.stopped_generation {
-        if stopped >= generation {
-            anyhow::bail!(
-                "execution environment generation {generation} is durable-stopped at generation {stopped}; refusing to run"
-            );
-        }
+    if let Some(stopped) = barrier.stopped_generation
+        && stopped >= generation
+    {
+        anyhow::bail!(
+            "execution environment generation {generation} is durable-stopped at generation {stopped}; refusing to run"
+        );
     }
     if barrier.high_water > generation {
         anyhow::bail!(

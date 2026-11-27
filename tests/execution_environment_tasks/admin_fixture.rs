@@ -45,7 +45,7 @@ impl AdminFixture {
             ADMIN_PASSWORD,
         )
         .await;
-        let (admin_base, _handle) = super::http::spawn_http(admin_state.clone()).await;
+        let (admin_base, _handle) = super::http_server::spawn_http(admin_state.clone()).await;
         let cookie = admin_session(&admin_base, ADMIN_LOGIN, ADMIN_PASSWORD).await;
 
         let other_root = workspace_root.join("other-workspace");

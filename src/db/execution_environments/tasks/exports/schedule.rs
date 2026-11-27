@@ -131,16 +131,18 @@ pub async fn schedule_native_task_export(
     .ok_or(NativeTaskExportError::Conflict)?;
     let header = queries::insert_export(
         &mut tx,
-        job_id,
-        task_id,
-        environment_id,
-        application_id,
-        task.workspace_binding_id,
-        task.assigned_manager_id,
-        candidate_generation,
-        stop_job_id,
-        &selection.selection_sha256,
-        selection.file_count,
+        queries::InsertExport {
+            job_id,
+            task_id,
+            environment_id,
+            application_id,
+            workspace_binding_id: task.workspace_binding_id,
+            manager_id: task.assigned_manager_id,
+            candidate_generation,
+            stop_job_id,
+            selection_sha256: &selection.selection_sha256,
+            file_count: selection.file_count,
+        },
     )
     .await
     .map_err(internal)?

@@ -5,7 +5,7 @@
 //! frames, body-length agreement, admission caps, and bounded queue depth.
 
 #[cfg(test)]
-mod flow_tests {
+mod relay_flow_cases {
     use crate::service_relay::control::{ResponseHeadFrame, StreamFrame};
     use crate::service_relay::*;
 

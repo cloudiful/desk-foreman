@@ -31,7 +31,7 @@ use uuid::Uuid;
 
 use super::{
     admit_check::{Admission, check_open},
-    call::{RelayCall, STREAM_QUEUE_CAPACITY},
+    call::{RelayCall, RelayCallParams, STREAM_QUEUE_CAPACITY},
     errors::RelayAdmissionError,
     frames::{InboundEvent, StreamDelivery},
     registry_state::{
@@ -153,16 +153,16 @@ impl RelayRegistry {
             environment_streams,
             manager_streams,
         } = check_open(&mut state, &request)?;
-        let call = RelayCall::new(
-            self,
+        let call = RelayCall::new(RelayCallParams {
+            registry: self,
             tunnel,
-            request.stream_id,
-            request.environment_id,
-            request.manager_id,
-            request.generation,
+            stream_id: request.stream_id,
+            environment_id: request.environment_id,
+            manager_id: request.manager_id,
+            generation: request.generation,
             events,
             response,
-        )
+        })
         .map_err(|_| RelayAdmissionError::BodyTooLarge)?;
         // A duplicate identifier is refused by `check_open` above, so this
         // insert can never overwrite an existing route.

@@ -54,7 +54,7 @@ async fn answer_inner(
     out: &tokio::sync::mpsc::Sender<OutMsg>,
 ) -> Result<(), RelayErrorCode> {
     let reply = http::send_to_agent(
-        &admitted,
+        admitted,
         &open.method,
         &open.path,
         open.query.as_deref(),

@@ -8,6 +8,19 @@ use tokio::sync::RwLock;
 #[derive(Default)]
 pub(super) struct OwnerFences(Mutex<HashMap<RunnerOwner, Weak<RwLock<()>>>>);
 
+impl OwnerFences {
+    pub(super) fn for_owner(&self, owner: &RunnerOwner) -> Arc<RwLock<()>> {
+        let mut fences = self.0.lock().expect("owner fences poisoned");
+        fences.retain(|_, fence| fence.strong_count() != 0);
+        if let Some(fence) = fences.get(owner).and_then(Weak::upgrade) {
+            return fence;
+        }
+        let fence = Arc::new(RwLock::new(()));
+        fences.insert(owner.clone(), Arc::downgrade(&fence));
+        fence
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -38,18 +51,5 @@ mod tests {
         drop(c);
         let _new = fences.for_owner(&second);
         assert_eq!(fences.0.lock().unwrap().len(), 1);
-    }
-}
-
-impl OwnerFences {
-    pub(super) fn for_owner(&self, owner: &RunnerOwner) -> Arc<RwLock<()>> {
-        let mut fences = self.0.lock().expect("owner fences poisoned");
-        fences.retain(|_, fence| fence.strong_count() != 0);
-        if let Some(fence) = fences.get(owner).and_then(Weak::upgrade) {
-            return fence;
-        }
-        let fence = Arc::new(RwLock::new(()));
-        fences.insert(owner.clone(), Arc::downgrade(&fence));
-        fence
     }
 }

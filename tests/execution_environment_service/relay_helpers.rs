@@ -125,21 +125,3 @@ pub async fn respond(
         )
         .await;
 }
-
-/// Send one attributed refusal for `stream`.
-pub async fn refuse(
-    tunnel: &mut WsClient,
-    stream: RelayId,
-    code: runner_protocol::service_relay::RelayErrorCode,
-) {
-    use runner_protocol::service_relay::ErrorFrame;
-    tunnel
-        .send_text(
-            &encode_control(&RelayControl::Error(ErrorFrame {
-                stream_id: stream,
-                code,
-            }))
-            .expect("encode refusal"),
-        )
-        .await;
-}

@@ -57,17 +57,29 @@ pub struct RelayCall {
     pub(crate) inner: Arc<CallInner>,
 }
 
+pub(crate) struct RelayCallParams<'a> {
+    pub(crate) registry: &'a Arc<RelayRegistry>,
+    pub(crate) tunnel: TunnelHandle,
+    pub(crate) stream_id: RelayId,
+    pub(crate) environment_id: Uuid,
+    pub(crate) manager_id: i64,
+    pub(crate) generation: i64,
+    pub(crate) events: mpsc::Sender<InboundEvent>,
+    pub(crate) response: mpsc::Receiver<InboundEvent>,
+}
+
 impl RelayCall {
-    pub(crate) fn new(
-        registry: &Arc<RelayRegistry>,
-        tunnel: TunnelHandle,
-        stream_id: RelayId,
-        environment_id: Uuid,
-        manager_id: i64,
-        generation: i64,
-        events: mpsc::Sender<InboundEvent>,
-        response: mpsc::Receiver<InboundEvent>,
-    ) -> Result<Self, RelayCallError> {
+    pub(crate) fn new(params: RelayCallParams<'_>) -> Result<Self, RelayCallError> {
+        let RelayCallParams {
+            registry,
+            tunnel,
+            stream_id,
+            environment_id,
+            manager_id,
+            generation,
+            events,
+            response,
+        } = params;
         let (terminal, _) = watch::channel(None);
         Ok(Self {
             inner: Arc::new(CallInner {

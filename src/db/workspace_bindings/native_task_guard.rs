@@ -49,6 +49,45 @@ pub(crate) async fn native_task_holds_binding(
     Ok(active.map(|(task_id,)| task_id))
 }
 
+/// Apply the existing lifecycle state transition on a guarded transaction.
+///
+/// The statement itself is the unchanged `set_workspace_binding_state.sql`;
+/// only its execution moves onto the caller's transaction so the state change
+/// happens while the binding row lock this guard took is still held. Running it
+/// on a second connection would leave exactly the window the guard closes.
+pub(crate) async fn set_lifecycle_state(
+    tx: &mut Transaction<'_, Postgres>,
+    workspace_binding_id: i64,
+    lifecycle_state: &str,
+) -> anyhow::Result<Option<crate::db::types::WorkspaceBindingResponse>> {
+    Ok(
+        sqlx::query_as::<_, crate::db::types::WorkspaceBindingResponse>(include_str!(
+            "../../sql/set_workspace_binding_state.sql"
+        ))
+        .bind(workspace_binding_id)
+        .bind(lifecycle_state)
+        .fetch_optional(&mut **tx)
+        .await?,
+    )
+}
+
+/// Delete an archived binding on a guarded transaction.
+///
+/// The unchanged `delete_workspace_binding.sql`, executed on the caller's
+/// transaction so the row cannot be removed after the guard released the lock.
+pub(crate) async fn delete_binding(
+    tx: &mut Transaction<'_, Postgres>,
+    workspace_binding_id: i64,
+) -> anyhow::Result<Option<String>> {
+    Ok(
+        sqlx::query(include_str!("../../sql/delete_workspace_binding.sql"))
+            .bind(workspace_binding_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .map(|row| row.get("workspace_root")),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::GUARD_SQL;
@@ -99,43 +138,4 @@ mod tests {
             "the guard resolves to the single active task that owns the workspace"
         );
     }
-}
-
-/// Apply the existing lifecycle state transition on a guarded transaction.
-///
-/// The statement itself is the unchanged `set_workspace_binding_state.sql`;
-/// only its execution moves onto the caller's transaction so the state change
-/// happens while the binding row lock this guard took is still held. Running it
-/// on a second connection would leave exactly the window the guard closes.
-pub(crate) async fn set_lifecycle_state(
-    tx: &mut Transaction<'_, Postgres>,
-    workspace_binding_id: i64,
-    lifecycle_state: &str,
-) -> anyhow::Result<Option<crate::db::types::WorkspaceBindingResponse>> {
-    Ok(
-        sqlx::query_as::<_, crate::db::types::WorkspaceBindingResponse>(include_str!(
-            "../../sql/set_workspace_binding_state.sql"
-        ))
-        .bind(workspace_binding_id)
-        .bind(lifecycle_state)
-        .fetch_optional(&mut **tx)
-        .await?,
-    )
-}
-
-/// Delete an archived binding on a guarded transaction.
-///
-/// The unchanged `delete_workspace_binding.sql`, executed on the caller's
-/// transaction so the row cannot be removed after the guard released the lock.
-pub(crate) async fn delete_binding(
-    tx: &mut Transaction<'_, Postgres>,
-    workspace_binding_id: i64,
-) -> anyhow::Result<Option<String>> {
-    Ok(
-        sqlx::query(include_str!("../../sql/delete_workspace_binding.sql"))
-            .bind(workspace_binding_id)
-            .fetch_optional(&mut **tx)
-            .await?
-            .map(|row| row.get("workspace_root")),
-    )
 }

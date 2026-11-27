@@ -9,7 +9,7 @@
 //! `try_lock`, not pointer identity. No live daemon.
 
 #[cfg(test)]
-mod owner_tests {
+mod owner_cases {
     use std::path::Path;
     use std::sync::Arc;
 

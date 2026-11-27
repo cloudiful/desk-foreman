@@ -9,11 +9,20 @@
 //! It deliberately proves nothing about Docker, containers, mounts,
 //! checkouts or a real task process: P1 has no writer.
 
-#[path = "execution_environments/helpers.rs"]
-mod helpers;
+#[path = "execution_environments/test_database_url.rs"]
+mod test_database_url;
 
-#[path = "execution_environments/http.rs"]
-mod http;
+#[path = "execution_environments/isolated_db.rs"]
+mod isolated_db;
+
+#[path = "execution_environments/app_state.rs"]
+mod app_state;
+
+#[path = "execution_environments/app_token.rs"]
+mod app_token;
+
+#[path = "execution_environments/http_server.rs"]
+mod http_server;
 
 #[path = "execution_environment_tasks/support.rs"]
 mod support;

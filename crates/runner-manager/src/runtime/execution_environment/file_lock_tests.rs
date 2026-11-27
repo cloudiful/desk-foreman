@@ -5,7 +5,7 @@
 //! and no live daemon.
 
 #[cfg(test)]
-mod file_lock_tests {
+mod file_lock_cases {
     use std::path::Path;
 
     use super::super::file_lock::{EnvFileLock, lock_holder_token};

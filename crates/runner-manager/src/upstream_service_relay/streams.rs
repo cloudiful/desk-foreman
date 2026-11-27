@@ -77,8 +77,7 @@ impl StreamSlot {
         if frame.stream_id != self.open.stream_id {
             return Err(RelayProtocolError::InvalidIdentifier);
         }
-        self.order
-            .accept(&RelayControl::RequestEnd(frame.clone()))?;
+        self.order.accept(&RelayControl::RequestEnd(*frame))?;
         self.guard.finish()?;
         Ok((self.open.clone(), std::mem::take(&mut self.body)))
     }

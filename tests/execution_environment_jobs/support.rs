@@ -11,7 +11,7 @@ use desk_foreman::db::task_runtime::TaskRuntime;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
-use super::helpers::test_database_url;
+use super::test_database_url::test_database_url;
 
 fn replace_database_name(base_url: &str, db_name: &str) -> String {
     let (prefix, suffix) = match base_url.rfind('?') {

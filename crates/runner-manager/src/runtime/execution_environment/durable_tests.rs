@@ -8,7 +8,7 @@
 //! Docker call. No live daemon.
 
 #[cfg(test)]
-mod durable_tests {
+mod durable_cases {
     use runner_protocol::{EnsureExecutionEnvironmentRequest, StopExecutionEnvironmentRequest};
 
     use super::super::{

@@ -96,18 +96,32 @@ pub async fn claim_execution_environment_job(
 /// replay returns the existing outcome only when state, result and error
 /// summary are identical, otherwise `TerminalConflict`. Completion after the
 /// deadline never succeeds.
+pub struct CompleteExecutionEnvironmentJob<'a> {
+    pub application_id: i64,
+    pub environment_id: Uuid,
+    pub token: &'a str,
+    pub job_id: Uuid,
+    pub manager_id: i64,
+    pub state: &'a str,
+    pub result: Option<ExecutionEnvironmentJobResult>,
+    pub error_summary: Option<&'a str>,
+}
+
 pub async fn complete_execution_environment_job(
     pool: &PgPool,
     runtime: &TaskRuntime,
-    application_id: i64,
-    environment_id: Uuid,
-    token: &str,
-    job_id: Uuid,
-    manager_id: i64,
-    state: &str,
-    result: Option<ExecutionEnvironmentJobResult>,
-    error_summary: Option<&str>,
+    job: CompleteExecutionEnvironmentJob<'_>,
 ) -> anyhow::Result<CompleteOutcome> {
+    let CompleteExecutionEnvironmentJob {
+        application_id,
+        environment_id,
+        token,
+        job_id,
+        manager_id,
+        state,
+        result,
+        error_summary,
+    } = job;
     if !job_state_is_terminal(state) {
         anyhow::bail!("complete requires a terminal state, got {state}");
     }

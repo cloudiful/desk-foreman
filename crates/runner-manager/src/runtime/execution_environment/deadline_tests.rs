@@ -7,7 +7,7 @@
 //! command runner kills and reaps the spawned CLI. No live daemon.
 
 #[cfg(test)]
-mod deadline_tests {
+mod deadline_cases {
     use std::path::Path;
     use std::time::Duration;
 

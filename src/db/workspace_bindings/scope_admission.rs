@@ -51,6 +51,7 @@ pub(crate) fn validate_scope_binding(
 ///
 /// Only the two binding-carrying owner variants match; personal and
 /// environment owners never do. A nonpositive binding id never matches.
+#[cfg(test)]
 pub(crate) fn session_owner_matches_scope(
     owner: &runner_protocol::RunnerOwner,
     workspace_binding_id: i64,

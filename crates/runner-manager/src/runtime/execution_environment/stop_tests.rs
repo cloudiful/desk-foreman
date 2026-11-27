@@ -8,7 +8,7 @@
 //! never confirming. Volume is never deleted. No live daemon.
 
 #[cfg(test)]
-mod stop_tests {
+mod stop_cases {
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 

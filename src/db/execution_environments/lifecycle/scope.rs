@@ -191,10 +191,10 @@ pub(crate) fn select_scope_manager(
     else {
         return Err(LifecycleError::ScopeManagerUnavailable);
     };
-    if let Some(assigned_manager_id) = assigned_manager_id {
-        if assigned_manager_id != manager_id {
-            return Err(LifecycleError::ScopeManagerUnavailable);
-        }
+    if let Some(assigned_manager_id) = assigned_manager_id
+        && assigned_manager_id != manager_id
+    {
+        return Err(LifecycleError::ScopeManagerUnavailable);
     }
     Ok(manager_id)
 }
@@ -206,6 +206,13 @@ mod tests {
 
     const ROOT: &str = "/workspace/fixture";
 
+    type ScopeCase = (
+        &'static str,
+        Vec<LiveScopeManager>,
+        Option<i64>,
+        Result<i64, ()>,
+    );
+
     fn observation(manager_id: Option<i64>, root: &str, authorizes: bool) -> LiveScopeManager {
         LiveScopeManager {
             runner_manager_id: manager_id,
@@ -216,7 +223,7 @@ mod tests {
 
     #[test]
     fn scope_manager_selection_table() {
-        let cases: [(&str, Vec<LiveScopeManager>, Option<i64>, Result<i64, ()>); 11] = [
+        let cases: [ScopeCase; 11] = [
             ("no observation", Vec::new(), None, Err(())),
             (
                 "one authorizing observation",

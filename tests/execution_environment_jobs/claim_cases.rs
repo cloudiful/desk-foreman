@@ -1,12 +1,12 @@
 //! Claim and completion cases for durable environment jobs.
 
 use desk_foreman::db::queries::{
-    ClaimOutcome, CompleteOutcome, ExecutionEnvironmentJobResult, claim_execution_environment_job,
-    complete_execution_environment_job,
+    ClaimOutcome, CompleteExecutionEnvironmentJob, CompleteOutcome, ExecutionEnvironmentJobResult,
+    claim_execution_environment_job, complete_execution_environment_job,
 };
 
+use super::app_token::create_app_with_token;
 use super::fixtures::{create_environment, create_manager, future_deadline, seed_ensure};
-use super::helpers::create_app_with_token;
 use super::support::JobDb;
 
 #[tokio::test]
@@ -61,14 +61,16 @@ async fn only_assigned_manager_can_claim_and_complete() {
     match complete_execution_environment_job(
         &db.pool,
         &db.task_runtime,
-        app,
-        env,
-        "assigned-token",
-        job_id,
-        other,
-        "succeeded",
-        None,
-        None,
+        CompleteExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            token: "assigned-token",
+            job_id,
+            manager_id: other,
+            state: "succeeded",
+            result: None,
+            error_summary: None,
+        },
     )
     .await
     .expect("wrong manager complete")
@@ -82,14 +84,16 @@ async fn only_assigned_manager_can_claim_and_complete() {
     let completed = complete_execution_environment_job(
         &db.pool,
         &db.task_runtime,
-        app,
-        env,
-        "assigned-token",
-        job_id,
-        assigned,
-        "succeeded",
-        None,
-        None,
+        CompleteExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            token: "assigned-token",
+            job_id,
+            manager_id: assigned,
+            state: "succeeded",
+            result: None,
+            error_summary: None,
+        },
     )
     .await
     .expect("assigned complete");
@@ -181,14 +185,16 @@ async fn terminal_duplicate_replays_and_conflicting_replay_is_refused() {
     complete_execution_environment_job(
         &db.pool,
         &db.task_runtime,
-        app,
-        env,
-        "terminal-token",
-        job_id,
-        manager,
-        "succeeded",
-        Some(result.clone()),
-        None,
+        CompleteExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            token: "terminal-token",
+            job_id,
+            manager_id: manager,
+            state: "succeeded",
+            result: Some(result.clone()),
+            error_summary: None,
+        },
     )
     .await
     .expect("first complete");
@@ -196,14 +202,16 @@ async fn terminal_duplicate_replays_and_conflicting_replay_is_refused() {
     let duplicate = complete_execution_environment_job(
         &db.pool,
         &db.task_runtime,
-        app,
-        env,
-        "terminal-token",
-        job_id,
-        manager,
-        "succeeded",
-        Some(result),
-        None,
+        CompleteExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            token: "terminal-token",
+            job_id,
+            manager_id: manager,
+            state: "succeeded",
+            result: Some(result),
+            error_summary: None,
+        },
     )
     .await
     .expect("duplicate complete");
@@ -215,14 +223,16 @@ async fn terminal_duplicate_replays_and_conflicting_replay_is_refused() {
     let conflict = complete_execution_environment_job(
         &db.pool,
         &db.task_runtime,
-        app,
-        env,
-        "terminal-token",
-        job_id,
-        manager,
-        "failed",
-        None,
-        Some("late failure"),
+        CompleteExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            token: "terminal-token",
+            job_id,
+            manager_id: manager,
+            state: "failed",
+            result: None,
+            error_summary: Some("late failure"),
+        },
     )
     .await
     .expect("conflicting complete");

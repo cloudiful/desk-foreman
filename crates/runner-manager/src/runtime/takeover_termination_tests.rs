@@ -148,11 +148,11 @@ async fn cancel_kills_background_sleep_process_group() -> anyhow::Result<()> {
     let child_pid: u32 = {
         let mut pid = None;
         for _ in 0..50 {
-            if let Ok(raw) = std::fs::read_to_string(&pidfile) {
-                if let Ok(parsed) = raw.trim().parse::<u32>() {
-                    pid = Some(parsed);
-                    break;
-                }
+            if let Ok(raw) = std::fs::read_to_string(&pidfile)
+                && let Ok(parsed) = raw.trim().parse::<u32>()
+            {
+                pid = Some(parsed);
+                break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }

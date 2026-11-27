@@ -9,8 +9,8 @@ use crate::runtime::{
     execution_environment::{
         LABEL_ENVIRONMENT,
         inspect::{
-            ContainerMount, EnvContainerInfo, ensure_native_task_container_matches,
-            inspect_environment_container,
+            ContainerMount, EnvContainerInfo, NativeTaskContainerExpectation,
+            ensure_native_task_container_matches, inspect_environment_container,
         },
     },
 };
@@ -109,18 +109,18 @@ pub(super) fn verify_native_candidate(
     uid: u32,
     gid: u32,
 ) -> anyhow::Result<()> {
-    ensure_native_task_container_matches(
+    ensure_native_task_container_matches(NativeTaskContainerExpectation {
         info,
-        &request.owner,
+        owner: &request.owner,
         manager_id,
         expected_image,
-        &request.task,
+        task: &request.task,
         state_volume,
         state_mount_target,
-        Path::new(task_source),
+        task_source: Path::new(task_source),
         uid,
         gid,
-    )?;
+    })?;
     let mounts = info.mounts.as_deref().unwrap_or_default();
     if mounts.len() != 2 || !mounts.iter().all(native_mount_is_bounded) {
         bail!("native task container has an untrusted mount configuration");

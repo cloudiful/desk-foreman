@@ -16,7 +16,9 @@ use runner_protocol::{NativeTaskPreparedResult, RunnerJobResult};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use super::lifecycle::{CompleteOutcome, complete_execution_environment_job};
+use super::lifecycle::{
+    CompleteExecutionEnvironmentJob, CompleteOutcome, complete_execution_environment_job,
+};
 use super::resolution::{EnvironmentJobResolution, resolve_environment_job_result};
 use super::types::ExecutionEnvironmentJob;
 use crate::db::task_runtime::TaskRuntime;
@@ -271,14 +273,16 @@ pub(crate) async fn complete_assigned_manager_environment_job(
     let outcome = complete_execution_environment_job(
         pool,
         runtime,
-        row.application_id,
-        row.environment_id,
-        &row.token,
-        row.job_id,
-        manager_id,
-        state,
-        Some(job_result),
-        error_summary,
+        CompleteExecutionEnvironmentJob {
+            application_id: row.application_id,
+            environment_id: row.environment_id,
+            token: &row.token,
+            job_id: row.job_id,
+            manager_id,
+            state,
+            result: Some(job_result),
+            error_summary,
+        },
     )
     .await?;
     Ok(match outcome {

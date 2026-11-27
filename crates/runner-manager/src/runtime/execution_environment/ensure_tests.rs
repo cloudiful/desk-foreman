@@ -6,7 +6,7 @@
 //! unsupported backends. No live daemon.
 
 #[cfg(test)]
-mod ensure_tests {
+mod ensure_cases {
     use std::sync::Arc;
     use std::time::Duration;
 

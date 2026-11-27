@@ -6,7 +6,7 @@
 //! boundary rules are proven without a daemon or a global env race.
 
 #[cfg(test)]
-mod profile_tests {
+mod profile_cases {
     use super::super::profile::{
         EnsureProcessProfile, ExecutionEnvironmentProfile,
         command::{
@@ -18,10 +18,7 @@ mod profile_tests {
     use std::time::Duration;
 
     fn configured(argv: &[&str]) -> TrustedCommand {
-        match parse_trusted_command(Some(&serde_json::to_string(argv).expect("serialize argv"))) {
-            TrustedCommand::Configured(parsed) => TrustedCommand::Configured(parsed),
-            other => other,
-        }
+        parse_trusted_command(Some(&serde_json::to_string(argv).expect("serialize argv")))
     }
 
     fn argv_of(command: TrustedCommand) -> Option<Vec<String>> {
@@ -114,7 +111,7 @@ mod profile_tests {
             TrustedCommand::Invalid(_)
         ));
 
-        let oversized = vec!["x".repeat(MAX_COMMAND_BYTES + 1)];
+        let oversized = ["x".repeat(MAX_COMMAND_BYTES + 1)];
         assert!(matches!(
             configured(&oversized.iter().map(String::as_str).collect::<Vec<_>>()),
             TrustedCommand::Invalid(_)

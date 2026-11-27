@@ -18,6 +18,7 @@
 //!     leases, instead of killing the fresh container. An empty-container
 //!     removal is idempotent churn (bind-mounted workspace files survive;
 //!     the next `ensure_runner` recreates).
+//!
 //! Still, queued-not-yet-dispatched abandoned jobs are skipped via
 //! `sender.is_closed()` (true once the receiver is dropped) to avoid
 //! confusing UX (old sessions cancelled by a takeover reported as failed)

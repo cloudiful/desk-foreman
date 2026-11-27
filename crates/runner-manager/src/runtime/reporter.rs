@@ -187,10 +187,9 @@ fn queue_event(pending: &mut HashMap<String, Envelope>, envelope: Envelope) {
             || envelope.event.status != runner_protocol::RunnerLifecycleStatus::Running
     });
     if replace {
-        if let Some(previous) = pending.insert(key, envelope) {
-            if let Some(ack) = previous.ack {
-                let _ = ack.send(Err(report_superseded()));
-            }
+        let previous = pending.insert(key, envelope);
+        if let Some(ack) = previous.and_then(|previous| previous.ack) {
+            let _ = ack.send(Err(report_superseded()));
         }
     } else if let Some(ack) = envelope.ack {
         let _ = ack.send(Err(report_superseded()));
@@ -229,10 +228,10 @@ fn fail_acked_pending(pending: &mut HashMap<String, Envelope>) {
         .map(|(key, _)| key.clone())
         .collect::<Vec<_>>();
     for key in acked {
-        if let Some(envelope) = pending.remove(&key) {
-            if let Some(ack) = envelope.ack {
-                let _ = ack.send(Err(report_failed()));
-            }
+        if let Some(envelope) = pending.remove(&key)
+            && let Some(ack) = envelope.ack
+        {
+            let _ = ack.send(Err(report_failed()));
         }
     }
 }
@@ -274,10 +273,9 @@ async fn flush_reports(
         if pending
             .get(&key)
             .is_some_and(|current| current.event == event)
+            && let Some(envelope) = pending.remove(&key)
         {
-            if let Some(envelope) = pending.remove(&key) {
-                sent.push(envelope);
-            }
+            sent.push(envelope);
         }
     }
     Ok(sent)

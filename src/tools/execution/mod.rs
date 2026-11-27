@@ -109,22 +109,21 @@ impl ExecutionRegistry {
     }
 
     fn remove_starting(&self, id: &str) {
-        if let Ok(mut entries) = self.entries.lock() {
-            if entries
+        if let Ok(mut entries) = self.entries.lock()
+            && entries
                 .get(id)
                 .is_some_and(|entry| matches!(entry.state, ExecutionState::Starting))
-            {
-                entries.remove(id);
-            }
+        {
+            entries.remove(id);
         }
     }
 
     fn update(&self, id: &str, f: impl FnOnce(&mut Entry)) {
-        if let Ok(mut entries) = self.entries.lock() {
-            if let Some(entry) = entries.get_mut(id) {
-                f(entry);
-                entry.updated_at = chrono::Utc::now();
-            }
+        if let Ok(mut entries) = self.entries.lock()
+            && let Some(entry) = entries.get_mut(id)
+        {
+            f(entry);
+            entry.updated_at = chrono::Utc::now();
         }
     }
 }

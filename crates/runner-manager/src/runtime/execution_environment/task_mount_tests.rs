@@ -9,8 +9,8 @@ use super::{
     LABEL_OWNER, NATIVE_TASK_WORKSPACE_ROOT,
     argv::{EnvironmentRunSpec, ServiceRunSpec, build_native_task_run_argv},
     inspect::{
-        ContainerMount, EnvContainerInfo, ensure_native_task_container_matches,
-        ensure_native_task_stop_mounts_match,
+        ContainerMount, EnvContainerInfo, NativeTaskContainerExpectation,
+        ensure_native_task_container_matches, ensure_native_task_stop_mounts_match,
     },
     test_support,
 };
@@ -225,18 +225,18 @@ fn a_checkout_created_for_another_binding_is_not_reused() {
     let source = "/daemon/native/environment/task/tree";
     let expected_volume = "df-env-123e4567e89b12d3a456426614174000";
     let validate = |info: &EnvContainerInfo| {
-        ensure_native_task_container_matches(
+        ensure_native_task_container_matches(NativeTaskContainerExpectation {
             info,
-            &owner,
-            "manager-7",
-            "test-image",
-            &task,
-            expected_volume,
-            "/state",
-            std::path::Path::new(source),
-            1000,
-            1000,
-        )
+            owner: &owner,
+            manager_id: "manager-7",
+            expected_image: "test-image",
+            task: &task,
+            state_volume: expected_volume,
+            state_mount_target: "/state",
+            task_source: std::path::Path::new(source),
+            uid: 1000,
+            gid: 1000,
+        })
     };
 
     assert!(validate(&info_for(7, source)).is_err());
@@ -296,18 +296,18 @@ fn native_inspect_requires_exact_mounts_identity_user_and_no_published_ports() {
     let source = "/daemon/native/environment/task/tree";
     let expected_volume = "df-env-123e4567e89b12d3a456426614174000";
     let validate = |info: &EnvContainerInfo| {
-        ensure_native_task_container_matches(
+        ensure_native_task_container_matches(NativeTaskContainerExpectation {
             info,
-            &owner,
-            "manager-7",
-            "test-image",
-            &task,
-            expected_volume,
-            "/state",
-            std::path::Path::new(source),
-            1000,
-            1000,
-        )
+            owner: &owner,
+            manager_id: "manager-7",
+            expected_image: "test-image",
+            task: &task,
+            state_volume: expected_volume,
+            state_mount_target: "/state",
+            task_source: std::path::Path::new(source),
+            uid: 1000,
+            gid: 1000,
+        })
     };
 
     assert!(validate(&info(source)).is_ok());

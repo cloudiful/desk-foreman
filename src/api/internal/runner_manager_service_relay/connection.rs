@@ -67,7 +67,7 @@ pub fn admit(registry: Arc<RelayRegistry>, manager_id: i64) -> Result<TunnelAdmi
     let lease = handle.lease();
     registry
         .attach_tunnel(manager_id, handle.clone())
-        .map_err(|error| map_admission_error(error))?;
+        .map_err(map_admission_error)?;
     Ok(TunnelAdmission {
         lease,
         handle,

@@ -62,7 +62,6 @@ pub(crate) async fn dispatch_open(
     enum Decision {
         Refuse(RelayErrorCode),
         Assemble,
-        Violation,
     }
     let stream_id = open.stream_id;
     let decision = {
@@ -81,7 +80,6 @@ pub(crate) async fn dispatch_open(
     };
     match decision {
         Decision::Refuse(code) => send_fixed_error(out, stream_id, code).await,
-        Decision::Violation => false,
         Decision::Assemble => {
             let slot = match StreamSlot::new(open) {
                 Ok(slot) => slot,

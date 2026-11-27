@@ -17,7 +17,7 @@ use runner_protocol::{
 use crate::config::{RunnerBackendKind, SharedRunnerManagerConfig};
 use crate::runtime::{
     DirectRunnerBackend, DockerRunnerBackend, LocalRunnerService, RunnerBackend,
-    RunnerLifecycleReporter, execution_environment::service::host_identity::UidSource,
+    RunnerLifecycleReporter,
 };
 
 #[derive(Clone)]
@@ -252,17 +252,17 @@ impl IntoResponse for AppError {
 
 #[cfg(test)]
 mod tests {
-    use std::{os::unix::fs::PermissionsExt, path::PathBuf, sync::Arc, time::Duration};
+    use std::{sync::Arc, time::Duration};
 
     use desk_foreman::runner::RunnerOwner;
     use reqwest::{Client, StatusCode};
     use runner_protocol::{
         CommandOutput, ExecRequest, InputRequest, RunnerCommandRequest, ShellToolOutput,
     };
-    use tempfile::{Builder, TempDir, tempdir};
+    use tempfile::tempdir;
 
     use super::{RunnerManagerState, build_app};
-    use crate::config::{RunnerBackendKind, RunnerManagerConfig};
+    use crate::config::RunnerManagerConfig;
     use crate::runtime::{DirectRunnerBackend, LocalRunnerService};
 
     async fn spawn_test_server() -> anyhow::Result<(String, tokio::task::JoinHandle<()>)> {
@@ -315,31 +315,6 @@ mod tests {
             native_task_root: None,
             native_task_host_root: None,
         }
-    }
-
-    fn fixture_base() -> PathBuf {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .expect("HOME is required for private fixture directories");
-        let ai = home.join(".cache/ai");
-        std::fs::create_dir_all(&ai).expect("create private fixture parent");
-        std::fs::set_permissions(&ai, std::fs::Permissions::from_mode(0o700))
-            .expect("private fixture parent mode");
-        let base = ai.join("1180-dfi2b1");
-        std::fs::create_dir_all(&base).expect("create fixture base");
-        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700))
-            .expect("fixture base mode");
-        base
-    }
-
-    fn private_dir(name: &str) -> TempDir {
-        let fixture = Builder::new()
-            .prefix(name)
-            .tempdir_in(fixture_base())
-            .expect("private fixture");
-        std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o700))
-            .expect("private fixture mode");
-        fixture
     }
 
     fn owner() -> RunnerOwner {

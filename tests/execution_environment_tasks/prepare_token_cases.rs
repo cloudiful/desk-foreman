@@ -106,7 +106,7 @@ async fn schedule_preparation(
 async fn sequential_token_reuse_by_other_jobs_is_an_opaque_conflict() {
     let fixture = TaskFixture::setup().await;
     let foreign_app =
-        super::helpers::create_app_with_token(&fixture.database.pool, "task-foreign-token-owner")
+        super::app_token::create_app_with_token(&fixture.database.pool, "task-foreign-token-owner")
             .await
             .0;
     let foreign_env =

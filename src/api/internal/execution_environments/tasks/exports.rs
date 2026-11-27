@@ -55,7 +55,7 @@ pub async fn schedule_native_task_export_handler(
     let parsed: ScheduleNativeTaskExportRequest = match body::decode_task_export_body(request).await
     {
         Ok(parsed) => parsed,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     if let Err(errors) = parsed.validate() {
         return bad_request(&validation_errors_message(&errors));

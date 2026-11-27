@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::{
     PreparationCompletion, PreparationCompletionOutcome, mark_preparation_uncertain,
-    writes::{complete_job, mark_task_prepared},
+    writes::{CompletePreparationJob, complete_job, mark_task_prepared},
 };
 use crate::db::execution_environment_jobs::{
     ExecutionEnvironmentJobResult, find_execution_environment_job_by_id,
@@ -187,14 +187,16 @@ pub(super) async fn complete(
     })?;
     let completed = complete_job(
         &mut locked.tx,
-        locked.job_id,
-        locked.application_id,
-        locked.environment_id,
-        locked.task_id,
-        completion.manager_id,
-        "succeeded",
-        result,
-        None,
+        CompletePreparationJob {
+            job_id: locked.job_id,
+            application_id: locked.application_id,
+            environment_id: locked.environment_id,
+            task_id: locked.task_id,
+            manager_id: completion.manager_id,
+            state: "succeeded",
+            result,
+            error_summary: None,
+        },
     )
     .await?;
     if completed.is_none() {
@@ -263,14 +265,18 @@ pub(super) async fn fail(
     })?;
     let completed = complete_job(
         &mut locked.tx,
-        locked.job_id,
-        locked.application_id,
-        locked.environment_id,
-        locked.task_id,
-        manager_id,
-        "uncertain",
-        result,
-        Some("assigned runner manager could not confirm the native task preparation"),
+        CompletePreparationJob {
+            job_id: locked.job_id,
+            application_id: locked.application_id,
+            environment_id: locked.environment_id,
+            task_id: locked.task_id,
+            manager_id,
+            state: "uncertain",
+            result,
+            error_summary: Some(
+                "assigned runner manager could not confirm the native task preparation",
+            ),
+        },
     )
     .await?;
     if completed.is_none() {

@@ -6,17 +6,31 @@ use uuid::Uuid;
 use crate::db::execution_environment_jobs::ExecutionEnvironmentJob;
 use crate::db::execution_environments::NativeTask;
 
+pub(super) struct CompletePreparationJob<'a> {
+    pub(super) job_id: Uuid,
+    pub(super) application_id: i64,
+    pub(super) environment_id: Uuid,
+    pub(super) task_id: Uuid,
+    pub(super) manager_id: i64,
+    pub(super) state: &'a str,
+    pub(super) result: serde_json::Value,
+    pub(super) error_summary: Option<&'a str>,
+}
+
 pub(super) async fn complete_job(
     tx: &mut Transaction<'_, Postgres>,
-    job_id: Uuid,
-    application_id: i64,
-    environment_id: Uuid,
-    task_id: Uuid,
-    manager_id: i64,
-    state: &str,
-    result: serde_json::Value,
-    error_summary: Option<&str>,
+    job: CompletePreparationJob<'_>,
 ) -> anyhow::Result<Option<ExecutionEnvironmentJob>> {
+    let CompletePreparationJob {
+        job_id,
+        application_id,
+        environment_id,
+        task_id,
+        manager_id,
+        state,
+        result,
+        error_summary,
+    } = job;
     Ok(sqlx::query_file_as!(
         ExecutionEnvironmentJob,
         "src/sql/execution_environments/tasks/prepare/complete_preparation_job.sql",

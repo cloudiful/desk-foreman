@@ -6,7 +6,7 @@
 //! cleans anything up. Fake CLI only; no live daemon.
 
 #[cfg(test)]
-mod state_probe_tests {
+mod state_probe_cases {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::time::Duration;

@@ -3,11 +3,13 @@
 use serde_json::json;
 
 use super::ack::{RESULT, ensure_ack, owner, pull, result_body, stop_ack};
-use super::helpers::{create_app_with_token, test_state};
-use super::http::{http_post, spawn_http};
+use super::app_state::test_state;
+use super::app_token::create_app_with_token;
+use super::http_post::http_post;
+use super::http_server::spawn_http;
 use super::support::{
-    DispatchDb, create_environment, create_manager_with_token, future_deadline, job_error_summary,
-    job_result, job_state, seed_job,
+    DispatchDb, SeedJob, create_environment, create_manager_with_token, future_deadline,
+    job_error_summary, job_result, job_state, seed_job,
 };
 
 #[tokio::test]
@@ -19,13 +21,15 @@ async fn inconsistent_acks_are_rejected_and_leave_the_row_claimable() {
     let env = create_environment(&db.pool, app, "bad-ack").await;
     let job_id = seed_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "ensure",
-        3,
-        "bad-token",
-        future_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: env,
+            manager_id: manager,
+            kind: "ensure",
+            generation: 3,
+            token: "bad-token",
+            deadline: future_deadline(),
+        },
     )
     .await;
 
@@ -132,25 +136,29 @@ async fn unconfirmed_and_failed_outcomes_become_uncertain_blockers() {
     let stop_env = create_environment(&db.pool, app, "uncertain-stop").await;
     let stop_id = seed_job(
         &db.pool,
-        app,
-        stop_env,
-        manager,
-        "stop",
-        0,
-        "uncertain-stop-token",
-        future_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: stop_env,
+            manager_id: manager,
+            kind: "stop",
+            generation: 0,
+            token: "uncertain-stop-token",
+            deadline: future_deadline(),
+        },
     )
     .await;
     let ensure_env = create_environment(&db.pool, app, "uncertain-ensure").await;
     let ensure_id = seed_job(
         &db.pool,
-        app,
-        ensure_env,
-        manager,
-        "ensure",
-        0,
-        "uncertain-ensure-token",
-        future_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: ensure_env,
+            manager_id: manager,
+            kind: "ensure",
+            generation: 0,
+            token: "uncertain-ensure-token",
+            deadline: future_deadline(),
+        },
     )
     .await;
 
@@ -239,13 +247,15 @@ async fn completion_after_the_deadline_never_mutates_the_row() {
     let env = create_environment(&db.pool, app, "deadline-ensure").await;
     let job_id = seed_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "ensure",
-        0,
-        "deadline-token",
-        future_deadline(),
+        SeedJob {
+            application_id: app,
+            environment_id: env,
+            manager_id: manager,
+            kind: "ensure",
+            generation: 0,
+            token: "deadline-token",
+            deadline: future_deadline(),
+        },
     )
     .await;
 

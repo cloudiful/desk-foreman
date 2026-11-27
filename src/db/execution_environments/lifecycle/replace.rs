@@ -153,10 +153,10 @@ pub async fn replace_execution_environment_scoped(
     // survive a replacement. A prior uncertain stop is already resolved by the
     // confirmed proof above and its history is kept.
     let jobs = load_jobs(&mut tx, application_id, environment_id).await?;
-    if jobs.iter().any(|job| stop_is_active(job)) {
+    if jobs.iter().any(stop_is_active) {
         return Err(LifecycleError::UnresolvedBlockers);
     }
-    if jobs.iter().any(|job| ensure_is_blocker(job)) {
+    if jobs.iter().any(ensure_is_blocker) {
         return Err(LifecycleError::UnresolvedBlockers);
     }
 

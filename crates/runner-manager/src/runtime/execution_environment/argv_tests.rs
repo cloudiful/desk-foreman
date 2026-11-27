@@ -5,7 +5,7 @@
 //! existing hardening, mount, and no-port guarantees.
 
 #[cfg(test)]
-mod argv_tests {
+mod argv_cases {
     use super::super::argv::{
         EnvironmentRunSpec, ServiceRunSpec, build_environment_run_argv,
         build_scoped_service_run_argv, build_scoped_state_ownership_argv, build_volume_create_argv,

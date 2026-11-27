@@ -5,11 +5,8 @@
 //! client are involved: a case that needs a tunnel drives the mock manager in
 //! [`super::relay_cases`].
 
-use std::time::Duration;
-
-use super::relay_helpers::{read_open, respond};
 use super::support::{ServiceFixture, call, set_fence};
-use super::ws_client::{Frame, WsClient};
+use super::ws_client::WsClient;
 
 const PROTOCOL: &str = "df-env-http.v2";
 

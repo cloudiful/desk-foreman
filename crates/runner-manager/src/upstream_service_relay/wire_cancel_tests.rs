@@ -24,14 +24,6 @@ mod tests {
         tokio::time::timeout(QUIET, next_event(rig)).await.ok()
     }
 
-    /// The manager drive must end after a violation or disconnect.
-    async fn drive_must_end(rig: &mut Rig) {
-        tokio::time::timeout(Duration::from_secs(10), &mut rig.manager)
-            .await
-            .expect("drive must end after the violation")
-            .expect("drive joins");
-    }
-
     #[tokio::test]
     async fn a_cancel_kills_only_its_stream() {
         let mut rig = Rig::start().await;
@@ -127,14 +119,13 @@ mod tests {
         // Same identifier while still assembling: attributed refusal, tunnel
         // stays up so unrelated streams are never killed by one reuse.
         rig.plane.send_open(stream, "GET", "v1/sse", 0).await;
-        match rig.plane.next_text().await {
-            raw => match decode_text(&raw) {
-                RelayControl::Error(frame) => {
-                    assert_eq!(frame.stream_id, stream);
-                    assert_eq!(frame.code, RelayErrorCode::Conflict);
-                }
-                other => panic!("a reused identifier must be refused, got {other:?}"),
-            },
+        let raw = rig.plane.next_text().await;
+        match decode_text(&raw) {
+            RelayControl::Error(frame) => {
+                assert_eq!(frame.stream_id, stream);
+                assert_eq!(frame.code, RelayErrorCode::Conflict);
+            }
+            other => panic!("a reused identifier must be refused, got {other:?}"),
         }
         // The first stream still assembles and serves its 200.
         rig.plane.send_request_end(stream).await;

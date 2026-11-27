@@ -11,7 +11,7 @@ use crate::error::ErrorResponse;
 
 pub(crate) async fn decode_task_export_body<T: DeserializeOwned>(
     request: Request,
-) -> Result<T, Response> {
+) -> Result<T, Box<Response>> {
     let limit = runner_protocol::MAX_TASK_EXPORT_UPLOAD_BODY_BYTES;
     if request
         .headers()
@@ -20,19 +20,21 @@ pub(crate) async fn decode_task_export_body<T: DeserializeOwned>(
         .and_then(|value| value.parse::<u64>().ok())
         .is_some_and(|length| length > limit as u64)
     {
-        return Err(too_large());
+        return Err(Box::new(too_large()));
     }
     let bytes = to_bytes(request.into_body(), limit)
         .await
-        .map_err(|_| too_large())?;
+        .map_err(|_| Box::new(too_large()))?;
     serde_json::from_slice(&bytes).map_err(|_| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "invalid task export request body".to_string(),
-            }),
+        Box::new(
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "invalid task export request body".to_string(),
+                }),
+            )
+                .into_response(),
         )
-            .into_response()
     })
 }
 

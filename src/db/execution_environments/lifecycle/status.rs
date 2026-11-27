@@ -71,10 +71,10 @@ pub async fn execution_environment_status(
         });
 
         if let Some(stop) = confirmed_stop {
-            if environment.state != super::types::LIFECYCLE_STATE_REPLACED
-                || environment.stop_proof_job_id != Some(stop.job_id)
-            {
-                if let Some(updated) = mark_replaced(
+            let already_marked = environment.state == super::types::LIFECYCLE_STATE_REPLACED
+                && environment.stop_proof_job_id == Some(stop.job_id);
+            if !already_marked
+                && let Some(updated) = mark_replaced(
                     &mut tx,
                     application_id,
                     environment_id,
@@ -82,9 +82,8 @@ pub async fn execution_environment_status(
                     candidate,
                 )
                 .await?
-                {
-                    environment = updated;
-                }
+            {
+                environment = updated;
             }
             // Supersede obsolete ensure records matching this proof. Repeated
             // reconciliation is a no-op once they are terminal.
@@ -120,10 +119,9 @@ pub async fn execution_environment_status(
                 && environment.generation == candidate
                 && environment.state == LIFECYCLE_STATE_STARTING
                 && !stop_outstanding
+                && let Some(updated) = mark_ready(&mut tx, application_id, environment_id).await?
             {
-                if let Some(updated) = mark_ready(&mut tx, application_id, environment_id).await? {
-                    environment = updated;
-                }
+                environment = updated;
             }
         }
     }

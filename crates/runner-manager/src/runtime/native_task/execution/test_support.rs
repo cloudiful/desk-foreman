@@ -15,7 +15,7 @@ mod fake_docker;
 mod inspect;
 #[path = "test_support/stop_support.rs"]
 mod stop_support;
-use fake_docker::write_fake_docker;
+use fake_docker::{FakeDocker, write_fake_docker};
 use inspect::inspect_json;
 
 use crate::config::{RunnerBackendKind, RunnerManagerConfig};
@@ -141,17 +141,17 @@ impl Rig {
         stopped_info["State"]["Status"] = serde_json::json!("exited");
         std::fs::write(&stopped_inspect_path, stopped_info.to_string())
             .expect("stopped inspect JSON");
-        let fake = write_fake_docker(
-            temp.path(),
-            &log,
-            &inspect_path,
-            &stopped_inspect_path,
-            &other_names_path,
-            &mode_path,
-            &marker,
-            &barrier,
-            &container_name,
-        );
+        let fake = write_fake_docker(FakeDocker {
+            dir: temp.path(),
+            log: &log,
+            inspect: &inspect_path,
+            stopped_inspect: &stopped_inspect_path,
+            other_names: &other_names_path,
+            mode: &mode_path,
+            marker: &marker,
+            barrier: &barrier,
+            container_name: &container_name,
+        });
 
         let mut config = crate::runtime::execution_environment::test_support::test_manager_config(
             &fake.to_string_lossy(),

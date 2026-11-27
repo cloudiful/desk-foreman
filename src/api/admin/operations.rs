@@ -179,32 +179,6 @@ fn workspace_runner_response(
     }
 }
 
-#[cfg(test)]
-mod principal_tests {
-    use super::*;
-
-    #[test]
-    fn principal_session_response_retains_identity() {
-        let response = session_response(RunnerSessionStatus {
-            session_id: 1,
-            owner: RunnerOwner::ApplicationPrincipal {
-                application_id: 2,
-                workspace_binding_id: 3,
-                principal_digest: "a".repeat(64),
-            },
-            session_key: None,
-            state: "running".into(),
-            exit_code: None,
-            timed_out: false,
-            wall_time_seconds: 0.0,
-        });
-        assert_eq!(response.owner_kind, "application_principal");
-        assert_eq!(response.owner_id, 3);
-        assert_eq!(response.owner_application_id, Some(2));
-        assert_eq!(response.owner_principal_digest, Some("a".repeat(64)));
-    }
-}
-
 fn session_response(row: RunnerSessionStatus) -> RunnerSessionResponse {
     let (owner_kind, owner_id, owner_application_id, owner_principal_digest) = match row.owner {
         RunnerOwner::InternalUser { user_id } => ("user", user_id, None, None),
@@ -234,5 +208,31 @@ fn session_response(row: RunnerSessionStatus) -> RunnerSessionResponse {
         exit_code: row.exit_code,
         timed_out: row.timed_out,
         wall_time_seconds: row.wall_time_seconds,
+    }
+}
+
+#[cfg(test)]
+mod principal_tests {
+    use super::*;
+
+    #[test]
+    fn principal_session_response_retains_identity() {
+        let response = session_response(RunnerSessionStatus {
+            session_id: 1,
+            owner: RunnerOwner::ApplicationPrincipal {
+                application_id: 2,
+                workspace_binding_id: 3,
+                principal_digest: "a".repeat(64),
+            },
+            session_key: None,
+            state: "running".into(),
+            exit_code: None,
+            timed_out: false,
+            wall_time_seconds: 0.0,
+        });
+        assert_eq!(response.owner_kind, "application_principal");
+        assert_eq!(response.owner_id, 3);
+        assert_eq!(response.owner_application_id, Some(2));
+        assert_eq!(response.owner_principal_digest, Some("a".repeat(64)));
     }
 }

@@ -79,15 +79,15 @@ impl EnvFileLock {
                 self.path.display()
             )
         })?;
-        if let Some(dir) = self.path.parent() {
-            if let Ok(handle) = File::open(dir) {
-                handle.sync_all().map_err(|error| {
-                    anyhow::anyhow!(
-                        "failed to sync execution environment state directory {}: {error}",
-                        dir.display()
-                    )
-                })?;
-            }
+        if let Some(dir) = self.path.parent()
+            && let Ok(handle) = File::open(dir)
+        {
+            handle.sync_all().map_err(|error| {
+                anyhow::anyhow!(
+                    "failed to sync execution environment state directory {}: {error}",
+                    dir.display()
+                )
+            })?;
         }
         Ok(())
     }

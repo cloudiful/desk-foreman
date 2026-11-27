@@ -4,16 +4,16 @@ use std::time::Duration;
 
 use chrono::{Duration as ChronoDuration, Utc};
 use desk_foreman::db::queries::{
-    ClaimOutcome, CompleteOutcome, EnqueueOutcome, claim_execution_environment_job,
-    complete_execution_environment_job, enqueue_execution_environment_job,
-    expire_execution_environment_jobs, find_active_execution_environment_job,
-    find_execution_environment_job_by_token,
+    ClaimOutcome, CompleteExecutionEnvironmentJob, CompleteOutcome, EnqueueExecutionEnvironmentJob,
+    EnqueueOutcome, claim_execution_environment_job, complete_execution_environment_job,
+    enqueue_execution_environment_job, expire_execution_environment_jobs,
+    find_active_execution_environment_job, find_execution_environment_job_by_token,
 };
 
+use super::app_token::create_app_with_token;
 use super::fixtures::{
     create_environment, create_manager, future_deadline, past_deadline, seed_ensure,
 };
-use super::helpers::create_app_with_token;
 use super::support::JobDb;
 
 #[tokio::test]
@@ -45,14 +45,16 @@ async fn completion_after_deadline_never_succeeds_and_late_results_keep_the_bloc
     let late = complete_execution_environment_job(
         &db.pool,
         &db.task_runtime,
-        app,
-        env,
-        "deadline-token",
-        job_id,
-        manager,
-        "succeeded",
-        None,
-        None,
+        CompleteExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            token: "deadline-token",
+            job_id,
+            manager_id: manager,
+            state: "succeeded",
+            result: None,
+            error_summary: None,
+        },
     )
     .await
     .expect("late complete");
@@ -75,14 +77,16 @@ async fn completion_after_deadline_never_succeeds_and_late_results_keep_the_bloc
     let stale = complete_execution_environment_job(
         &db.pool,
         &db.task_runtime,
-        app,
-        env,
-        "deadline-token",
-        job_id,
-        manager,
-        "succeeded",
-        None,
-        None,
+        CompleteExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            token: "deadline-token",
+            job_id,
+            manager_id: manager,
+            state: "succeeded",
+            result: None,
+            error_summary: None,
+        },
     )
     .await
     .expect("stale complete");
@@ -99,13 +103,15 @@ async fn completion_after_deadline_never_succeeds_and_late_results_keep_the_bloc
 
     let blocked = enqueue_execution_environment_job(
         &db.pool,
-        app,
-        env,
-        manager,
-        "ensure",
-        7,
-        "post-expiry-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 7,
+            token: "post-expiry-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("post-expiry enqueue");
@@ -190,13 +196,15 @@ async fn uncertain_survives_reconnect_and_blocks_new_ensure_of_any_generation() 
 
     let blocked = enqueue_execution_environment_job(
         &fresh,
-        app,
-        env,
-        manager,
-        "ensure",
-        42,
-        "reconnect-blocked-token",
-        future_deadline(),
+        EnqueueExecutionEnvironmentJob {
+            application_id: app,
+            environment_id: env,
+            assigned_manager_id: manager,
+            job_kind: "ensure",
+            target_generation: 42,
+            token: "reconnect-blocked-token",
+            deadline_at: future_deadline(),
+        },
     )
     .await
     .expect("blocked enqueue on reconnect");
