@@ -20,8 +20,8 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use cloudiful_tasks::{
-    Attempt, AttemptStatus, EnqueueRequest, Failure, Queue, RetryPolicy, Task, TaskId, TaskKind,
-    TaskStatus, WorkerConfig,
+    Attempt, AttemptStatus, ClaimRequest, Completion, EnqueueRequest, Failure, FailureReport,
+    Queue, RecoveryRequest, RetryPolicy, Task, TaskId, TaskKind, TaskStatus, WorkerConfig,
 };
 
 use crate::db::execution_environment_jobs::EXECUTION_ENVIRONMENT_JOB_KINDS;
@@ -105,6 +105,14 @@ fn payload_matches(payload: &Value, job_id: Uuid) -> bool {
     *payload == json!({ "job_id": job_id })
 }
 
+/// Whether a task carries the exact idempotency key of the lookup.
+///
+/// The collection lookup reports the tasks of the exact keys, so a task of
+/// another key never passes for the task of the requested key.
+fn carries_key(task_key: Option<&str>, key: &str) -> bool {
+    task_key == Some(key)
+}
+
 /// The opened queues of the runtime, one per existing job kind.
 struct Queues {
     by_kind: BTreeMap<String, Queue>,
@@ -121,7 +129,9 @@ impl Queues {
     ///
     /// The lookup is bounded to the five known queues of the namespace. Each
     /// match keeps the kind of the queue that returned it, so a task of another
-    /// queue never passes for the task of the expected kind.
+    /// queue never passes for the task of the expected kind. A task whose own
+    /// key differs from the requested key is not a match: the lookup reports
+    /// the tasks of the exact key only.
     async fn find_matches(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -130,17 +140,19 @@ impl Queues {
         let mut matches = Vec::new();
         for kind in EXECUTION_ENVIRONMENT_JOB_KINDS {
             let queue = self.queue(kind)?;
-            let task = queue
-                .get_by_idempotency_key_in(&mut *tx, key)
+            let tasks = queue
+                .get_by_idempotency_key_in(&mut *tx, &[key])
                 .await
                 .map_err(|error| anyhow::anyhow!("durable task lookup failed: {error}"))?;
-            let Some(task) = task else {
-                continue;
-            };
-            matches.push(QueueMatch {
-                kind: (*kind).to_string(),
-                task,
-            });
+            for task in tasks {
+                if !carries_key(task.idempotency_key(), key) {
+                    continue;
+                }
+                matches.push(QueueMatch {
+                    kind: (*kind).to_string(),
+                    task,
+                });
+            }
         }
         Ok(matches)
     }
@@ -280,21 +292,33 @@ impl TaskRuntime {
         .map_err(|error| anyhow::anyhow!("invalid durable task key: {error}"))?
         .with_retry_policy(RetryPolicy::none());
 
-        let outcome = queue
-            .enqueue_in(&mut *tx, request)
+        let outcomes = queue
+            .enqueue_in(&mut *tx, &[request])
             .await
             .map_err(|error| anyhow::anyhow!("durable task enqueue failed: {error}"))?;
+        let outcome = outcomes
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("durable task enqueue returned no outcome"))?;
+        let outcome = outcome
+            .map_err(|error| anyhow::anyhow!("durable task enqueue was refused: {error}"))?;
         let task = outcome.into_task();
         if !kind_matches(task.kind().as_str(), job_kind) {
             anyhow::bail!("the durable task of job {job_id} has a different kind");
         }
 
-        let claim = queue
-            .claim_by_id_in(&mut *tx, task.id(), &worker_id(job_id, manager_id))
+        let task_ids = [task.id()];
+        let worker = worker_id(job_id, manager_id);
+        let claim_request = ClaimRequest::new(&worker, 1).with_task_ids(&task_ids);
+        let claims = queue
+            .claim_in(&mut *tx, &claim_request)
             .await
             .map_err(|error| anyhow::anyhow!("durable task claim failed: {error}"))?;
-        if claim.is_none() {
-            anyhow::bail!("the durable task of job {job_id} could not be claimed");
+        let claim = claims.into_iter().next().ok_or_else(|| {
+            anyhow::anyhow!("the durable task of job {job_id} could not be claimed")
+        })?;
+        if claim.task().id() != task.id() {
+            anyhow::bail!("the durable task of job {job_id} was claimed as another task");
         }
         Ok(())
     }
@@ -342,14 +366,28 @@ impl TaskRuntime {
 
         let attempt = latest_attempt(queue, &mut *tx, task).await?;
         let settled = match disposition {
-            JobDisposition::Succeeded => queue.complete_in(&mut *tx, &attempt, None).await,
+            JobDisposition::Succeeded => {
+                let completions = [Completion::new(&attempt, None)];
+                queue.complete_in(&mut *tx, &completions).await
+            }
             JobDisposition::Failed => {
                 let failure = Failure::permanent(Some(json!({
                     "disposition": disposition.code(),
                 })));
-                queue.fail_in(&mut *tx, &attempt, &failure).await
+                let failures = [FailureReport::new(&attempt, &failure)];
+                queue.fail_in(&mut *tx, &failures).await
             }
         };
+        let settled = match settled {
+            Ok(settled) => settled,
+            Err(error) => {
+                return Err(anyhow::anyhow!("durable task settlement failed: {error}"));
+            }
+        };
+        let settled = settled
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("durable task settlement returned no outcome"))?;
         match settled {
             Ok(task) => {
                 if !disposition.accepts(task.status()) {
@@ -382,12 +420,14 @@ async fn latest_attempt(
     tx: &mut Transaction<'_, Postgres>,
     task: &Task,
 ) -> anyhow::Result<Attempt> {
+    let task_ids = [task.id()];
     let attempts = queue
-        .attempts_in(tx, task.id(), 1)
+        .attempts_in(tx, &task_ids, 1)
         .await
         .map_err(|error| anyhow::anyhow!("durable task attempts are unavailable: {error}"))?;
     let attempt = attempts
-        .first()
+        .iter()
+        .find(|attempt| attempt.task_id() == task.id())
         .ok_or_else(|| anyhow::anyhow!("the durable task of a claimed job has no attempt"))?;
     if attempt.status() != AttemptStatus::Running {
         anyhow::bail!("the durable task of a claimed job has no running attempt");
@@ -409,18 +449,31 @@ async fn recover_and_verify(
     task_id: TaskId,
     disposition: JobDisposition,
 ) -> anyhow::Result<()> {
-    queue
-        .recover_expired_by_id_in(&mut *tx, task_id)
+    let task_ids = [task_id];
+    let recovery = RecoveryRequest::new(1).with_task_ids(&task_ids);
+    let recovered = queue
+        .recover_expired_in(&mut *tx, &recovery)
         .await
         .map_err(|error| anyhow::anyhow!("durable task recovery failed: {error}"))?;
+    for task in &recovered {
+        if task.id() != task_id {
+            anyhow::bail!("the durable task recovery of job {job_id} sealed another task");
+        }
+    }
 
-    let task = queue
-        .get_by_idempotency_key_in(tx, key)
+    let tasks = queue
+        .get_by_idempotency_key_in(tx, &[key])
         .await
         .map_err(|error| anyhow::anyhow!("durable task lookup failed: {error}"))?;
-    let Some(task) = task else {
-        anyhow::bail!("the durable task of job {job_id} disappeared");
-    };
+    let mut matching = tasks
+        .into_iter()
+        .filter(|task| carries_key(task.idempotency_key(), key));
+    let task = matching
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("the durable task of job {job_id} disappeared"))?;
+    if matching.next().is_some() {
+        anyhow::bail!("the durable task of job {job_id} exists more than once");
+    }
     if task.id() != task_id {
         anyhow::bail!("the durable task of job {job_id} was replaced by another task");
     }
@@ -455,6 +508,14 @@ mod tests {
         assert!(JobDisposition::Succeeded.accepts(TaskStatus::Succeeded));
         assert!(!JobDisposition::Failed.accepts(TaskStatus::Succeeded));
         assert!(!JobDisposition::Failed.accepts(TaskStatus::Running));
+    }
+
+    #[test]
+    fn only_the_exact_key_accepts_the_task() {
+        let key = "environment-job:11111111-2222-3333-4444-555555555555";
+        assert!(carries_key(Some(key), key));
+        assert!(!carries_key(None, key));
+        assert!(!carries_key(Some("environment-job:other"), key));
     }
 
     #[test]
